@@ -14,12 +14,6 @@ interface ResumeProviderProps {
 export const ResumeProvider: React.FC<ResumeProviderProps> = ({ children }) => {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
 
-  if(resumeFile){
-    console.log('Resume file:', resumeFile.name);
-  }else{ 
-    console.log('No resume file selected');
-  }
-
   return (
     <ResumeContext.Provider value={{ resumeFile, setResumeFile }}>
       {children}

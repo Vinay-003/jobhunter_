@@ -1,30 +1,37 @@
 # Kafka Project
 
-This is a Bun-based project.
+The repository has been reorganized for clarity. Primary apps live under `backend/` and `frontend/project/`. Python utilities for PDF extraction are under `backend/python/`.
 
-## Prerequisites
+## Structure
 
-- [Bun](https://bun.sh) installed on your system
+- `backend/`: Express + TypeScript API
+  - `src/`: application source (routes, controllers, models)
+  - `uploads/`: user-uploaded files
+  - `python/`: PDF utilities (`pdf_text_extract.py`, `tect_to-model.py`)
+- `frontend/project/`: Vite + React app
 
-## Setup
+## Development
 
-1. Install dependencies:
+Backend:
+
 ```bash
-bun install
+cd backend
+npm install
+npm run dev
 ```
 
-2. Run the development server:
+Frontend:
+
 ```bash
-bun dev
+cd frontend/project
+npm install
+npm run dev
 ```
 
-Or run the production build:
+## Python utilities
+
 ```bash
-bun start
+cd backend/python
+python pdf_text_extract.py
+python tect_to-model.py
 ```
-
-## Project Structure
-
-- `src/` - Source code directory
-- `package.json` - Project configuration and dependencies
-- `tsconfig.json` - TypeScript configuration 

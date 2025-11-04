@@ -30,7 +30,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 /backend/.env.local
 /backend/.env.development
 
-
+backend/node_modules
+/backend/dist
 
 
 # caches

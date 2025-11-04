@@ -76,23 +76,35 @@ const ResumeUploadSection = () => {
         body: formData,
       });
 
-      if (!response.ok) {
-        throw new Error('Upload failed');
+      // Try to parse response even if not OK to get error message
+      let result;
+      try {
+        result = await response.json();
+      } catch (parseError) {
+        throw new Error('Failed to parse server response');
       }
 
-      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || `Upload failed with status ${response.status}`);
+      }
+
       setUploadStatus('Resume processed successfully!');
       setLatestResume(result.resume);
+      setError('');
       
       // Reset file input
       const fileInput = document.getElementById('resume') as HTMLInputElement;
-      console.log('File input:', fileInput);
       if (fileInput) {
         fileInput.value = '';
       }
       setResumeFile(null);
+      
+      // Refresh latest resume display
+      await fetchLatestResume();
     } catch (err) {
-      setError('Failed to process resume: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      console.error('Upload error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError('Failed to process resume: ' + errorMessage);
       setUploadStatus('');
     } finally {
       setIsProcessing(false);
@@ -138,10 +150,11 @@ const ResumeUploadSection = () => {
             </div>
             <button
               onClick={handleProcess}
-              className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg transition-colors flex items-center space-x-2 mx-auto"
+              disabled={isProcessing}
+              className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg transition-colors flex items-center space-x-2 mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <span>Process Resume</span>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              {isProcessing && <Loader2 className="w-4 h-4 animate-spin" />}
             </button>
           </div>
         )}

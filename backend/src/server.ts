@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import uploadRoutes from './routes/upload.js';
+import analysisRoutes from './routes/analysis.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -24,6 +25,7 @@ if (!fs.existsSync(uploadsDir)) {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api', uploadRoutes);
+app.use('/api', analysisRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -31,21 +33,26 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Error handling middleware
+// Error handling middleware (must be after all routes)
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+  console.error('Unhandled error:', err);
+  console.error('Error stack:', err.stack);
+  
+  // Don't send response if headers already sent
+  if (res.headersSent) {
+    return next(err);
+  }
+  
+  res.status(err.status || 500).json({ 
+    success: false,
+    error: err.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is running on http://localhost:${PORT}`);
   console.log('Environment:', process.env.NODE_ENV || 'development');
-  console.log('Database config:', {
-    host: process.env.PG_HOST,
-    port: process.env.PG_PORT,
-    database: process.env.PG_DATABASE,
-    user: process.env.PG_USER
-  });
 });
 
 export default app; 

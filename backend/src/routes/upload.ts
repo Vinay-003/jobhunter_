@@ -42,29 +42,66 @@ const upload = multer({
   }
 });
 
-// Upload resume endpoint
-router.post('/upload-resume', authenticateToken, upload.single('resume'), async (req: express.Request, res: express.Response) => {
+// Upload resume endpoint with proper error handling
+router.post('/upload-resume', authenticateToken, (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Use multer and handle errors
+  upload.single('resume')(req, res, (err: any) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({
+            success: false,
+            message: 'File size too large. Maximum size is 5MB.'
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          message: `Upload error: ${err.message}`
+        });
+      }
+      // Other multer errors (like file type)
+      return res.status(400).json({
+        success: false,
+        message: err.message || 'File upload error'
+      });
+    }
+    next();
+  });
+}, async (req: express.Request, res: express.Response) => {
   try {
+    console.log('Upload request received');
+    console.log('File:', req.file ? req.file.originalname : 'No file');
+    console.log('User:', req.user?.id);
+
     if (!req.file) {
       return res.status(400).json({ 
         success: false, 
-        message: 'No file uploaded' 
+        message: 'No file uploaded. Please select a PDF file.' 
       });
     }
 
     if (!req.user?.id) {
+      // Clean up the uploaded file if there was an error
+      if (req.file) {
+        fs.unlink(req.file.path, (err) => {
+          if (err) console.error('Error deleting file after auth failure:', err);
+        });
+      }
       return res.status(401).json({
         success: false,
         message: 'User not authenticated'
       });
     }
 
+    console.log('Storing resume in database...');
     // Store resume information in database
     const resume = await resumeModel.createResume(
       req.user.id,
       req.file.originalname,
       req.file.path
     );
+
+    console.log('Resume stored successfully:', resume.id);
 
     res.status(200).json({
       success: true,
@@ -76,17 +113,26 @@ router.post('/upload-resume', authenticateToken, upload.single('resume'), async 
         status: resume.status
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Upload error:', error);
+    console.error('Error stack:', error.stack);
+    
     // Clean up the uploaded file if there was an error
-    if (req.file) {
+    if (req.file && fs.existsSync(req.file.path)) {
       fs.unlink(req.file.path, (err) => {
         if (err) console.error('Error deleting file after failed upload:', err);
       });
     }
+
+    // Provide more detailed error message
+    const errorMessage = error.message || 'Error uploading file';
+    const isDatabaseError = error.code === '23503' || error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist');
+
     res.status(500).json({
       success: false,
-      message: 'Error uploading file'
+      message: isDatabaseError 
+        ? 'Database error: Please ensure all tables are created. Check database connection.'
+        : errorMessage
     });
   }
 });
