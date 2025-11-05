@@ -9,6 +9,8 @@ dist
 # code coverage
 coverage
 *.lcov
+venv
+venv/*
 
 # logs
 logs
