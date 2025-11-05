@@ -32,3 +32,12 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+.venv
+.venv/*
+uploads/
+__pycache__/
+*.pyc
+/backend/venv
+/backend/venv/*
+/backend/__pycache__/
+/backend/*.pyc

@@ -1,9 +1,27 @@
 # pdf_text_extract.py
 # Extracts text from PDF files
 
-import fitz  # PyMuPDF for PDF text extraction
-import os  # For file path validation
 import sys
+
+import importlib
+
+# Attempt to import PyMuPDF (module name: fitz). If not installed, instruct how to install.
+last_exc = None
+fitz = None
+for _mod in ("fitz", "pymupdf"):
+    try:
+        fitz = importlib.import_module(_mod)
+        break
+    except Exception as e:
+        last_exc = e
+
+if fitz is None:
+    print("ERROR: PyMuPDF (fitz) is not installed or could not be imported. Install with: pip install pymupdf", file=sys.stderr)
+    if last_exc:
+        print(f"Import error: {last_exc}", file=sys.stderr)
+    sys.exit(1)
+
+import os  # For file path validation
 import json
 
 def extract_pdf_text(pdf_path):
