@@ -1,5 +1,5 @@
 {
-  "name": "resume",
+  "name": "jobhunterwithml1",
   "version": "1.0.0",
   "description": "Resume ATS and Job Recommendation System Backend",
   "main": "src/server.ts",
@@ -12,7 +12,7 @@
     "test": "bun test"
   },
   "keywords": [
-    "resume",
+    "job-hunting",
     "ats",
     "job-recommendation",
     "ml"

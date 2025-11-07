@@ -216,6 +216,27 @@ export class JoobleService {
       // Extract keywords from resume skills
       const keywords = this.extractKeywordsFromResume(resumeAnalysis);
       
+      // Validate that we have meaningful skills extracted
+      // If no skills were extracted, it's likely not a resume
+      if (!keywords || keywords === 'software developer') {
+        const skillCount = resumeAnalysis?.extractedInfo?.skills?.length || 0;
+        if (skillCount < 3) {
+          console.error('❌ Invalid resume: insufficient skills extracted');
+          console.error(`   Skills found: ${skillCount}`);
+          console.error(`   This appears to be a non-resume file (e.g., lab report, essay, etc.)`);
+          return {
+            success: false,
+            error: 'Invalid resume file. Please upload a valid resume with your skills and experience. Only ' + skillCount + ' skill(s) detected.',
+            totalJobs: 0,
+            recommendedJobs: 0,
+            recommendations: [],
+            atsScore: resumeAnalysis.score || 0,
+            apiCallsUsed: this.apiCallCount,
+            apiCallsRemaining: this.API_LIMIT - this.apiCallCount
+          };
+        }
+      }
+      
       // Search jobs from Jooble
       const joobleJobs = await this.searchJobs({
         keywords: filters.keywords || keywords,
@@ -258,8 +279,19 @@ export class JoobleService {
    */
   private extractKeywordsFromResume(analysis: any): string {
     const keywords: string[] = [];
+    const prioritySkills: string[] = [];
+    const frameworks: string[] = [];
+    const languages: string[] = [];
+    const databases: string[] = [];
+    const cloudTools: string[] = [];
+    const dataScience: string[] = [];
 
-    // Extract technical skills
+    // Extract skills from extractedInfo.skills (ML analyzer format)
+    if (analysis.extractedInfo && analysis.extractedInfo.skills && Array.isArray(analysis.extractedInfo.skills)) {
+      keywords.push(...analysis.extractedInfo.skills);
+    }
+    
+    // Fallback: Extract technical skills from nested structure (rule-based format)
     if (analysis.skills && analysis.skills.technical) {
       Object.values(analysis.skills.technical).forEach((skillArray: any) => {
         if (Array.isArray(skillArray)) {
@@ -267,9 +299,85 @@ export class JoobleService {
         }
       });
     }
+    
+    // Fallback: Extract from top-level skills array
+    if (analysis.skills && Array.isArray(analysis.skills)) {
+      keywords.push(...analysis.skills);
+    }
 
-    // Use first 3 keywords to avoid too specific searches
-    return keywords.slice(0, 3).join(' ') || 'software developer';
+    // Filter out empty strings and duplicates
+    const uniqueKeywords = [...new Set(keywords.filter(k => k && k.trim().length > 0))];
+    
+    // Categorize skills for smarter job matching
+    const skillCategories = {
+      frameworks: ['react', 'angular', 'vue', 'next.js', 'next', 'express', 'express.js', 'node.js', 'node', 'django', 'flask', 'spring', 'tailwind', 'streamlit'],
+      languages: ['python', 'java', 'javascript', 'typescript', 'c', 'c++', 'rust', 'go', 'ruby', 'php', 'kotlin', 'swift'],
+      databases: ['mysql', 'postgresql', 'mongodb', 'supabase', 'redis', 'cassandra', 'dynamodb', 'sql'],
+      cloudTools: ['aws', 'azure', 'gcp', 'docker', 'kubernetes', 'ci/cd', 'github actions', 'git', 'github', 'version control'],
+      dataScience: ['machine learning', 'ai', 'data science', 'pandas', 'numpy', 'plotly', 'tensorflow', 'pytorch', 'scikit-learn'],
+      highValue: ['full stack', 'devops', 'microservices', 'api', 'rest', 'graphql']
+    };
+    
+    // Categorize each skill
+    uniqueKeywords.forEach(skill => {
+      const skillLower = skill.toLowerCase();
+      
+      if (skillCategories.frameworks.some(f => skillLower.includes(f))) {
+        frameworks.push(skill);
+      }
+      if (skillCategories.languages.some(l => skillLower === l)) {
+        languages.push(skill);
+      }
+      if (skillCategories.databases.some(d => skillLower.includes(d))) {
+        databases.push(skill);
+      }
+      if (skillCategories.cloudTools.some(c => skillLower.includes(c))) {
+        cloudTools.push(skill);
+      }
+      if (skillCategories.dataScience.some(ds => skillLower.includes(ds))) {
+        dataScience.push(skill);
+      }
+      if (skillCategories.highValue.some(h => skillLower.includes(h))) {
+        prioritySkills.push(skill);
+      }
+    });
+    
+    // Build optimized search query with ALL relevant technical skills
+    // Strategy: Use frameworks + languages + databases + cloud tools + data science (exclude soft skills)
+    const selectedSkills: string[] = [];
+    
+    // Add ALL categorized technical skills (they're already filtered to be job-relevant)
+    selectedSkills.push(...prioritySkills);  // Full stack, DevOps, etc.
+    selectedSkills.push(...frameworks);      // React, Next.js, Express, etc.
+    selectedSkills.push(...languages);       // Python, JavaScript, Rust, etc.
+    selectedSkills.push(...cloudTools);      // Azure, CI/CD, GitHub Actions, etc.
+    selectedSkills.push(...databases);       // PostgreSQL, MySQL, Supabase, etc.
+    selectedSkills.push(...dataScience);     // ML, AI, Pandas, NumPy, etc.
+    
+    // Remove duplicates
+    const finalKeywords = [...new Set(selectedSkills)];
+    
+    console.log(`🔍 Skill categorization:`, {
+      total: uniqueKeywords.length,
+      frameworks: frameworks.length,
+      languages: languages.length,
+      databases: databases.length,
+      cloudTools: cloudTools.length,
+      dataScience: dataScience.length,
+      highValue: prioritySkills.length
+    });
+    console.log(`🔍 Selected keywords (${finalKeywords.length}):`, finalKeywords);
+    
+    const searchQuery = finalKeywords.join(' ');
+    console.log(`🔍 Using search query (${searchQuery.length} chars): "${searchQuery}"`);
+    
+    // Return empty if no valid technical skills found (likely not a resume)
+    if (finalKeywords.length === 0) {
+      console.warn('⚠️  No technical skills found in resume - may not be a valid resume file');
+      return 'software developer';  // Still return default for API call validation check
+    }
+    
+    return searchQuery;
   }
 
   /**

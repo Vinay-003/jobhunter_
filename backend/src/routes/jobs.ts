@@ -128,6 +128,54 @@ router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
       });
     }
 
+    // Check if analysis is outdated (old version with limited data extraction)
+    // Old version indicators:
+    // 1. extractedInfo.skills has less than 10 items (old: 3, new: 36+)
+    // 2. Missing new fields like 'name', 'linkedin', 'github', 'projects', 'education'
+    const hasLimitedSkills = resume.analysis_data.extractedInfo?.skills 
+      && Array.isArray(resume.analysis_data.extractedInfo.skills) 
+      && resume.analysis_data.extractedInfo.skills.length < 10;
+    
+    const missingNewFields = !resume.analysis_data.extractedInfo?.name 
+      || !resume.analysis_data.extractedInfo?.projects
+      || !resume.analysis_data.extractedInfo?.education;
+    
+    console.log('🔍 AUTO-REANALYSIS CHECK:', {
+      hasLimitedSkills,
+      skillsCount: resume.analysis_data.extractedInfo?.skills?.length || 0,
+      hasName: !!resume.analysis_data.extractedInfo?.name,
+      hasProjects: !!resume.analysis_data.extractedInfo?.projects,
+      hasEducation: !!resume.analysis_data.extractedInfo?.education,
+      missingNewFields,
+      willReanalyze: hasLimitedSkills || missingNewFields
+    });
+    
+    console.log('📊 FULL extractedInfo.skills ARRAY:', JSON.stringify(resume.analysis_data.extractedInfo?.skills || [], null, 2));
+    console.log('📚 EDUCATION:', JSON.stringify(resume.analysis_data.extractedInfo?.education || 'none', null, 2));
+    console.log('🚀 PROJECTS:', JSON.stringify(resume.analysis_data.extractedInfo?.projects || 'none', null, 2));
+    
+    const needsReanalysis = hasLimitedSkills || missingNewFields;
+
+    if (needsReanalysis) {
+      console.log('⚠️  Detected outdated analysis. Re-analyzing resume with enhanced parser...');
+      console.log(`   - Limited skills: ${hasLimitedSkills} (${resume.analysis_data.extractedInfo?.skills?.length || 0} skills found)`);
+      console.log(`   - Missing new fields: ${missingNewFields}`);
+      
+      const analysisService = (await import('../services/analysisService.js')).default;
+      const freshAnalysis = await analysisService.analyzeResume(resume.file_path);
+      
+      if (freshAnalysis.success) {
+        // Update the database with fresh analysis
+        await resumeModel.updateResumeStatus(resume.id, 'processed', freshAnalysis);
+        // Use fresh analysis for job matching
+        resume.analysis_data = freshAnalysis;
+        console.log('✅ Resume re-analyzed successfully!');
+        console.log(`   - Skills extracted: ${(freshAnalysis as any).extractedInfo?.skills?.length || 0}`);
+        console.log(`   - Projects found: ${(freshAnalysis as any).extractedInfo?.projects?.length || 0}`);
+        console.log(`   - Education entries: ${(freshAnalysis as any).extractedInfo?.education?.length || 0}`);
+      }
+    }
+
     // Prepare filters
     const filters: any = {};
     if (location) filters.location = location as string;
@@ -136,6 +184,13 @@ router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
     if (min_match_score) filters.min_match_score = parseFloat(min_match_score as string);
 
     console.log(`Generating recommendations for user ${userId} with filters:`, filters);
+    console.log(`Resume analysis structure:`, {
+      hasSkills: !!resume.analysis_data.skills,
+      hasExtractedInfo: !!resume.analysis_data.extractedInfo,
+      extractedInfoSkills: resume.analysis_data.extractedInfo?.skills || 'none',  // Show ALL skills, not just first 3
+      extractedInfoSkillsCount: resume.analysis_data.extractedInfo?.skills?.length || 0,
+      topLevelKeys: Object.keys(resume.analysis_data)
+    });
 
     // Get recommendations from Jooble
     const recommendations = await joobleService.getRecommendedJobs(
@@ -145,9 +200,13 @@ router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
     );
 
     if (!recommendations.success) {
-      return res.status(500).json({
+      return res.status(400).json({
         success: false,
-        message: recommendations.error || 'Failed to generate recommendations'
+        message: recommendations.error || 'Failed to generate recommendations',
+        atsScore: recommendations.atsScore || 0,
+        totalJobs: 0,
+        recommendedJobs: 0,
+        recommendations: []
       });
     }
 

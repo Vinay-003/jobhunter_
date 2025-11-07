@@ -3,6 +3,10 @@ Python Flask Server for Resume Analysis
 Runs independently from the TypeScript backend
 """
 
+# IMPORTANT: Set offline environment BEFORE importing any ML libraries
+from offline_config import setup_offline_environment
+setup_offline_environment()
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
@@ -268,6 +272,10 @@ def analyze_pdf_ml():
         # Add extracted text to response
         analysis_result['extractedText'] = text
         analysis_result['textLength'] = len(text)
+        
+        # DEBUG: Log what we're returning
+        print(f"🔍 PYTHON RETURNING extractedInfo.skills: {analysis_result.get('extractedInfo', {}).get('skills', [])}") 
+        print(f"🔍 PYTHON skills count: {len(analysis_result.get('extractedInfo', {}).get('skills', []))}")
         
         return jsonify(analysis_result)
         

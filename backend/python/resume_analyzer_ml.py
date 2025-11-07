@@ -28,13 +28,52 @@ class ResumeAnalyzerML:
         if ML_AVAILABLE:
             try:
                 print(f"Loading Sentence-BERT model: {self.model_name}...")
-                self.model = SentenceTransformer(self.model_name)
-                print("Model loaded successfully!")
+                
+                # Try to load from local cache first
+                import os
+                cache_dir = os.path.expanduser('~/.cache/huggingface/hub')
+                model_path = os.path.join(cache_dir, f'models--sentence-transformers--{self.model_name}')
+                
+                if os.path.exists(model_path):
+                    # Load from cache directory directly
+                    snapshot_dirs = []
+                    snapshots_path = os.path.join(model_path, 'snapshots')
+                    if os.path.exists(snapshots_path):
+                        snapshot_dirs = [d for d in os.listdir(snapshots_path) if os.path.isdir(os.path.join(snapshots_path, d))]
+                    
+                    if snapshot_dirs:
+                        # Use the first (and likely only) snapshot directory
+                        snapshot_path = os.path.join(snapshots_path, snapshot_dirs[0])
+                        print(f"📂 Loading model from local cache: {snapshot_path}")
+                        self.model = SentenceTransformer(snapshot_path)
+                    else:
+                        # Fallback to online loading (which should use cache)
+                        print("🌐 Loading model with cache fallback...")
+                        self.model = SentenceTransformer(self.model_name)
+                else:
+                    # First time - download the model
+                    print("📥 Downloading model for first time...")
+                    self.model = SentenceTransformer(self.model_name)
+                
+                # Set model to evaluation mode and disable gradient computation
+                if self.model:
+                    self.model.eval()
+                    print("✅ Model loaded successfully!")
+                    
             except Exception as e:
-                print(f"Error loading model: {e}")
-                self.model = None
+                print(f"❌ Error loading model: {e}")
+                print("💡 Trying alternative loading method...")
+                try:
+                    # Alternative: Try loading without auth token parameter
+                    self.model = SentenceTransformer(self.model_name)
+                    if self.model:
+                        self.model.eval()
+                        print("✅ Model loaded with alternative method!")
+                except Exception as e2:
+                    print(f"❌ Alternative loading also failed: {e2}")
+                    self.model = None
         else:
-            print("ML libraries not available. Falling back to rule-based analysis.")
+            print("❌ ML libraries not available. Falling back to rule-based analysis.")
     
     def analyze_resume(self, text: str) -> Dict[str, Any]:
         """
@@ -86,10 +125,17 @@ class ResumeAnalyzerML:
                 "quantifiedBullets": extracted_info.get("quantified_bullets", 0)
             },
             "extractedInfo": {
+                "name": extracted_info.get("name"),
                 "email": extracted_info.get("email"),
                 "phone": extracted_info.get("phone"),
-                "skills": extracted_info.get("skills", [])[:10],  # Top 10 skills
+                "location": extracted_info.get("location"),
+                "linkedin": extracted_info.get("linkedin"),
+                "github": extracted_info.get("github"),
+                "skills": extracted_info.get("skills", []),  # All skills now
                 "sections": extracted_info.get("sections", []),
+                "education": extracted_info.get("education", []),
+                "work_experience": extracted_info.get("work_experience", []),
+                "projects": extracted_info.get("projects", []),
                 "experienceLevel": extracted_info.get("experience_level", "entry"),
                 "yearsOfExperience": extracted_info.get("years_of_experience", 0)
             }
@@ -102,6 +148,17 @@ class ResumeAnalyzerML:
         # Word count
         word_count = len(text.split())
         
+        # Extract name (usually first line or first few words)
+        lines = text.split('\n')
+        name = None
+        for line in lines[:5]:  # Check first 5 lines
+            line = line.strip()
+            if line and not any(char.isdigit() for char in line) and len(line.split()) <= 4:
+                # Likely a name if it's short, has no numbers, and looks like a proper name
+                if not any(keyword in line.lower() for keyword in ['email', 'phone', 'linkedin', 'github', 'http', '@']):
+                    name = line
+                    break
+        
         # Contact information
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
         phone_pattern = r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
@@ -109,9 +166,47 @@ class ResumeAnalyzerML:
         email = re.search(email_pattern, text)
         phone = re.search(phone_pattern, text)
         
+        # Extract location (city, state, country)
+        location = None
+        location_patterns = [
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),\s*([A-Z][a-z]+)',  # City, State
+            r'([A-Z][a-z]+),\s*([A-Z]{2})',  # City, ST
+        ]
+        for pattern in location_patterns:
+            match = re.search(pattern, text)
+            if match:
+                location = match.group()
+                break
+        
+        # Extract LinkedIn URL
+        linkedin = None
+        linkedin_patterns = [
+            r'linkedin\.com/in/([a-zA-Z0-9-]+)',
+            r'LinkedIn:\s*([a-zA-Z0-9-]+)',
+            r'linkedin:\s*([a-zA-Z0-9-]+)'
+        ]
+        for pattern in linkedin_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                linkedin = match.group(1) if '/' in pattern else match.group(1)
+                break
+        
+        # Extract GitHub URL
+        github = None
+        github_patterns = [
+            r'github\.com/([a-zA-Z0-9-]+)',
+            r'Github:\s*([a-zA-Z0-9-]+)',
+            r'github:\s*([a-zA-Z0-9-]+)'
+        ]
+        for pattern in github_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                github = match.group(1)
+                break
+        
         # Sections
         section_keywords = {
-            "experience": ["experience", "work history", "employment", "professional experience"],
+            "experience": ["experience", "work history", "employment", "professional experience", "workexperience"],
             "education": ["education", "academic", "qualifications", "degree"],
             "skills": ["skills", "technical skills", "competencies", "abilities", "expertise"],
             "summary": ["summary", "objective", "profile", "about"],
@@ -123,6 +218,15 @@ class ResumeAnalyzerML:
         for section, keywords in section_keywords.items():
             if any(keyword in text_lower for keyword in keywords):
                 found_sections.append(section)
+        
+        # Extract education details
+        education_info = self._extract_education(text, text_lower)
+        
+        # Extract work experience
+        work_experience = self._extract_work_experience(text, text_lower)
+        
+        # Extract projects
+        projects = self._extract_projects(text, text_lower)
         
         # Action verbs with frequency tracking
         action_verbs = [
@@ -152,7 +256,6 @@ class ResumeAnalyzerML:
         repetitive_verbs = {verb: count for verb, count in action_verb_frequency.items() if count > 2}
         
         # Count bullet points
-        lines = text.split('\n')
         bullet_pattern = r'^\s*[•\-\*◦▪]\s+'
         total_bullets = sum(1 for line in lines if re.match(bullet_pattern, line))
         
@@ -166,45 +269,83 @@ class ResumeAnalyzerML:
                 if re.search(r'\d+[\d,]*\.?\d*\s*(%|percent|million|thousand|users|customers|revenue|\$|hours|days|weeks|months|years|projects|items)', line.lower()):
                     quantified_bullets += 1
         
-        # Skills extraction (common technical and soft skills)
+        # Enhanced skills extraction with comprehensive list
         common_skills = [
             # Programming Languages
-            "python", "java", "javascript", "typescript", "c++", "c#", "ruby", "php", 
-            "swift", "kotlin", "go", "rust", "scala", "r", "matlab",
-            # Web Technologies
-            "react", "angular", "vue", "node.js", "express", "django", "flask", 
-            "spring", "asp.net", "html", "css", "sass", "bootstrap", "tailwind",
+            "python", "java", "javascript", "typescript", "c++", "c#", "c", "ruby", "php", 
+            "swift", "kotlin", "go", "rust", "scala", "r", "matlab", "perl", "haskell",
+            # Web Technologies & Frameworks
+            "react", "angular", "vue", "vue.js", "node.js", "node", "express", "express.js",
+            "django", "flask", "spring", "spring boot", "asp.net", "html", "html5", "css", 
+            "css3", "sass", "less", "bootstrap", "tailwind", "tailwindcss", "material-ui",
+            "next.js", "next", "nuxt", "gatsby", "svelte", "backbone", "ember",
+            # Backend & APIs
+            "fastapi", "graphql", "rest", "restful", "soap", "grpc", "microservices",
+            "serverless", "lambda", "api", "websocket",
             # Databases
-            "sql", "mysql", "postgresql", "mongodb", "redis", "oracle", "dynamodb",
-            "cassandra", "elasticsearch",
+            "sql", "mysql", "postgresql", "postgres", "mongodb", "redis", "sqlite",
+            "oracle", "dynamodb", "cassandra", "elasticsearch", "mariadb", "neo4j",
+            "firestore", "supabase", "firebase",
             # Cloud & DevOps
-            "aws", "azure", "gcp", "docker", "kubernetes", "jenkins", "ci/cd",
-            "terraform", "ansible", "git", "github", "gitlab", "linux",
-            # Data & AI
+            "aws", "azure", "gcp", "google cloud", "docker", "kubernetes", "k8s",
+            "jenkins", "ci/cd", "terraform", "ansible", "vagrant", "git", "github", 
+            "gitlab", "bitbucket", "linux", "unix", "bash", "shell", "nginx", "apache",
+            # Data & AI/ML
             "machine learning", "deep learning", "data analysis", "data science",
-            "tensorflow", "pytorch", "scikit-learn", "pandas", "numpy", "jupyter",
-            "tableau", "power bi", "spark", "hadoop",
-            # Mobile
-            "android", "ios", "react native", "flutter", "xamarin",
-            # Others
-            "api", "rest", "graphql", "microservices", "agile", "scrum", "jira",
-            "testing", "selenium", "jest", "unit testing",
+            "artificial intelligence", "ai", "ml", "tensorflow", "pytorch", "keras",
+            "scikit-learn", "sklearn", "pandas", "numpy", "jupyter", "matplotlib",
+            "seaborn", "plotly", "tableau", "power bi", "spark", "hadoop", "airflow",
+            "etl", "data mining", "nlp", "computer vision", "opencv",
+            # Mobile Development
+            "android", "ios", "react native", "flutter", "xamarin", "ionic", "cordova",
+            "swift", "objective-c", "kotlin", "java android",
+            # Testing & Quality
+            "testing", "unit testing", "selenium", "jest", "mocha", "chai", "pytest",
+            "junit", "testng", "cypress", "puppeteer", "test automation", "tdd", "bdd",
+            # Tools & Others
+            "agile", "scrum", "jira", "confluence", "trello", "slack", "figma", "sketch",
+            "photoshop", "illustrator", "postman", "swagger", "webpack", "vite", "babel",
+            "eslint", "prettier", "vim", "vscode", "intellij", "eclipse", "xcode",
+            # Version Control & Collaboration
+            "version control", "source control", "git flow", "github actions", "travis ci",
+            "circle ci", "gitlab ci",
+            # Blockchain & Web3
+            "blockchain", "ethereum", "solidity", "web3", "smart contracts", "cryptocurrency",
+            # System Design & Architecture
+            "system design", "architecture", "design patterns", "oop", "functional programming",
+            "event-driven", "message queue", "kafka", "rabbitmq", "redis pub/sub",
             # Soft skills
             "leadership", "communication", "teamwork", "problem solving", "analytical",
             "collaboration", "project management", "critical thinking", "mentoring",
-            "presentation", "negotiation"
+            "presentation", "negotiation", "time management", "event management",
+            "team management", "versatile", "trust building"
         ]
-        found_skills = [skill for skill in common_skills if skill in text_lower]
+        found_skills = []
+        for skill in common_skills:
+            # Use word boundaries for exact matching
+            pattern = r'\b' + re.escape(skill) + r'\b'
+            if re.search(pattern, text_lower):
+                found_skills.append(skill)
+        
+        # Remove duplicates and maintain order
+        found_skills = list(dict.fromkeys(found_skills))
         
         # Detect experience level (student, entry, mid, senior, principal)
         experience_level, years_of_experience = self._detect_experience_level(text, text_lower, total_bullets)
         
         return {
             "word_count": word_count,
+            "name": name,
             "email": email.group() if email else None,
             "phone": phone.group() if phone else None,
+            "location": location,
+            "linkedin": linkedin,
+            "github": github,
             "has_contact": bool(email and phone),
             "sections": found_sections,
+            "education": education_info,
+            "work_experience": work_experience,
+            "projects": projects,
             "action_verbs": found_action_verbs,
             "action_verb_frequency": action_verb_frequency,
             "repetitive_verbs": repetitive_verbs,
@@ -215,6 +356,288 @@ class ResumeAnalyzerML:
             "experience_level": experience_level,
             "years_of_experience": years_of_experience
         }
+    
+    def _extract_education(self, text: str, text_lower: str) -> List[Dict[str, Any]]:
+        """Extract education information from resume"""
+        education_list = []
+        
+        # Find EDUCATION section
+        education_section_start = -1
+        education_keywords = ['education', 'academic background', 'qualifications']
+        
+        for keyword in education_keywords:
+            pos = text_lower.find(keyword)
+            if pos != -1:
+                education_section_start = pos
+                break
+        
+        if education_section_start == -1:
+            return education_list
+        
+        # Extract text from education section (until next major section)
+        next_section_keywords = ['work experience', 'workexperience', 'experience', 'projects', 'skills', 'certifications']
+        education_section_end = len(text)
+        
+        for keyword in next_section_keywords:
+            pos = text_lower.find(keyword, education_section_start + 50)
+            if pos != -1 and pos < education_section_end:
+                education_section_end = pos
+        
+        education_text = text[education_section_start:education_section_end]
+        
+        # Look for university/institution names
+        institution_patterns = [
+            r'(IIIT\s+[A-Z][a-z]+(?:,\s*[A-Z]{2,3})?)',
+            r'(IIT\s+[A-Z][a-z]+)',
+            r'(NIT\s+[A-Z][a-z]+)',
+            r'([A-Z][A-Za-z\s]+(?:University|College|Institute|School)[^.\n]*)'
+        ]
+        
+        institutions_found = []
+        for pattern in institution_patterns:
+            matches = re.finditer(pattern, education_text, re.IGNORECASE)
+            for match in matches:
+                institutions_found.append(match.group(1))
+        
+        # Look for degree patterns
+        degree_patterns = [
+            r'\b(B\.?Tech|Bachelor|B\.?E\.?|B\.?S\.?)\b',
+            r'\b(M\.?Tech|Master|M\.?E\.?|M\.?S\.?)\b',
+            r'\b(Ph\.?D\.?|Doctorate)\b'
+        ]
+        
+        degrees_found = []
+        for pattern in degree_patterns:
+            matches = re.finditer(pattern, education_text, re.IGNORECASE)
+            for match in matches:
+                degrees_found.append(match.group(1))
+        
+        # Look for field of study
+        field_keywords = ['computer science', 'cse', 'electrical', 'mechanical', 'civil', 
+                         'electronics', 'information technology', 'data science', 'ai', 'ml']
+        fields_found = []
+        for keyword in field_keywords:
+            if keyword in education_text.lower():
+                fields_found.append(keyword.upper() if keyword == 'cse' else keyword.title())
+        
+        # Look for years
+        year_pattern = r'20\d{2}|202[0-9]'
+        years = re.findall(year_pattern, education_text)
+        
+        # Combine findings into structured data
+        if institutions_found or degrees_found:
+            # Primary education entry
+            education_list.append({
+                "degree": degrees_found[0] if degrees_found else "B.Tech",
+                "field": fields_found[0] if fields_found else "Computer Science",
+                "institution": institutions_found[0] if institutions_found else None,
+                "graduation_year": years[-1] if years else None
+            })
+        
+        return education_list
+    
+    def _extract_work_experience(self, text: str, text_lower: str) -> List[Dict[str, Any]]:
+        """Extract work experience from resume"""
+        experience_list = []
+        
+        # Find EXPERIENCE or WORK EXPERIENCE section
+        experience_section_start = -1
+        experience_keywords = ['workexperience', 'work experience', 'experience', 'employment history', 'professional experience']
+        
+        for keyword in experience_keywords:
+            pos = text_lower.find(keyword)
+            if pos != -1:
+                experience_section_start = pos
+                break
+        
+        if experience_section_start == -1:
+            return experience_list
+        
+        # Extract text from experience section (until next major section)
+        next_section_keywords = ['summary', 'projects', 'skills', 'certifications', 'education']
+        experience_section_end = len(text)
+        
+        for keyword in next_section_keywords:
+            pos = text_lower.find(keyword, experience_section_start + 50)
+            if pos != -1 and pos < experience_section_end:
+                experience_section_end = pos
+        
+        experience_text = text[experience_section_start:experience_section_end]
+        lines = experience_text.split('\n')
+        
+        current_org = None
+        current_role = None
+        current_duration = None
+        current_description = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line or line.lower() in experience_keywords:
+                continue
+            
+            # Check if line contains a date range pattern
+            date_pattern = r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\.?\s*\d{4}\s*[-–—]\s*(?:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\.?\s*\d{4}|Present|Current|present|current)'
+            date_match = re.search(date_pattern, line, re.IGNORECASE)
+            
+            if date_match:
+                # Save previous experience if exists
+                if current_org:
+                    experience_list.append({
+                        "organization": current_org,
+                        "role": current_role,
+                        "duration": current_duration,
+                        "description": ' '.join(current_description)
+                    })
+                
+                # Start new experience
+                current_duration = date_match.group()
+                # Extract organization and role from the line
+                parts = line.split(date_match.group())
+                before_date = parts[0].strip()
+                
+                # Check if there's a hyphen or dash indicating role
+                if '-' in before_date:
+                    org_role = before_date.split('-', 1)
+                    current_org = org_role[0].strip()
+                    current_role = org_role[1].strip() if len(org_role) > 1 else None
+                else:
+                    current_org = before_date
+                    current_role = None
+                
+                # Description might be after the date
+                if len(parts) > 1:
+                    after_date = parts[1].strip()
+                    if after_date and after_date.startswith('-'):
+                        after_date = after_date[1:].strip()
+                    if after_date:
+                        current_description = [after_date]
+                    else:
+                        current_description = []
+                else:
+                    current_description = []
+                    
+            elif current_org and (line.startswith(('-', '•', '*', '◦', '▪')) or (current_description and len(line) > 10)):
+                # Add to current description
+                if line.startswith(('-', '•', '*', '◦', '▪')):
+                    line = line[1:].strip()
+                current_description.append(line)
+            elif not current_org and not line.startswith(('-', '•', '*', '◦', '▪')):
+                # Might be organization name without date format
+                if len(line.split()) <= 6 and not any(char.isdigit() for char in line):
+                    current_org = line
+                    current_role = None
+                    current_duration = None
+                    current_description = []
+        
+        # Save last experience
+        if current_org:
+            experience_list.append({
+                "organization": current_org,
+                "role": current_role,
+                "duration": current_duration,
+                "description": ' '.join(current_description)
+            })
+        
+        return experience_list
+    
+    def _extract_projects(self, text: str, text_lower: str) -> List[Dict[str, Any]]:
+        """Extract project information from resume"""
+        projects_list = []
+        
+        # Find PROJECTS section - look for it as a section header (at start of line or with minimal prefix)
+        projects_section_start = -1
+        project_keywords = ['projects', 'portfolio', 'work samples', 'key projects', 'personal projects']
+        
+        for keyword in project_keywords:
+            # Use pattern that matches the keyword at the start of a line (possibly with leading whitespace)
+            # or with only a few characters before it (section marker like numbers/bullets)
+            pattern = r'(?:^|\n)\s{0,5}' + keyword + r'\b'
+            match = re.search(pattern, text_lower, re.MULTILINE)
+            if match:
+                projects_section_start = match.end() - len(keyword)
+                break
+        
+        if projects_section_start == -1:
+            return projects_list
+        
+        # Extract text from projects section (until next major section)
+        next_section_keywords = ['education', 'experience', 'skills', 'certifications', 'languages', 'links']
+        projects_section_end = len(text)
+        
+        for keyword in next_section_keywords:
+            pattern = r'(?:^|\n)\s{0,5}' + keyword + r'\b'
+            match = re.search(pattern, text_lower[projects_section_start + 50:], re.MULTILINE)
+            if match:
+                candidate_end = projects_section_start + 50 + match.start()
+                if candidate_end < projects_section_end:
+                    projects_section_end = candidate_end
+        
+        projects_text = text[projects_section_start:projects_section_end]
+        lines = [l.strip() for l in projects_text.split('\n') if l.strip()]
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            
+            # Skip section header
+            if any(keyword in line.lower() for keyword in project_keywords):
+                i += 1
+                continue
+            
+            # Check if current line has technology separator
+            if '|' in line and not line.startswith(('-', '•', '*', '◦', '▪')):
+                # This line has format: "Category | Technology" or "Project Name | Technology"
+                parts = line.split('|')
+                project_name = parts[0].strip()
+                technology = parts[1].strip() if len(parts) > 1 else ""
+                
+                # Check if previous non-bullet line could be the project name
+                # (in case format is: Name on one line, Category | Tech on next line)
+                if (i > 0 and 
+                    not lines[i-1].startswith(('-', '•', '*', '◦', '▪', 'http', 'github', 'gitlab', 'link')) and
+                    len(lines[i-1].split()) <= 3 and
+                    not any(keyword in lines[i-1].lower() for keyword in project_keywords)):
+                    # Previous line is likely the actual project name
+                    project_name = lines[i-1]
+                
+                # Collect description from following bullet points
+                description_parts = []
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j]
+                    if next_line.startswith(('-', '•', '*', '◦', '▪')):
+                        cleaned = next_line[1:].strip()
+                        description_parts.append(cleaned)
+                        j += 1
+                    elif next_line.lower().startswith(('github', 'gitlab', 'http', 'link')):
+                        # Skip link lines
+                        j += 1
+                    elif '|' in next_line or (len(next_line.split()) <= 3 and not next_line.startswith(('-', '•', '*'))):
+                        # Hit next project or project name
+                        break
+                    else:
+                        # Could be continuation or description
+                        if len(next_line) > 20:
+                            description_parts.append(next_line)
+                        j += 1
+                
+                projects_list.append({
+                    "name": project_name,
+                    "technology": technology,
+                    "description": ' '.join(description_parts)
+                })
+                
+                i = j
+            elif (not line.startswith(('-', '•', '*', '◦', '▪', 'http', 'github', 'gitlab')) and
+                  i + 1 < len(lines) and
+                  '|' in lines[i + 1]):
+                # This is a project name, next line has technology
+                # Will be handled when we process the next line
+                i += 1
+            else:
+                i += 1
+        
+        return projects_list
     
     def _detect_experience_level(self, text: str, text_lower: str, total_bullets: int) -> tuple:
         """

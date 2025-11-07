@@ -27,13 +27,52 @@ class JobMatcherML:
         if ML_AVAILABLE:
             try:
                 print(f"Loading Sentence-BERT model: {self.model_name}...")
-                self.model = SentenceTransformer(self.model_name)
-                print("Model loaded successfully!")
+                
+                # Try to load from local cache first
+                import os
+                cache_dir = os.path.expanduser('~/.cache/huggingface/hub')
+                model_path = os.path.join(cache_dir, f'models--sentence-transformers--{self.model_name}')
+                
+                if os.path.exists(model_path):
+                    # Load from cache directory directly
+                    snapshot_dirs = []
+                    snapshots_path = os.path.join(model_path, 'snapshots')
+                    if os.path.exists(snapshots_path):
+                        snapshot_dirs = [d for d in os.listdir(snapshots_path) if os.path.isdir(os.path.join(snapshots_path, d))]
+                    
+                    if snapshot_dirs:
+                        # Use the first (and likely only) snapshot directory
+                        snapshot_path = os.path.join(snapshots_path, snapshot_dirs[0])
+                        print(f"📂 Loading model from local cache: {snapshot_path}")
+                        self.model = SentenceTransformer(snapshot_path)
+                    else:
+                        # Fallback to online loading (which should use cache)
+                        print("🌐 Loading model with cache fallback...")
+                        self.model = SentenceTransformer(self.model_name)
+                else:
+                    # First time - download the model
+                    print("📥 Downloading model for first time...")
+                    self.model = SentenceTransformer(self.model_name)
+                
+                # Set model to evaluation mode
+                if self.model:
+                    self.model.eval()
+                    print("✅ Model loaded successfully!")
+                    
             except Exception as e:
-                print(f"Error loading model: {e}")
-                self.model = None
+                print(f"❌ Error loading model: {e}")
+                print("💡 Trying alternative loading method...")
+                try:
+                    # Alternative: Try loading without auth token parameter
+                    self.model = SentenceTransformer(self.model_name)
+                    if self.model:
+                        self.model.eval()
+                        print("✅ Model loaded with alternative method!")
+                except Exception as e2:
+                    print(f"❌ Alternative loading also failed: {e2}")
+                    self.model = None
         else:
-            print("ML libraries not available. Falling back to keyword matching.")
+            print("❌ ML libraries not available. Falling back to keyword matching.")
     
     def calculate_match_score(
         self,
