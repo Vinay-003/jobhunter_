@@ -169,6 +169,17 @@ export class AnalysisService {
         );
 
         console.log(`ML Analysis complete, score: ${mlResponse.data.score}`);
+        
+        // Log hybrid scoring breakdown
+        if (mlResponse.data.scoreBreakdown?.category_scores) {
+          console.log('📊 HYBRID SCORING BREAKDOWN:', {
+            total: mlResponse.data.score,
+            categories: mlResponse.data.scoreBreakdown.category_scores,
+            bonuses: mlResponse.data.scoreBreakdown.total_bonuses || 0,
+            penalties: mlResponse.data.scoreBreakdown.total_penalties || 0
+          });
+        }
+        
         return mlResponse.data;
       } catch (mlError: any) {
         // If ML fails, use rule-based

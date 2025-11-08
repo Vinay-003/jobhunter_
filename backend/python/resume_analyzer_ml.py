@@ -75,6 +75,220 @@ class ResumeAnalyzerML:
         else:
             print("❌ ML libraries not available. Falling back to rule-based analysis.")
     
+    # ========== NEW: ATS COMPATIBILITY UTILITY FUNCTIONS ==========
+    
+    def _detect_file_type(self, pdf_path: str = None) -> tuple:
+        """
+        Detect if PDF is text-based or image-based
+        Returns: (file_type: str, penalty: int)
+        """
+        # For now, assume text-based since we successfully extracted text
+        # In production, would check if PDF has text layer
+        return "text_based", 0
+    
+    def _analyze_layout(self, text: str) -> tuple:
+        """
+        Analyze resume layout complexity
+        Returns: (layout_type: str, score: float)
+        """
+        # Check for table indicators, multi-column markers
+        has_excessive_symbols = text.count('|') > 50  # Table column separator
+        has_tab_formatting = text.count('\t') > 30
+        
+        if has_excessive_symbols or has_tab_formatting:
+            return "complex", 2.0
+        
+        # Check for normal single-column layout
+        lines = text.split('\n')
+        avg_line_length = sum(len(line) for line in lines) / max(len(lines), 1)
+        
+        if avg_line_length > 100:  # Very long lines = likely multi-column
+            return "multi_column", 4.0
+        
+        return "single_column", 6.0
+    
+    def _check_date_consistency(self, experiences: List[Dict], education: List[Dict]) -> tuple:
+        """
+        Check date format consistency and presence - More lenient
+        Returns: (score: float, penalty: int)
+        """
+        date_formats = set()
+        missing_dates = 0
+        total_entries = len(experiences) + len(education)
+        
+        if total_entries == 0:
+            return 2.0, 0  # Give some credit if no entries to check
+        
+        # Check experiences
+        for exp in experiences:
+            duration = exp.get('duration')
+            if not duration or duration.strip() == '':
+                missing_dates += 1
+            else:
+                # Detect format patterns - be more flexible
+                if re.search(r'[A-Z][a-z]{2,8},?\s+\d{4}', duration):
+                    date_formats.add('month_year')
+                elif re.search(r'\d{1,2}/\d{4}', duration):
+                    date_formats.add('mm_yyyy')
+                elif re.search(r'\d{4}-\d{2}', duration):
+                    date_formats.add('yyyy_mm')
+                elif re.search(r'\d{4}', duration):
+                    date_formats.add('year_only')
+        
+        # Check education
+        for edu in education:
+            date = edu.get('date') or edu.get('graduation_date') or edu.get('graduation_year')
+            if not date:
+                missing_dates += 1
+            else:
+                if re.search(r'\d{4}', str(date)):
+                    date_formats.add('year_only')
+        
+        # Calculate score and penalty - be more lenient
+        # Only penalize if MORE THAN HALF are missing dates
+        penalty = -5 if missing_dates > (total_entries // 2) else 0
+        
+        # Score based on consistency
+        if len(date_formats) == 0:
+            score = 1.0  # Some dates found but unclear format
+        elif len(date_formats) == 1:
+            score = 4.0  # Consistent format - perfect!
+        elif len(date_formats) == 2:
+            score = 3.0  # Mostly consistent (education vs experience can differ)
+        else:
+            score = 2.0  # Multiple formats
+        
+        return score, penalty
+    
+    def _check_grammar(self, text: str) -> float:
+        """
+        Basic grammar/spelling check
+        Returns: score (0-5)
+        More lenient - focuses on critical errors only
+        """
+        errors = 0
+        
+        # Check for excessive double spaces (more than 5 instances)
+        double_space_count = text.count('  ')
+        if double_space_count > 5:
+            errors += (double_space_count - 5) // 10
+        
+        # Check for common critical typos only
+        critical_typos = [
+            'teh ', 'recieve', 'occured', 'seperate', 'definately',
+            'experiance', 'responcible', 'managment', 'acheivement'
+        ]
+        for typo in critical_typos:
+            if typo in text.lower():
+                errors += 1
+        
+        # Check for missing punctuation at end of sentences (bullets)
+        lines = text.split('\n')
+        bullet_lines = [l.strip() for l in lines if l.strip().startswith(('•', '-', '◦', '*'))]
+        # Most professional resumes don't end bullets with periods, so don't penalize
+        
+        # Score based on critical errors only
+        if errors == 0:
+            return 5.0
+        elif errors <= 1:
+            return 4.0
+        elif errors <= 3:
+            return 3.0
+        elif errors <= 5:
+            return 2.0
+        else:
+            return 1.0
+    
+    def _detect_tailoring(self, text: str) -> bool:
+        """
+        Detect if resume appears tailored to specific role/domain
+        Returns: True if tailoring detected
+        """
+        text_lower = text.lower()
+        
+        # Check for targeting keywords in summary/objective
+        targeting_phrases = [
+            'seeking', 'looking for', 'interested in', 'pursuing',
+            'specializing in', 'focused on', 'passionate about',
+            'applying for', 'position in', 'role in'
+        ]
+        
+        for phrase in targeting_phrases:
+            if phrase in text_lower:
+                return True
+        
+        return False
+    
+    def _detect_leadership(self, text: str) -> bool:
+        """
+        Detect leadership/ownership language
+        Returns: True if leadership indicators found
+        """
+        text_lower = text.lower()
+        
+        leadership_keywords = [
+            'led', 'managed', 'supervised', 'coordinated', 'directed',
+            'organized', 'mentored', 'trained', 'guided', 'oversaw',
+            'spearheaded', 'championed', 'founded', 'established'
+        ]
+        
+        count = sum(1 for keyword in leadership_keywords if keyword in text_lower)
+        return count >= 2
+    
+    def _detect_oss_contributions(self, text: str) -> bool:
+        """
+        Detect open source contributions
+        Returns: True if OSS contributions found
+        """
+        text_lower = text.lower()
+        
+        oss_indicators = [
+            'github.com', 'open source', 'oss', 'pull request', 'pr merged',
+            'contributor', 'maintainer', 'open-source', 'github repo'
+        ]
+        
+        for indicator in oss_indicators:
+            if indicator in text_lower:
+                return True
+        
+        return False
+    
+    def _check_tone_readability(self, text: str) -> float:
+        """
+        Check professional tone and readability - More lenient
+        Returns: score (0-3)
+        """
+        score = 3.0  # Start with full points
+        
+        # Count average sentence length (approximation)
+        sentences = re.split(r'[.!?]+', text)
+        valid_sentences = [s for s in sentences if len(s.strip().split()) > 3]
+        
+        if len(valid_sentences) == 0:
+            return 2.0  # Give credit for concise resume
+        
+        avg_words_per_sentence = sum(len(s.split()) for s in valid_sentences) / len(valid_sentences)
+        
+        # Only penalize VERY long sentences (resume bullets should be concise)
+        if avg_words_per_sentence > 40:  # Raised threshold
+            score -= 1.0
+        elif avg_words_per_sentence > 35:
+            score -= 0.5
+        
+        # Check for excessive passive voice (be more lenient)
+        passive_indicators = ['was ', 'were ', 'been ', 'being ']
+        passive_count = sum(text.lower().count(word) for word in passive_indicators)
+        total_words = len(text.split())
+        passive_ratio = passive_count / max(total_words, 1)
+        
+        # Only penalize if EXCESSIVE passive voice (>8%)
+        if passive_ratio > 0.08:  # More than 8% passive (was 5%)
+            score -= 0.5
+        
+        return max(0.0, score)
+    
+    # ========== END NEW ATS FUNCTIONS ==========
+    
     def analyze_resume(self, text: str, target_level: str = None) -> Dict[str, Any]:
         """
         Analyze resume text using ML and rule-based approaches
@@ -107,12 +321,13 @@ class ResumeAnalyzerML:
         # Store the target level in extracted_info for scoring/recommendations
         extracted_info["target_level"] = experience_level
         
-        # Calculate ATS score using ML if available, otherwise use rules
+        # Calculate ATS score using HYBRID scoring system
         if self.model is not None:
-            score_result = self._calculate_ml_ats_score(text, extracted_info, experience_level)
+            score_result = self._calculate_hybrid_ats_score(text, extracted_info, experience_level)
             ats_score = score_result['total_score']
             score_breakdown = score_result
         else:
+            # Fallback to old ML scoring if model unavailable
             ats_score = self._calculate_rule_based_score(text, extracted_info, experience_level)
             score_breakdown = {'total_score': ats_score}
         
@@ -1183,6 +1398,454 @@ class ResumeAnalyzerML:
         total_score = ml_score + rule_score
         score_breakdown['total_score'] = round(min(100, max(0, total_score)), 1)
         score_breakdown['rule_based_score'] = round(rule_score, 1)
+        
+        return score_breakdown
+    
+    def _calculate_hybrid_ats_score(self, text: str, info: Dict, experience_level: str = "entry") -> Dict:
+        """
+        HYBRID ATS SCORING SYSTEM v3.0
+        Combines ML Semantic (20%) + ATS Formatting (28%) + Content (24%) + Skills (18%) + Education (10%) + Language (8%) + Length (2%)
+        Plus bonuses/penalties for special cases
+        """
+        score_breakdown = {}
+        
+        #  ============ 1. ML SEMANTIC ANALYSIS: 20 POINTS (20%) ============
+        
+        ml_score = 0.0
+        if self.model is not None:
+            # More comprehensive ideal characteristics for better semantic matching
+            ideal_characteristics = [
+                "professional summary showcasing expertise and career goals with measurable achievements",
+                "work experience with quantified results showing impact percentages revenue growth and performance metrics",
+                "technical skills including programming languages frameworks cloud platforms and development tools",
+                "projects demonstrating hands-on experience with real-world applications and technologies",
+                "education credentials with degree specialization institution and graduation details",
+                "strong action verbs like developed implemented architected optimized managed and led",
+                "contact information with email phone LinkedIn GitHub and professional profiles",
+                "clear section organization with experience education skills projects and achievements",
+                "bullet points highlighting specific accomplishments with numbers percentages and outcomes",
+                "leadership collaboration and team management experience with measurable results"
+            ]
+            
+            resume_embedding = self.model.encode(text, convert_to_tensor=True)
+            ideal_embeddings = self.model.encode(ideal_characteristics, convert_to_tensor=True)
+            similarities = util.cos_sim(resume_embedding, ideal_embeddings)[0]
+            # Use top 5 similarities for better coverage
+            top_similarities = torch.topk(similarities, k=min(5, len(similarities))).values
+            avg_top_similarity = torch.mean(top_similarities).item()
+            # Boost ML score slightly (multiply by 25 instead of 20 to allow scores up to full 20)
+            ml_score = min(20.0, avg_top_similarity * 25)
+        
+        score_breakdown['ml_semantic_score'] = round(ml_score, 1)
+        
+        # ============ 2. ATS FORMATTING & COMPATIBILITY: 28 POINTS (28%) ============
+        
+        formatting_score = 0.0
+        
+        # 2.1 File Type & Readability: 5 points
+        file_type, file_penalty = self._detect_file_type()
+        file_type_score = 5.0 if file_type == "text_based" else 0.0
+        formatting_score += file_type_score
+        score_breakdown['file_type_score'] = round(file_type_score, 1)
+        
+        # 2.2 Single-Column Layout: 6 points
+        layout_type, layout_score = self._analyze_layout(text)
+        formatting_score += layout_score
+        score_breakdown['layout_score'] = round(layout_score, 1)
+        
+        # 2.3 Standard Section Headings: 5 points
+        sections_count = len(info.get("sections", []))
+        if sections_count >= 6:
+            sections_score = 5.0
+        elif sections_count >= 5:
+            sections_score = 4.0
+        elif sections_count >= 4:
+            sections_score = 3.0
+        elif sections_count >= 3:
+            sections_score = 1.5
+        else:
+            sections_score = 0.0
+        formatting_score += sections_score
+        score_breakdown['sections_score'] = round(sections_score, 1)
+        
+        # 2.4 Date Consistency & Order: 4 points
+        date_score, date_penalty = self._check_date_consistency(
+            info.get("work_experience", []),
+            info.get("education", [])
+        )
+        formatting_score += date_score
+        score_breakdown['date_consistency_score'] = round(date_score, 1)
+        
+        # 2.5 Contact Information: 3 points
+        contact_score = 0.0
+        has_linkedin_github = bool(info.get("linkedin") or info.get("github"))
+        if info.get("has_contact") and has_linkedin_github:
+            contact_score = 3.0
+        elif info.get("has_contact"):
+            contact_score = 2.0
+        elif info.get("email") or info.get("phone"):
+            contact_score = 1.0
+        formatting_score += contact_score
+        score_breakdown['contact_info_score'] = round(contact_score, 1)
+        
+        # Check for missing contact penalty
+        contact_penalty = -10 if not info.get("has_contact") else 0
+        
+        # 2.6 Bullet Usage & Density: 5 points
+        total_bullets = info.get("total_bullets", 0)
+        work_exp_count = len(info.get("work_experience", []))
+        
+        if work_exp_count > 0:
+            avg_bullets = total_bullets / work_exp_count
+            if 3 <= avg_bullets <= 6:
+                bullet_density_score = 5.0
+            elif 2 <= avg_bullets <= 7:
+                bullet_density_score = 3.0
+            elif avg_bullets >= 1:
+                bullet_density_score = 1.0
+            else:
+                bullet_density_score = 0.0
+        else:
+            bullet_density_score = 0.0
+        
+        formatting_score += bullet_density_score
+        score_breakdown['bullet_density_score'] = round(bullet_density_score, 1)
+        
+        score_breakdown['formatting_total'] = round(formatting_score, 1)
+        
+        # ============ 3. CONTENT STRUCTURE & QUALITY: 24 POINTS (24%) ============
+        
+        content_score = 0.0
+        
+        # 3.1 Summary/Profile Quality: 5 points
+        # Check for summary section or objective statement
+        text_lower = text.lower()
+        has_summary = any(keyword in text_lower for keyword in ['summary', 'objective', 'profile', 'about me'])
+        summary_score = 5.0 if has_summary else 0.0
+        content_score += summary_score
+        score_breakdown['summary_score'] = round(summary_score, 1)
+        
+        # 3.2 Skills Section Clarity & Grouping: 6 points
+        skills_count = len(info.get("skills", []))
+        if skills_count >= 25:
+            skills_clarity_score = 6.0
+        elif skills_count >= 20:
+            skills_clarity_score = 5.0
+        elif skills_count >= 15:
+            skills_clarity_score = 4.0
+        elif skills_count >= 10:
+            skills_clarity_score = 2.0
+        else:
+            skills_clarity_score = 0.0
+        content_score += skills_clarity_score
+        score_breakdown['skills_clarity_score'] = round(skills_clarity_score, 1)
+        
+        # 3.3 Experience Section Completeness: 8 points
+        work_exp_count = len(info.get("work_experience", []))
+        project_count = len(info.get("projects", []))
+        
+        if experience_level == "entry":
+            if work_exp_count >= 3:
+                exp_completeness_score = 8.0
+            elif work_exp_count == 2:
+                exp_completeness_score = 6.0
+            elif work_exp_count == 1:
+                exp_completeness_score = 4.0 if project_count >= 3 else 2.0
+            else:
+                exp_completeness_score = 0.0
+        elif experience_level == "mid":
+            if work_exp_count >= 4:
+                exp_completeness_score = 8.0
+            elif work_exp_count == 3:
+                exp_completeness_score = 6.0
+            elif work_exp_count == 2:
+                exp_completeness_score = 3.0
+            else:
+                exp_completeness_score = 0.0
+        else:  # senior
+            if work_exp_count >= 5:
+                exp_completeness_score = 8.0
+            elif work_exp_count >= 4:
+                exp_completeness_score = 6.0
+            elif work_exp_count == 3:
+                exp_completeness_score = 3.0
+            else:
+                exp_completeness_score = 0.0
+        
+        content_score += exp_completeness_score
+        score_breakdown['experience_completeness_score'] = round(exp_completeness_score, 1)
+        
+        # 3.4 Projects & Internships Detail: 5 points
+        if experience_level == "entry":
+            if project_count >= 5:
+                projects_detail_score = 5.0
+            elif project_count >= 4:
+                projects_detail_score = 4.0
+            elif project_count >= 3:
+                projects_detail_score = 3.0
+            elif project_count >= 1:
+                projects_detail_score = 1.0
+            else:
+                projects_detail_score = 0.0
+        else:  # mid/senior
+            if project_count >= 3:
+                projects_detail_score = 5.0
+            elif project_count >= 2:
+                projects_detail_score = 3.0
+            elif project_count >= 1:
+                projects_detail_score = 1.0
+            else:
+                projects_detail_score = 0.0
+        
+        content_score += projects_detail_score
+        score_breakdown['projects_detail_score'] = round(projects_detail_score, 1)
+        
+        score_breakdown['content_total'] = round(content_score, 1)
+        
+        # ============ 4. SKILLS & KEYWORDS: 18 POINTS (18%) ============
+        
+        skills_keywords_score = 0.0
+        
+        # 4.1 Hard Skills Presence & Diversity: 8 points
+        if skills_count >= 25:
+            hard_skills_score = 8.0
+        elif skills_count >= 20:
+            hard_skills_score = 6.0
+        elif skills_count >= 15:
+            hard_skills_score = 4.0
+        elif skills_count >= 10:
+            hard_skills_score = 2.0
+        else:
+            hard_skills_score = 0.0
+        skills_keywords_score += hard_skills_score
+        score_breakdown['hard_skills_score'] = round(hard_skills_score, 1)
+        
+        # 4.2 Action Verbs & Achievement Language: 5 points (more lenient)
+        verb_count = len(info.get("action_verbs", []))
+        if verb_count >= 12:  # Lowered from 15
+            action_verbs_score = 5.0
+        elif verb_count >= 10:  # Lowered from 12
+            action_verbs_score = 4.0
+        elif verb_count >= 8:  # Lowered from 10
+            action_verbs_score = 3.5
+        elif verb_count >= 6:
+            action_verbs_score = 2.5
+        elif verb_count >= 4:  # New tier
+            action_verbs_score = 1.5
+        else:
+            action_verbs_score = 0.5  # Give some credit for any verbs
+        skills_keywords_score += action_verbs_score
+        score_breakdown['action_verbs_score'] = round(action_verbs_score, 1)
+        
+        # 4.3 Quantified Achievements Detection: 5 points (more lenient)
+        quantified_bullets = info.get("quantified_bullets", 0)
+        if total_bullets > 0:
+            quantification_ratio = quantified_bullets / total_bullets
+            if quantification_ratio >= 0.4:  # Lowered from 0.5
+                quantification_score = 5.0
+            elif quantification_ratio >= 0.3:  # Lowered from 0.4
+                quantification_score = 4.0
+            elif quantification_ratio >= 0.25:  # Lowered from 0.3
+                quantification_score = 3.5
+            elif quantification_ratio >= 0.15:  # Lowered from 0.2
+                quantification_score = 2.5
+            elif quantification_ratio >= 0.10:
+                quantification_score = 1.5
+            elif quantification_ratio >= 0.05:  # New tier
+                quantification_score = 1.0
+            else:
+                quantification_score = 0.5  # Give some credit
+        else:
+            quantification_score = 0.5  # Small credit even with no bullets
+        
+        skills_keywords_score += quantification_score
+        score_breakdown['quantification_score'] = round(quantification_score, 1)
+        
+        score_breakdown['skills_keywords_total'] = round(skills_keywords_score, 1)
+        
+        # ============ 5. EDUCATION & CERTIFICATIONS: 10 POINTS (10%) ============
+        
+        education_score = 0.0
+        education_count = len(info.get("education", []))
+        
+        # 5.1 Education Details: 6 points (more generous)
+        if experience_level == "entry":
+            if education_count >= 1:
+                edu = info.get("education", [{}])[0]
+                # Check for any combination of education fields
+                has_institution = bool(edu.get("institution"))
+                has_degree = bool(edu.get("degree"))
+                has_field = bool(edu.get("field"))
+                has_year = bool(edu.get("graduation_year") or edu.get("date") or edu.get("graduation_date"))
+                
+                details_count = sum([has_institution, has_degree, has_field, has_year])
+                
+                if details_count >= 3:
+                    education_details_score = 6.0
+                elif details_count >= 2:
+                    education_details_score = 5.0
+                elif details_count >= 1:
+                    education_details_score = 3.0
+                else:
+                    education_details_score = 1.0
+            else:
+                education_details_score = 0.0
+        elif experience_level == "mid":
+            if education_count >= 2:
+                education_details_score = 6.0
+            elif education_count == 1:
+                education_details_score = 5.0  # More generous
+            else:
+                education_details_score = 0.0
+        else:  # senior
+            if education_count >= 1:
+                education_details_score = 6.0
+            else:
+                education_details_score = 2.0  # Some credit even without formal education
+        
+        education_score += education_details_score
+        score_breakdown['education_details_score'] = round(education_details_score, 1)
+        
+        # 5.2 Certifications & Courses: 4 points
+        # Check for certification keywords in text
+        cert_keywords = [
+            'certified', 'certification', 'certificate', 'coursera', 'udemy',
+            'aws certified', 'google cloud', 'microsoft certified', 'cisco',
+            'comptia', 'pmp', 'scrum master', 'agile certified'
+        ]
+        text_lower = text.lower()
+        cert_count = sum(1 for keyword in cert_keywords if keyword in text_lower)
+        
+        if cert_count >= 3:
+            certifications_score = 4.0
+        elif cert_count >= 2:
+            certifications_score = 3.0
+        elif cert_count >= 1:
+            certifications_score = 2.0
+        else:
+            certifications_score = 0.0
+        
+        education_score += certifications_score
+        score_breakdown['certifications_score'] = round(certifications_score, 1)
+        
+        score_breakdown['education_total'] = round(education_score, 1)
+        
+        # ============ 6. LANGUAGE & PROFESSIONALISM: 8 POINTS (8%) ============
+        
+        language_score = 0.0
+        
+        # 6.1 Grammar & Spelling: 5 points
+        grammar_score = self._check_grammar(text)
+        language_score += grammar_score
+        score_breakdown['grammar_score'] = round(grammar_score, 1)
+        
+        # 6.2 Tone & Readability: 3 points
+        tone_score = self._check_tone_readability(text)
+        language_score += tone_score
+        score_breakdown['tone_score'] = round(tone_score, 1)
+        
+        score_breakdown['language_total'] = round(language_score, 1)
+        
+        # ============ 7. LENGTH & CONCISION: 2 POINTS (2%) ============
+        
+        word_count = info.get("word_count", len(text.split()))
+        
+        if experience_level == "entry":
+            if 400 <= word_count <= 800:
+                length_score = 2.0
+            elif 300 <= word_count <= 1000:
+                length_score = 1.0
+            else:
+                length_score = 0.0
+        elif experience_level == "mid":
+            if 600 <= word_count <= 1000:
+                length_score = 2.0
+            elif 500 <= word_count <= 1200:
+                length_score = 1.0
+            else:
+                length_score = 0.0
+        else:  # senior
+            if 800 <= word_count <= 1200:
+                length_score = 2.0
+            elif 600 <= word_count <= 1400:
+                length_score = 1.0
+            else:
+                length_score = 0.0
+        
+        score_breakdown['length_score'] = round(length_score, 1)
+        
+        # ============ 8. BONUSES (Max +6) ============
+        
+        bonuses = 0.0
+        
+        # Tailoring detected: +3 points
+        if self._detect_tailoring(text):
+            bonuses += 3.0
+            score_breakdown['tailoring_bonus'] = 3.0
+        
+        # Leadership/Ownership: +2 points
+        if self._detect_leadership(text):
+            bonuses += 2.0
+            score_breakdown['leadership_bonus'] = 2.0
+        
+        # OSS Contributions: +1 point
+        if self._detect_oss_contributions(text):
+            bonuses += 1.0
+            score_breakdown['oss_bonus'] = 1.0
+        
+        score_breakdown['total_bonuses'] = round(bonuses, 1)
+        
+        # ============ 9. PENALTIES (Max -35) ============
+        
+        penalties = 0.0
+        
+        # File type penalty (already calculated)
+        penalties += file_penalty
+        if file_penalty < 0:
+            score_breakdown['file_type_penalty'] = file_penalty
+        
+        # Missing contact penalty (already calculated)
+        penalties += contact_penalty
+        if contact_penalty < 0:
+            score_breakdown['contact_penalty'] = contact_penalty
+        
+        # Missing dates penalty (already calculated)
+        penalties += date_penalty
+        if date_penalty < 0:
+            score_breakdown['dates_penalty'] = date_penalty
+        
+        score_breakdown['total_penalties'] = round(penalties, 1)
+        
+        # ============ FINAL SCORE CALCULATION ============
+        
+        base_score = (
+            ml_score +
+            formatting_score +
+            content_score +
+            skills_keywords_score +
+            education_score +
+            language_score +
+            length_score
+        )
+        
+        final_score = base_score + bonuses + penalties
+        final_score = max(0, min(100, final_score))
+        
+        score_breakdown['base_score'] = round(base_score, 1)
+        score_breakdown['total_score'] = round(final_score, 1)
+        
+        # Category summaries for easy reference
+        score_breakdown['category_scores'] = {
+            'ml_semantic': round(ml_score, 1),
+            'formatting': round(formatting_score, 1),
+            'content': round(content_score, 1),
+            'skills': round(skills_keywords_score, 1),
+            'education': round(education_score, 1),
+            'language': round(language_score, 1),
+            'length': round(length_score, 1),
+            'bonuses': round(bonuses, 1),
+            'penalties': round(penalties, 1)
+        }
         
         return score_breakdown
     
