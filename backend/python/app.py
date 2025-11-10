@@ -3,18 +3,13 @@ Python Flask Server for Resume Analysis
 Runs independently from the TypeScript backend
 """
 
-# IMPORTANT: Set offline environment BEFORE importing any ML libraries
-from offline_config import setup_offline_environment
-setup_offline_environment()
-
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import json
 from pdf_text_extract import extract_pdf_text
-from resume_analyzer import analyze_resume
 
-# Import ML modules (with fallback to rule-based)
+# Import ML modules
 try:
     from resume_analyzer_ml import get_analyzer as get_ml_analyzer
     from job_matcher_ml import get_matcher as get_ml_matcher
@@ -23,7 +18,7 @@ try:
 except ImportError as e:
     ML_ENABLED = False
     print(f"⚠️  ML modules not available: {e}")
-    print("   Falling back to rule-based analysis")
+    print("   Service will not be available")
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for TypeScript backend to communicate
@@ -92,8 +87,14 @@ def extract_text():
 
 @app.route('/api/analyze-text', methods=['POST'])
 def analyze_text():
-    """Analyze resume text and provide ATS score"""
+    """Analyze resume text and provide ATS score (ML-based)"""
     try:
+        if not ML_ENABLED:
+            return jsonify({
+                'success': False,
+                'error': 'ML modules not available'
+            }), 503
+            
         data = request.get_json()
         
         if not data or 'text' not in data:
@@ -103,9 +104,11 @@ def analyze_text():
             }), 400
         
         text = data['text']
+        target_level = data.get('targetLevel', 'experienced')
         
-        # Analyze resume
-        result = analyze_resume(text)
+        # Use ML analyzer
+        analyzer = get_ml_analyzer()
+        result = analyzer.analyze_resume(text, target_level)
         
         return jsonify(result)
         
@@ -117,14 +120,21 @@ def analyze_text():
 
 @app.route('/api/analyze-pdf', methods=['POST'])
 def analyze_pdf():
-    """Complete pipeline: extract text from PDF and analyze"""
+    """Complete pipeline: extract text from PDF and analyze (ML-based)"""
     try:
+        if not ML_ENABLED:
+            return jsonify({
+                'success': False,
+                'error': 'ML modules not available'
+            }), 503
+            
         # Check if file is in request
         if 'file' not in request.files:
             # Check if file path is provided
             data = request.get_json()
             if data and 'filePath' in data:
                 pdf_path = data['filePath']
+                target_level = data.get('targetLevel', 'experienced')
             else:
                 return jsonify({
                     'success': False,
@@ -142,6 +152,7 @@ def analyze_pdf():
             # Save file temporarily
             pdf_path = os.path.join(UPLOAD_FOLDER, file.filename)
             file.save(pdf_path)
+            target_level = 'experienced'
         
         # Step 1: Extract text
         text = extract_pdf_text(pdf_path)
@@ -152,8 +163,9 @@ def analyze_pdf():
                 'error': 'Failed to extract text from PDF'
             }), 500
         
-        # Step 2: Analyze text
-        analysis_result = analyze_resume(text)
+        # Step 2: Analyze text using ML
+        analyzer = get_ml_analyzer()
+        analysis_result = analyzer.analyze_resume(text, target_level)
         
         # Add extracted text to response
         analysis_result['extractedText'] = text
@@ -311,11 +323,18 @@ def match_job_ml():
         job_description = data['jobDescription']
         job_title = data.get('jobTitle', '')
         ats_score = data.get('atsScore', 0)
+        experience_level = data.get('experienceLevel', 'entry')
+        years_of_experience = data.get('yearsOfExperience', 0)
+        
+        print(f"\n🎯 API: Single Job Match Request")
+        print(f"   Job: {job_title[:60] if job_title else 'N/A'}")
+        print(f"   Resume: {len(resume_text)} chars, ATS: {ats_score}")
         
         # Use ML matcher
         matcher = get_ml_matcher()
         result = matcher.calculate_match_score(
-            resume_text, job_description, job_title, ats_score
+            resume_text, job_description, job_title, ats_score,
+            experience_level, years_of_experience
         )
         
         return jsonify(result)
@@ -345,30 +364,37 @@ def batch_match_jobs_ml():
             }), 400
         
         resume_text = data['resumeText']
-        jobs = data['jobs']  # Array of {title, description}
+        jobs = data['jobs']
         ats_score = data.get('atsScore', 0)
         experience_level = data.get('experienceLevel', 'entry')
         years_of_experience = data.get('yearsOfExperience', 0)
         
-        if not isinstance(jobs, list):
+        if not isinstance(jobs, list) or len(jobs) == 0:
             return jsonify({
                 'success': False,
-                'error': 'jobs must be an array'
+                'error': 'jobs must be a non-empty array'
             }), 400
         
-        # Use ML matcher for batch processing with experience level
+        print(f"\n🚀 API: Batch Job Match Request")
+        print(f"   Jobs: {len(jobs)}")
+        print(f"   Resume: {len(resume_text)} chars, ATS: {ats_score}")
+        print(f"   Candidate: {experience_level} level, {years_of_experience} years\n")
+        
+        # Use ML matcher for batch processing
         matcher = get_ml_matcher()
         results = matcher.batch_calculate_matches(
-            resume_text, jobs, ats_score, experience_level, years_of_experience
+            resume_text, jobs, ats_score,
+            experience_level, years_of_experience
         )
         
         return jsonify({
             'success': True,
-            'totalJobs': len(jobs),
-            'matches': results
+            'results': results,
+            'count': len(results)
         })
         
     except Exception as e:
+        print(f"❌ Error in batch matching: {e}")
         return jsonify({
             'success': False,
             'error': str(e)

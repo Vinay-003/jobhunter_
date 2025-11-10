@@ -409,6 +409,17 @@ const JobRecommendations = ({ analysis }: { analysis: ResumeAnalysis | null }) =
                   <div className="text-right">
                     <div className="text-2xl font-bold text-red-500">{job.matchScore}%</div>
                     <div className="text-sm text-gray-400">Match</div>
+                    {(job as any).matchLevel && (
+                      <div className={`mt-2 px-3 py-1 rounded-full text-xs font-medium ${
+                        (job as any).matchLevel === 'excellent' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                        (job as any).matchLevel === 'very-good' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
+                        (job as any).matchLevel === 'good' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                        (job as any).matchLevel === 'fair' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                        'bg-red-500/20 text-red-400 border border-red-500/30'
+                      }`}>
+                        {(job as any).matchLevel.replace('-', ' ').toUpperCase()}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -434,11 +445,48 @@ const JobRecommendations = ({ analysis }: { analysis: ResumeAnalysis | null }) =
                 </div>
               </div>
 
-              <p className="text-gray-300 mb-4 line-clamp-3">{job.snippet}</p>
+              {/* Job Description */}
+              <div className="mb-4 p-4 bg-black/30 rounded-lg border border-red-900/20">
+                <p className="text-sm font-medium text-red-400 mb-2">Job Description:</p>
+                <p 
+                  className="text-gray-300 text-sm whitespace-pre-line"
+                  dangerouslySetInnerHTML={{ 
+                    __html: job.snippet
+                      .replace(/&nbsp;/g, ' ')
+                      .replace(/<b>/g, '<strong class="text-red-400">')
+                      .replace(/<\/b>/g, '</strong>')
+                      .replace(/<br>/g, '\n')
+                      .replace(/<br\/>/g, '\n')
+                  }}
+                />
+              </div>
 
+              {/* Match Details */}
+              {(job as any).semanticSimilarity !== undefined && (
+                <div className="mb-4 flex gap-4 text-xs">
+                  <div className="flex-1 bg-black/30 rounded p-2 border border-red-900/20">
+                    <div className="text-gray-400 mb-1">AI Similarity</div>
+                    <div className="text-red-400 font-bold">{(job as any).semanticSimilarity}%</div>
+                  </div>
+                  {(job as any).seniorityPenalty > 0 && (
+                    <div className="flex-1 bg-black/30 rounded p-2 border border-yellow-900/20">
+                      <div className="text-gray-400 mb-1">Level Gap</div>
+                      <div className="text-yellow-400 font-bold">-{(job as any).seniorityPenalty}</div>
+                    </div>
+                  )}
+                  {(job as any).jobLevel && (
+                    <div className="flex-1 bg-black/30 rounded p-2 border border-red-900/20">
+                      <div className="text-gray-400 mb-1">Job Level</div>
+                      <div className="text-red-400 font-bold capitalize">{(job as any).jobLevel}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Recommendation Reasons */}
               {job.recommendationReasons && job.recommendationReasons.length > 0 && (
                 <div className="mb-4">
-                  <p className="text-sm font-medium text-red-400 mb-2">Why this matches:</p>
+                  <p className="text-sm font-medium text-red-400 mb-2">Match Analysis:</p>
                   <ul className="space-y-1">
                     {job.recommendationReasons.map((reason, i) => (
                       <li key={i} className="text-sm text-gray-400 flex items-start">
@@ -510,53 +558,121 @@ function Home() {
           </section>
 
           {analysis && (
-            <section className="py-8 bg-red-950/20 rounded-lg mb-8 border border-red-900/30">
-              <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="text-center p-8">
-                  <div className="w-32 h-32 mx-auto mb-4 relative">
-                    <svg className="w-full h-full transform -rotate-90">
-                      <circle
-                        cx="64"
-                        cy="64"
-                        r="56"
-                        stroke="#660000"
-                        strokeWidth="8"
-                        fill="none"
-                      />
-                      <circle
-                        cx="64"
-                        cy="64"
-                        r="56"
-                        stroke="#ff3333"
-                        strokeWidth="8"
-                        fill="none"
-                        strokeDasharray={`${2 * Math.PI * 56}`}
-                        strokeDashoffset={`${2 * Math.PI * 56 * (1 - analysis.score / 100)}`}
-                        className="transition-all duration-1000"
-                      />
-                    </svg>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-3xl font-bold text-red-500">{analysis.score}</span>
+            <>
+              {/* ATS Score Section */}
+              <section className="py-8 bg-red-950/20 rounded-lg mb-8 border border-red-900/30">
+                <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="text-center p-8">
+                    <div className="w-32 h-32 mx-auto mb-4 relative">
+                      <svg className="w-full h-full transform -rotate-90">
+                        <circle
+                          cx="64"
+                          cy="64"
+                          r="56"
+                          stroke="#660000"
+                          strokeWidth="8"
+                          fill="none"
+                        />
+                        <circle
+                          cx="64"
+                          cy="64"
+                          r="56"
+                          stroke="#ff3333"
+                          strokeWidth="8"
+                          fill="none"
+                          strokeDasharray={`${2 * Math.PI * 56}`}
+                          strokeDashoffset={`${2 * Math.PI * 56 * (1 - analysis.score / 100)}`}
+                          className="transition-all duration-1000"
+                        />
+                      </svg>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="text-3xl font-bold text-red-500">{analysis.score}</span>
+                      </div>
                     </div>
+                    <h2 className="text-2xl font-bold mb-2">ATS Score</h2>
+                    <p className="text-gray-400">{analysis.statusMessage}</p>
                   </div>
-                  <h2 className="text-2xl font-bold mb-2">ATS Score</h2>
-                  <p className="text-gray-400">{analysis.statusMessage}</p>
+                  <div className="p-8">
+                    <h3 className="text-xl font-bold mb-4">Key Insights</h3>
+                    <ul className="space-y-3">
+                      {analysis.insights.slice(0, 5).map((insight, i) => (
+                        <li key={i} className="flex items-start">
+                          <span className="w-6 h-6 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                            ✓
+                          </span>
+                          <span className="text-gray-300">{insight}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
-                <div className="p-8">
-                  <h3 className="text-xl font-bold mb-4">Key Insights</h3>
-                  <ul className="space-y-3">
-                    {analysis.insights.slice(0, 5).map((insight, i) => (
-                      <li key={i} className="flex items-start">
-                        <span className="w-6 h-6 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                          ✓
-                        </span>
-                        <span className="text-gray-300">{insight}</span>
-                      </li>
-                    ))}
-                  </ul>
+              </section>
+
+              {/* Qualities and Drawbacks Section */}
+              <section className="py-8 mb-8">
+                <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Strengths */}
+                  <div className="bg-green-950/20 rounded-lg p-6 border border-green-900/30">
+                    <div className="flex items-center mb-4">
+                      <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center mr-3">
+                        <span className="text-2xl">✓</span>
+                      </div>
+                      <h3 className="text-xl font-bold text-green-400">Strengths</h3>
+                    </div>
+                    <ul className="space-y-3">
+                      {analysis.insights
+                        .filter(insight => 
+                          insight.toLowerCase().includes('good') || 
+                          insight.toLowerCase().includes('strong') ||
+                          insight.toLowerCase().includes('well') ||
+                          insight.toLowerCase().includes('excellent') ||
+                          !insight.toLowerCase().includes('missing') &&
+                          !insight.toLowerCase().includes('weak') &&
+                          !insight.toLowerCase().includes('poor') &&
+                          !insight.toLowerCase().includes('add') &&
+                          !insight.toLowerCase().includes('improve')
+                        )
+                        .slice(0, 6)
+                        .map((quality, i) => (
+                          <li key={i} className="flex items-start text-sm">
+                            <span className="text-green-400 mr-2 mt-1">•</span>
+                            <span className="text-gray-300">{quality}</span>
+                          </li>
+                        ))}
+                      {analysis.insights.filter(insight => 
+                        insight.toLowerCase().includes('good') || 
+                        insight.toLowerCase().includes('strong') ||
+                        insight.toLowerCase().includes('well') ||
+                        insight.toLowerCase().includes('excellent')
+                      ).length === 0 && (
+                        <li className="text-sm text-gray-400 italic">Analyzing resume strengths...</li>
+                      )}
+                    </ul>
+                  </div>
+
+                  {/* Areas for Improvement */}
+                  <div className="bg-yellow-950/20 rounded-lg p-6 border border-yellow-900/30">
+                    <div className="flex items-center mb-4">
+                      <div className="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center mr-3">
+                        <span className="text-2xl">⚠</span>
+                      </div>
+                      <h3 className="text-xl font-bold text-yellow-400">Areas to Improve</h3>
+                    </div>
+                    <ul className="space-y-3">
+                      {analysis.recommendations.slice(0, 6).map((drawback, i) => (
+                        <li key={i} className="flex items-start text-sm">
+                          <span className="text-yellow-400 mr-2 mt-1">•</span>
+                          <span className="text-gray-300">{drawback}</span>
+                        </li>
+                      ))}
+                      {analysis.recommendations.length === 0 && (
+                        <li className="text-sm text-gray-400 italic">No major issues found!</li>
+                      )}
+                    </ul>
+                  </div>
                 </div>
-              </div>
-            </section>
+              </section>
+            </>
           )}
 
           <section className="py-8">

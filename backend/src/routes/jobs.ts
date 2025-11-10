@@ -222,6 +222,11 @@ router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
       );
     }
 
+    console.log(`\n📤 SENDING TO FRONTEND:`);
+    console.log(`   Total jobs found: ${recommendations.totalJobs}`);
+    console.log(`   Recommended jobs: ${recommendations.recommendedJobs}`);
+    console.log(`   Top 5 match scores: ${recommendations.recommendations.slice(0, 5).map((r: any) => r.matchScore).join(', ')}`);
+    
     res.status(200).json({
       success: true,
       atsScore: recommendations.atsScore,

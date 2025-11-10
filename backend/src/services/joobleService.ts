@@ -538,11 +538,18 @@ export class JoobleService {
     try {
       const mlMatches = await this.calculateMLMatches(jobs, analysis);
       if (mlMatches && mlMatches.length > 0) {
-        console.log('Using ML-based job matching');
-        return this.filterAndSortMatches(mlMatches, filters);
+        console.log('✅ Using ML-based job matching');
+        console.log(`   Received ${mlMatches.length} ML-matched jobs`);
+        
+        const filtered = this.filterAndSortMatches(mlMatches, filters);
+        console.log(`   After filtering: ${filtered.length} jobs`);
+        console.log(`   Top 5 scores: ${filtered.slice(0, 5).map(j => j.matchScore).join(', ')}`);
+        
+        return filtered;
       }
-    } catch (error) {
-      console.log('ML matching unavailable, falling back to rule-based');
+    } catch (error: any) {
+      console.log('⚠️ ML matching unavailable, falling back to rule-based');
+      console.log('   Error:', error.message);
     }
 
     // Fallback to rule-based matching
@@ -564,12 +571,20 @@ export class JoobleService {
    */
   private async calculateMLMatches(jobs: JoobleJob[], analysis: any): Promise<any[]> {
     try {
+      console.log('\n🔮 Attempting ML-based job matching...');
+      console.log(`   Jobs to match: ${jobs.length}`);
+      console.log(`   Resume length: ${analysis.extractedText?.length || 0} chars`);
+      console.log(`   ATS Score: ${analysis.score || 0}`);
+      console.log(`   Experience: ${analysis.extractedInfo?.experienceLevel || 'entry'} (${analysis.extractedInfo?.yearsOfExperience || 0} years)`);
+      
       // Prepare jobs for batch processing
       const jobsData = jobs.map(job => ({
         title: job.title,
         description: job.snippet
       }));
 
+      console.log(`   Calling Python ML service: ${PYTHON_SERVICE_URL}/api/ml/batch-match-jobs`);
+      
       // Call ML service for batch matching
       const response = await axios.post(
         `${PYTHON_SERVICE_URL}/api/ml/batch-match-jobs`,
@@ -586,24 +601,36 @@ export class JoobleService {
         }
       );
 
-      if (response.data.success && response.data.matches) {
+      if (response.data.success && response.data.results) {
+        console.log(`✅ ML Matching: Received ${response.data.results.length} results`);
+        
         // Combine ML results with job data
         return jobs.map((job, index) => {
-          const mlResult = response.data.matches[index];
+          const mlResult = response.data.results[index];
+          console.log(`   Job ${index + 1}: ${job.title.substring(0, 50)} - Score: ${mlResult.matchScore}`);
+          
           return {
             ...job,
             matchScore: mlResult.matchScore || 0,
             semanticSimilarity: mlResult.semanticSimilarity,
             matchLevel: mlResult.matchLevel,
             recommendationReasons: mlResult.reasons || [],
-            methodology: mlResult.methodology
+            methodology: mlResult.methodology,
+            seniorityPenalty: mlResult.seniorityPenalty,
+            candidateLevel: mlResult.candidateLevel,
+            jobLevel: mlResult.jobLevel
           };
         });
       }
 
+      console.log('⚠️ ML service returned no results');
       return [];
     } catch (error: any) {
-      console.error('ML matching error:', error.message);
+      console.error('❌ ML matching error:', error.message);
+      if (error.response) {
+        console.error('   Response status:', error.response.status);
+        console.error('   Response data:', error.response.data);
+      }
       return [];
     }
   }
@@ -612,25 +639,38 @@ export class JoobleService {
    * Filter and sort matches
    */
   private filterAndSortMatches(matches: any[], filters: any): any[] {
+    console.log(`\n🔍 Filtering ${matches.length} matches...`);
+    console.log(`   Filters:`, filters);
+    
     let filtered = matches;
 
     // Filter by minimum match score if specified
     if (filters.min_match_score) {
+      const before = filtered.length;
       filtered = matches.filter(job => job.matchScore >= filters.min_match_score);
+      console.log(`   ⚠️ Min score filter (${filters.min_match_score}): ${before} → ${filtered.length} jobs`);
     }
 
     // Filter by posting date if specified
     if (filters.days_posted) {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - filters.days_posted);
+      const before = filtered.length;
       filtered = filtered.filter(job => {
         const jobDate = new Date(job.updated);
         return jobDate >= cutoffDate;
       });
+      console.log(`   📅 Date filter (${filters.days_posted} days): ${before} → ${filtered.length} jobs`);
     }
 
     // Sort by match score descending
-    return filtered.sort((a, b) => b.matchScore - a.matchScore).slice(0, 20);
+    const sorted = filtered.sort((a, b) => b.matchScore - a.matchScore);
+    const top20 = sorted.slice(0, 20);
+    
+    console.log(`   📊 Top 10 scores: ${sorted.slice(0, 10).map(j => j.matchScore).join(', ')}`);
+    console.log(`   ✅ Returning top ${top20.length} jobs\n`);
+    
+    return top20;
   }
 
   /**

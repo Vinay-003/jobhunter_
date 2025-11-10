@@ -23,55 +23,60 @@ class ResumeAnalyzerML:
     def __init__(self):
         """Initialize the ML model"""
         self.model = None
-        self.model_name = 'all-mpnet-base-v2'  # Best pre-trained model for semantic similarity
+        # Use resume-specific fine-tuned model for better accuracy
+        self.model_name = 'anass1209/resume-job-matcher-all-MiniLM-L6-v2'
+        self.fallback_model = 'all-mpnet-base-v2'
         
         if ML_AVAILABLE:
             try:
-                print(f"Loading Sentence-BERT model: {self.model_name}...")
+                print(f"Loading Resume-Job Matching Model: {self.model_name}...")
+                print("📌 This model is specifically fine-tuned for resume analysis!")
                 
                 # Try to load from local cache first
                 import os
                 cache_dir = os.path.expanduser('~/.cache/huggingface/hub')
-                model_path = os.path.join(cache_dir, f'models--sentence-transformers--{self.model_name}')
+                model_path = os.path.join(cache_dir, f'models--{self.model_name.replace("/", "--")}')
                 
-                if os.path.exists(model_path):
-                    # Load from cache directory directly
-                    snapshot_dirs = []
-                    snapshots_path = os.path.join(model_path, 'snapshots')
-                    if os.path.exists(snapshots_path):
-                        snapshot_dirs = [d for d in os.listdir(snapshots_path) if os.path.isdir(os.path.join(snapshots_path, d))]
-                    
-                    if snapshot_dirs:
-                        # Use the first (and likely only) snapshot directory
-                        snapshot_path = os.path.join(snapshots_path, snapshot_dirs[0])
-                        print(f"📂 Loading model from local cache: {snapshot_path}")
-                        self.model = SentenceTransformer(snapshot_path)
-                    else:
-                        # Fallback to online loading (which should use cache)
-                        print("🌐 Loading model with cache fallback...")
-                        self.model = SentenceTransformer(self.model_name)
-                else:
-                    # First time - download the model
-                    print("📥 Downloading model for first time...")
-                    self.model = SentenceTransformer(self.model_name)
-                
-                # Set model to evaluation mode and disable gradient computation
-                if self.model:
-                    self.model.eval()
-                    print("✅ Model loaded successfully!")
-                    
-            except Exception as e:
-                print(f"❌ Error loading model: {e}")
-                print("💡 Trying alternative loading method...")
                 try:
-                    # Alternative: Try loading without auth token parameter
-                    self.model = SentenceTransformer(self.model_name)
+                    # Try to load resume-specific model
+                    if os.path.exists(model_path):
+                        snapshot_dirs = []
+                        snapshots_path = os.path.join(model_path, 'snapshots')
+                        if os.path.exists(snapshots_path):
+                            snapshot_dirs = [d for d in os.listdir(snapshots_path) if os.path.isdir(os.path.join(snapshots_path, d))]
+                        
+                        if snapshot_dirs:
+                            snapshot_path = os.path.join(snapshots_path, snapshot_dirs[0])
+                            print(f"📂 Loading model from local cache: {snapshot_path}")
+                            self.model = SentenceTransformer(snapshot_path)
+                        else:
+                            print("🌐 Loading model from HuggingFace...")
+                            self.model = SentenceTransformer(self.model_name)
+                    else:
+                        print("📥 Downloading resume-specific model (first time, ~90MB)...")
+                        self.model = SentenceTransformer(self.model_name)
+                    
                     if self.model:
                         self.model.eval()
-                        print("✅ Model loaded with alternative method!")
-                except Exception as e2:
-                    print(f"❌ Alternative loading also failed: {e2}")
-                    self.model = None
+                        print("✅ Resume-specific model loaded successfully!")
+                        
+                except Exception as resume_model_error:
+                    # Fallback to general model
+                    print(f"⚠️  Resume model failed: {resume_model_error}")
+                    print(f"💡 Falling back to general model: {self.fallback_model}...")
+                    
+                    try:
+                        self.model = SentenceTransformer(self.fallback_model)
+                        if self.model:
+                            self.model.eval()
+                            print("✅ Fallback model loaded successfully!")
+                    except Exception as fallback_error:
+                        print(f"❌ Fallback model also failed: {fallback_error}")
+                        self.model = None
+                    
+            except Exception as e:
+                print(f"❌ Critical error loading models: {e}")
+                self.model = None
         else:
             print("❌ ML libraries not available. Falling back to rule-based analysis.")
     
