@@ -6,7 +6,7 @@ out
 dist
 *.tgz
 docs
-
+flowchart.mmd
 # code coverage
 coverage
 *.lcov
