@@ -1,30 +1,23 @@
-````markdown
 # Resume ATS & Job Recommendation System
 
 This project is split into **two independent services**:
-- **TypeScript Backend** (Node.js/Bun) - Authentication, database, file uploads
-- **Python Service** - PDF text extraction and resume analysis
+- **TypeScript Backend (Bun + Express)** - Authentication, database, resume uploads, job search/recommendations
+- **Python Service (Flask)** - PDF text extraction and resume analysis
 
 ## Quick Start
 
-### Option 1: Run Both Services Together
+### Run Services Separately
 
+**Terminal 1 - Python Service (Port 5000):**
 ```bash
-cd backend
-chmod +x start-all.sh
-./start-all.sh
+cd backend/python
+python3 -m venv venv
+source venv/bin/activate  # On Linux/Mac
+pip install -r requirements.txt
+python app.py
 ```
 
-### Option 2: Run Services Separately
-
-**Terminal 1 - Python Service:**
-```bash
-cd backend
-chmod +x start-python.sh
-./start-python.sh
-```
-
-**Terminal 2 - TypeScript Service:**
+**Terminal 2 - TypeScript Backend (Port 3001):**
 ```bash
 cd backend
 bun run dev
@@ -57,7 +50,7 @@ cd backend
 bun install
 
 # Set up environment variables
-cp .env.example .env  # Edit .env with your config
+# Create backend/.env (see example below)
 
 # Run server
 bun run dev
@@ -68,14 +61,35 @@ bun run dev
 Create `backend/.env`:
 
 ```env
-# TypeScript Backend
-PORT=3001
-DATABASE_URL=your_database_connection_string
+# Database (use one of these connection strings)
+PG_DATABASE_STRING=your_database_connection_string
+# DATABASE_URL=your_database_connection_string
+# SUPABASE_DB_URL=your_database_connection_string
+PG_SSL=true
+
+# Auth
 JWT_SECRET=your_secret_key
+
+# Server
+PORT=3001
 NODE_ENV=development
 
-# Python Service URL
+# Python Service URL (from backend to Python service)
 PYTHON_SERVICE_URL=http://localhost:5000
+
+# Job API
+JOOBLE_API_KEY=your_jooble_api_key
+```
+
+> Note: The backend exits on startup if no database connection string is provided.
+
+## Database Setup
+
+Run the migration to create required tables:
+
+```bash
+cd backend
+bun run migrate
 ```
 
 ## API Endpoints
@@ -84,15 +98,27 @@ PYTHON_SERVICE_URL=http://localhost:5000
 - `POST /api/auth/signup` - Create account
 - `POST /api/auth/login` - Login
 - `POST /api/upload-resume` - Upload resume
-- `POST /api/analyze` - Analyze resume (calls Python service)
-- `GET /api/jobs` - Get jobs
+- `GET /api/latest-resume` - Fetch latest resume
+- `GET /api/resume/:id` - Download resume by ID
+- `POST /api/analyze` - Analyze latest resume
+- `POST /api/analyze/:id` - Analyze resume by ID
+- `POST /api/jobs/search` - Search jobs (Jooble)
+- `POST /api/jobs/refresh` - Refresh jobs from Jooble
+- `GET /api/jobs` - Get jobs from database
 - `GET /api/jobs/recommendations` - Get job recommendations
+- `GET /health` - Health check
 
-### Python Service (http://localhost:5000)
+### Python Service (http://localhost:5000) - Core
 - `GET /health` - Health check
 - `POST /api/extract-text` - Extract text from PDF
 - `POST /api/analyze-text` - Analyze resume text
 - `POST /api/analyze-pdf` - Complete analysis pipeline
+
+### Python Service (http://localhost:5000) - ML
+- `POST /api/ml/analyze-text` - Analyze resume text (ML)
+- `POST /api/ml/analyze-pdf` - Complete analysis pipeline (ML)
+- `POST /api/ml/match-job` - Match resume to a job (ML)
+- `POST /api/ml/batch-match-jobs` - Batch match jobs (ML)
 
 ## Architecture
 
@@ -128,6 +154,4 @@ bun run dev
 
 - [Backend README](backend/README.md)
 - [Python Service README](backend/python/README.md)
-- [Analysis API Documentation](backend/ANALYSIS_API.md)
-- [Supabase Setup](backend/SUPABASE_SETUP.md)
-````
+See `docs/` for architecture/design references and additional notes.
