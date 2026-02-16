@@ -104,7 +104,7 @@ def analyze_text():
             }), 400
         
         text = data['text']
-        target_level = data.get('targetLevel', 'experienced')
+        target_level = data.get('targetLevel', None)
         
         # Use ML analyzer
         analyzer = get_ml_analyzer()
@@ -134,7 +134,7 @@ def analyze_pdf():
             data = request.get_json()
             if data and 'filePath' in data:
                 pdf_path = data['filePath']
-                target_level = data.get('targetLevel', 'experienced')
+                target_level = data.get('targetLevel', None)
             else:
                 return jsonify({
                     'success': False,
@@ -152,7 +152,7 @@ def analyze_pdf():
             # Save file temporarily
             pdf_path = os.path.join(UPLOAD_FOLDER, file.filename)
             file.save(pdf_path)
-            target_level = 'experienced'
+            target_level = None
         
         # Step 1: Extract text
         text = extract_pdf_text(pdf_path)

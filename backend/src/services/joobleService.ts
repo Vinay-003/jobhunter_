@@ -36,6 +36,33 @@ export class JoobleService {
   private apiCallCount = 0;
   private readonly API_LIMIT = 500;
 
+  private getLevelRank(level: string): number {
+    const normalized = (level || '').toLowerCase();
+    if (normalized === 'intern' || normalized === 'student') return 0;
+    if (normalized === 'entry') return 1;
+    if (normalized === 'mid') return 2;
+    if (normalized === 'senior') return 3;
+    if (normalized === 'principal') return 4;
+    return 2;
+  }
+
+  private getLevelPreferenceAdjustment(candidateLevel: string, jobLevel: string): number {
+    const cRank = this.getLevelRank(candidateLevel);
+    const jRank = this.getLevelRank(jobLevel);
+    const gap = jRank - cRank;
+
+    // Under-qualified should be strongly discouraged.
+    if (gap >= 2) return -18;
+    if (gap === 1) return -8;
+
+    // Over-qualified should be mildly discouraged so recommendations feel level-appropriate.
+    if (gap === -1) return -2;
+    if (gap <= -2) return -6;
+
+    // Same level gets slight boost.
+    return 2;
+  }
+
   /**
    * Fetch jobs from Jooble API
    */
@@ -571,11 +598,17 @@ export class JoobleService {
    */
   private async calculateMLMatches(jobs: JoobleJob[], analysis: any): Promise<any[]> {
     try {
+      const selectedLevel =
+        analysis.targetLevel ||
+        analysis.extractedInfo?.targetLevel ||
+        analysis.extractedInfo?.experienceLevel ||
+        'entry';
+
       console.log('\n🔮 Attempting ML-based job matching...');
       console.log(`   Jobs to match: ${jobs.length}`);
       console.log(`   Resume length: ${analysis.extractedText?.length || 0} chars`);
       console.log(`   ATS Score: ${analysis.score || 0}`);
-      console.log(`   Experience: ${analysis.extractedInfo?.experienceLevel || 'entry'} (${analysis.extractedInfo?.yearsOfExperience || 0} years)`);
+      console.log(`   Experience: ${selectedLevel} (${analysis.extractedInfo?.yearsOfExperience || 0} years)`);
       
       // Prepare jobs for batch processing
       const jobsData = jobs.map(job => ({
@@ -592,7 +625,7 @@ export class JoobleService {
           resumeText: analysis.extractedText || '',
           jobs: jobsData,
           atsScore: analysis.score || 0,
-          experienceLevel: analysis.extractedInfo?.experienceLevel || 'entry',
+          experienceLevel: selectedLevel,
           yearsOfExperience: analysis.extractedInfo?.yearsOfExperience || 0
         },
         {
@@ -608,17 +641,22 @@ export class JoobleService {
         return jobs.map((job, index) => {
           const mlResult = response.data.results[index];
           console.log(`   Job ${index + 1}: ${job.title.substring(0, 50)} - Score: ${mlResult.matchScore}`);
+
+          const jobLevel = mlResult.jobLevel || 'mid';
+          const levelPreferenceAdjustment = this.getLevelPreferenceAdjustment(selectedLevel, jobLevel);
+          const adjustedScore = Math.max(0, Math.min(100, (mlResult.matchScore || 0) + levelPreferenceAdjustment));
           
           return {
             ...job,
-            matchScore: mlResult.matchScore || 0,
+            matchScore: adjustedScore,
             semanticSimilarity: mlResult.semanticSimilarity,
             matchLevel: mlResult.matchLevel,
             recommendationReasons: mlResult.reasons || [],
             methodology: mlResult.methodology,
             seniorityPenalty: mlResult.seniorityPenalty,
+            levelPreferenceAdjustment,
             candidateLevel: mlResult.candidateLevel,
-            jobLevel: mlResult.jobLevel
+            jobLevel
           };
         });
       }

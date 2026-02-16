@@ -267,26 +267,16 @@ class JobMatcherML:
         logging.info(f"   ✅ Semantic Score: {semantic_score:.1f}/100")
         logging.info("")
         
-        # 2. ATS score provides quality boost (0-15 points for full, 0-10 for snippet)
-        # Reduce ATS impact for snippets since matching is harder
-        ats_max = 10 if is_snippet else 15
-        ats_contribution = (ats_score / 100) * ats_max
-        
-        logging.info("� ATS CONTRIBUTION CALCULATION:")
-        logging.info(f"   Resume ATS Score: {ats_score:.1f}/100")
-        logging.info(f"   Max ATS Points: {ats_max} ({'snippet' if is_snippet else 'full desc'})")
-        logging.info(f"   Formula: ({ats_score:.1f} / 100) × {ats_max}")
-        logging.info(f"   Calculation: {ats_score / 100:.3f} × {ats_max} = {ats_contribution:.1f}")
-        logging.info(f"   ✅ ATS Contribution: +{ats_contribution:.1f}/100")
-        logging.info("")
+        # ATS no longer contributes to job match score.
+        ats_contribution = 0.0
         
         # Total match score BEFORE seniority penalty
-        base_score = semantic_score + ats_contribution
+        base_score = semantic_score
         
         logging.info("➕ BASE SCORE CALCULATION:")
         logging.info(f"   Semantic Score: {semantic_score:.1f}")
-        logging.info(f"   ATS Contribution: +{ats_contribution:.1f}")
-        logging.info(f"   Formula: {semantic_score:.1f} + {ats_contribution:.1f}")
+        logging.info("   ATS Contribution: +0.0 (disabled)")
+        logging.info(f"   Formula: {semantic_score:.1f}")
         logging.info(f"   ✅ Base Score: {base_score:.1f}/100")
         logging.info("")
         
@@ -762,7 +752,7 @@ class JobMatcherML:
                     semantic_score = similarity_score * 180
                     if show_detailed and detailed_count <= max_detailed:
                         logging.info(f"   Range: <0.25 → Formula: {similarity_score:.4f} × 180 = {semantic_score:.1f}")
-                ats_max = 10
+                pass
             else:
                 # Full description formula
                 if similarity_score >= 0.7:
@@ -781,25 +771,22 @@ class JobMatcherML:
                     semantic_score = similarity_score * 116.7
                     if show_detailed and detailed_count <= max_detailed:
                         logging.info(f"   Range: <0.3 → Formula: {similarity_score:.4f} × 116.7 = {semantic_score:.1f}")
-                ats_max = 15
+                pass
             
             if show_detailed and detailed_count <= max_detailed:
                 logging.info(f"   ✅ Semantic Score: {semantic_score:.1f}/100")
             
-            ats_contribution = (ats_score / 100) * ats_max
+            ats_contribution = 0.0
             
             if show_detailed and detailed_count <= max_detailed:
                 logging.info(f"\n📋 ATS CONTRIBUTION:")
-                logging.info(f"   Resume ATS: {ats_score:.1f}/100")
-                logging.info(f"   Max Points: {ats_max} ({'snippet' if is_snippet else 'full'})")
-                logging.info(f"   Formula: ({ats_score:.1f} / 100) × {ats_max} = {ats_contribution:.1f}")
-                logging.info(f"   ✅ ATS Contribution: +{ats_contribution:.1f}/100")
+                logging.info("   ATS contribution is disabled for job matching")
             
-            base_score = semantic_score + ats_contribution
+            base_score = semantic_score
             
             if show_detailed and detailed_count <= max_detailed:
                 logging.info(f"\n➕ BASE SCORE:")
-                logging.info(f"   {semantic_score:.1f} (semantic) + {ats_contribution:.1f} (ATS) = {base_score:.1f}")
+                logging.info(f"   {semantic_score:.1f} (semantic) = {base_score:.1f}")
                 logging.info(f"   ✅ Base Score: {base_score:.1f}/100")
             
             # Apply seniority penalty
@@ -833,7 +820,7 @@ class JobMatcherML:
             # Log results for this job with detailed breakdown
             logging.info(f"    Similarity: {similarity_score*100:.1f}% | "
                         f"Semantic: {semantic_score:.1f} | "
-                        f"ATS: +{ats_contribution:.1f} | "
+                        f"ATS: +0.0 (disabled) | "
                         f"Base: {base_score:.1f} | "
                         f"Level: {job_seniority} | "
                         f"Penalty: -{seniority_penalty:.1f} | "
@@ -881,11 +868,11 @@ class JobMatcherML:
         # Keyword match score (0-60 points)
         keyword_score = keyword_overlap * 60
         
-        # ATS contribution (0-40 points)
-        ats_contribution = (ats_score / 100) * 40
+        # ATS no longer contributes in keyword fallback either.
+        ats_contribution = 0.0
         
         # Total score
-        total_score = min(100, max(0, keyword_score + ats_contribution))
+        total_score = min(100, max(0, keyword_score))
         
         match_level = self._get_match_level(total_score)
         
@@ -963,12 +950,6 @@ class JobMatcherML:
             reasons.append("Strong semantic alignment between your resume and job requirements")
         elif similarity >= 0.5:
             reasons.append("Moderate alignment with job requirements")
-        
-        # ATS score impact
-        if ats_score >= 80:
-            reasons.append("Your resume is well-optimized for ATS systems")
-        elif ats_score >= 60:
-            reasons.append("Good resume quality supports your application")
         
         # Extract actual matching skills dynamically
         resume_lower = resume_text.lower()

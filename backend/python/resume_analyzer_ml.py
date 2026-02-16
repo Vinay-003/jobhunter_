@@ -351,6 +351,7 @@ class ResumeAnalyzerML:
         
         # Generate insights and recommendations based on target level
         insights = self._generate_insights(extracted_info, ats_score, experience_level)
+        strengths = self._generate_strengths(extracted_info, ats_score, experience_level)
         recommendations = self._generate_recommendations(extracted_info, ats_score, experience_level)
         
         # Determine status
@@ -361,6 +362,8 @@ class ResumeAnalyzerML:
             "score": round(ats_score, 1),
             "status": status,
             "statusMessage": status_message,
+            "targetLevel": experience_level,
+            "strengths": strengths,
             "insights": insights,
             "recommendations": recommendations,
             "scoreBreakdown": score_breakdown,
@@ -386,10 +389,38 @@ class ResumeAnalyzerML:
                 "education": extracted_info.get("education", []),
                 "work_experience": extracted_info.get("work_experience", []),
                 "projects": extracted_info.get("projects", []),
-                "experienceLevel": extracted_info.get("experience_level", "entry"),
-                "yearsOfExperience": extracted_info.get("years_of_experience", 0)
+                "experienceLevel": experience_level,
+                "detectedExperienceLevel": extracted_info.get("experience_level", "entry"),
+                "targetLevel": experience_level,
+                "yearsOfExperience": extracted_info.get("years_of_experience", 0),
+                "detectionMeta": extracted_info.get("detection_meta", {})
             }
         }
+
+    def _detect_sections_from_headers(self, lines: List[str]) -> List[str]:
+        """Detect resume sections using line-header matching (more reliable than substring search)."""
+        section_keywords = {
+            "experience": ["experience", "work history", "employment", "professional experience", "workexperience"],
+            "education": ["education", "academic", "qualifications", "degree"],
+            "skills": ["skills", "technical skills", "competencies", "abilities", "expertise"],
+            "summary": ["summary", "objective", "profile", "about"],
+            "projects": ["projects", "portfolio", "work samples", "key projects", "personal projects"],
+            "certifications": ["certifications", "certificates", "licenses"]
+        }
+
+        found_sections = []
+        for raw_line in lines:
+            # Normalize typical section header formatting: "PROJECTS:", "Projects |", etc.
+            clean = re.sub(r'[^a-zA-Z\s]', ' ', raw_line).strip().lower()
+            if not clean or len(clean) > 40:
+                continue
+
+            for section, keywords in section_keywords.items():
+                if section in found_sections:
+                    continue
+                if any(clean == keyword or clean.startswith(keyword + " ") for keyword in keywords):
+                    found_sections.append(section)
+        return found_sections
     
     def _extract_resume_info(self, text: str) -> Dict[str, Any]:
         """Extract structured information from resume"""
@@ -428,8 +459,9 @@ class ResumeAnalyzerML:
                 location = match.group()
                 break
         
-        # Extract LinkedIn URL
+        # Extract LinkedIn URL or label mention
         linkedin = None
+        linkedin_confidence = "none"
         linkedin_patterns = [
             r'linkedin\.com/in/([a-zA-Z0-9-]+)',
             r'LinkedIn:\s*@?([a-zA-Z0-9-]+)',  # Support @username format
@@ -439,10 +471,15 @@ class ResumeAnalyzerML:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 linkedin = match.group(1)
+                linkedin_confidence = "url"
                 break
+        if not linkedin and re.search(r'\blinked\s*in\b|\blinkedin\b', text_lower):
+            linkedin = "mentioned"
+            linkedin_confidence = "label"
         
-        # Extract GitHub URL
+        # Extract GitHub URL or label mention
         github = None
+        github_confidence = "none"
         github_patterns = [
             r'github\.com/([a-zA-Z0-9-]+)',
             r'Github:\s*@?([a-zA-Z0-9-]+)',  # Support @username format
@@ -452,22 +489,26 @@ class ResumeAnalyzerML:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 github = match.group(1)
+                github_confidence = "url"
                 break
+        if not github and re.search(r'\bgithub\b', text_lower):
+            github = "mentioned"
+            github_confidence = "label"
         
-        # Sections
-        section_keywords = {
-            "experience": ["experience", "work history", "employment", "professional experience", "workexperience"],
-            "education": ["education", "academic", "qualifications", "degree"],
-            "skills": ["skills", "technical skills", "competencies", "abilities", "expertise"],
-            "summary": ["summary", "objective", "profile", "about"],
-            "projects": ["projects", "portfolio", "work samples"],
-            "certifications": ["certifications", "certificates", "licenses"]
-        }
-        
-        found_sections = []
-        for section, keywords in section_keywords.items():
-            if any(keyword in text_lower for keyword in keywords):
-                found_sections.append(section)
+        # Sections: prefer header-level detection, fallback to broad detection if very sparse.
+        found_sections = self._detect_sections_from_headers(lines)
+        if len(found_sections) < 2:
+            section_keywords = {
+                "experience": ["experience", "work history", "employment", "professional experience", "workexperience"],
+                "education": ["education", "academic", "qualifications", "degree"],
+                "skills": ["skills", "technical skills", "competencies", "abilities", "expertise"],
+                "summary": ["summary", "objective", "profile", "about"],
+                "projects": ["projects", "portfolio", "work samples"],
+                "certifications": ["certifications", "certificates", "licenses"]
+            }
+            for section, keywords in section_keywords.items():
+                if section not in found_sections and any(keyword in text_lower for keyword in keywords):
+                    found_sections.append(section)
         
         # Extract education details
         education_info = self._extract_education(text, text_lower)
@@ -506,11 +547,16 @@ class ResumeAnalyzerML:
         repetitive_verbs = {verb: count for verb, count in action_verb_frequency.items() if count > 2}
         
         # Count bullet points and collect full bullet text (handling multi-line bullets)
-        bullet_pattern = r'^\s*[•\-\*◦▪]\s+'
+        # Includes middle dot and numbered bullets like "1." / "a)".
+        bullet_pattern = r'^\s*(?:[•\-\*◦▪·●◉○►▸]\s+|\d+[\.\)]\s+|[a-zA-Z][\.\)]\s+)'
+        list_like_pattern = r'^\s*(?:[•\-\*◦▪·●◉○►▸]|\d+[\.\)]|[a-zA-Z][\.\)])'
         bullets_full_text = []
         current_bullet = None
+        has_list_like_lines = False
         
         for line in lines:
+            if re.match(list_like_pattern, line):
+                has_list_like_lines = True
             if re.match(bullet_pattern, line):
                 # Save previous bullet
                 if current_bullet:
@@ -639,7 +685,12 @@ class ResumeAnalyzerML:
             "total_bullets": total_bullets,
             "quantified_bullets": quantified_bullets,
             "experience_level": experience_level,
-            "years_of_experience": years_of_experience
+            "years_of_experience": years_of_experience,
+            "detection_meta": {
+                "linkedin_confidence": linkedin_confidence,
+                "github_confidence": github_confidence,
+                "has_list_like_lines": has_list_like_lines
+            }
         }
     
     def _extract_education(self, text: str, text_lower: str) -> List[Dict[str, Any]]:
@@ -1849,6 +1900,32 @@ class ResumeAnalyzerML:
         # ============ 9. PENALTIES (Max -35) ============
         
         penalties = 0.0
+
+        # Target level mismatch penalty:
+        # if user selects a level much higher than detected profile evidence, penalize strongly.
+        detected_level = info.get("experience_level", "entry")
+        years_of_experience = int(info.get("years_of_experience", 0) or 0)
+        level_rank = {"entry": 1, "mid": 2, "senior": 3}
+        target_rank = level_rank.get(experience_level, 1)
+        detected_rank = level_rank.get(detected_level, 1)
+        rank_gap = target_rank - detected_rank
+
+        level_mismatch_penalty = 0.0
+        if rank_gap > 0:
+            # Baseline penalty for claiming higher level than detected.
+            level_mismatch_penalty = -4.0 * rank_gap
+
+            # Additional evidence checks to make senior claims much stricter.
+            work_exp_count = len(info.get("work_experience", []))
+            if experience_level == "senior" and years_of_experience < 5:
+                level_mismatch_penalty -= 4.0
+            if experience_level == "mid" and years_of_experience < 2:
+                level_mismatch_penalty -= 2.0
+            if work_exp_count == 0:
+                level_mismatch_penalty -= 2.0
+
+            # Cap penalty to avoid total collapse.
+            level_mismatch_penalty = max(level_mismatch_penalty, -14.0)
         
         # File type penalty (already calculated)
         penalties += file_penalty
@@ -1864,6 +1941,16 @@ class ResumeAnalyzerML:
         penalties += date_penalty
         if date_penalty < 0:
             score_breakdown['dates_penalty'] = date_penalty
+
+        penalties += level_mismatch_penalty
+        if level_mismatch_penalty < 0:
+            score_breakdown['level_mismatch_penalty'] = round(level_mismatch_penalty, 1)
+            score_breakdown['level_mismatch_detail'] = {
+                "target_level": experience_level,
+                "detected_level": detected_level,
+                "years_of_experience": years_of_experience,
+                "rank_gap": rank_gap
+            }
         
         score_breakdown['total_penalties'] = round(penalties, 1)
         
@@ -1984,6 +2071,24 @@ class ResumeAnalyzerML:
             quality_bonus += 2
         
         score += quality_bonus
+
+        # Apply target-level mismatch penalty in fallback mode too.
+        detected_level = info.get("experience_level", "entry")
+        years_of_experience = int(info.get("years_of_experience", 0) or 0)
+        level_rank = {"entry": 1, "mid": 2, "senior": 3}
+        target_rank = level_rank.get(experience_level, 1)
+        detected_rank = level_rank.get(detected_level, 1)
+        rank_gap = target_rank - detected_rank
+
+        if rank_gap > 0:
+            penalty = 4.0 * rank_gap
+            if experience_level == "senior" and years_of_experience < 5:
+                penalty += 4.0
+            if experience_level == "mid" and years_of_experience < 2:
+                penalty += 2.0
+            if len(info.get("work_experience", [])) == 0:
+                penalty += 2.0
+            score -= min(14.0, penalty)
         
         return min(100, max(0, score))
     
@@ -2070,6 +2175,23 @@ class ResumeAnalyzerML:
             insights.append("Acceptable resume length but could be more detailed")
         
         return insights
+
+    def _generate_strengths(self, info: Dict, score: float, experience_level: str = "entry") -> List[str]:
+        """Generate explicit strengths list for frontend display."""
+        insights = self._generate_insights(info, score, experience_level)
+        strengths = []
+
+        for item in insights:
+            lower = item.lower()
+            if any(token in lower for token in [
+                "good", "strong", "well", "excellent", "complete", "optimal",
+                "professional profile", "educational background", "work experience",
+                "project work", "comprehensive", "diverse"
+            ]):
+                strengths.append(item)
+
+        # Preserve order and uniqueness
+        return list(dict.fromkeys(strengths))
     
     def _generate_recommendations(self, info: Dict, score: float, experience_level: str = "entry") -> List[str]:
         """Generate level-appropriate recommendations for improvement"""
@@ -2079,12 +2201,17 @@ class ResumeAnalyzerML:
         project_count = len(info.get("projects", []))
         education_count = len(info.get("education", []))
         total_bullets = info.get("total_bullets", 0)
+        detection_meta = info.get("detection_meta", {})
+        linkedin_confidence = detection_meta.get("linkedin_confidence", "none")
+        github_confidence = detection_meta.get("github_confidence", "none")
+        has_list_like_lines = detection_meta.get("has_list_like_lines", False)
         
         # Professional identity
         if not info.get("name"):
             recommendations.append("📛 Add your full name at the top of your resume")
         
-        if not info.get("linkedin") and not info.get("github"):
+        # Evidence-based gating: only suggest links when truly absent.
+        if linkedin_confidence == "none" and github_confidence == "none":
             if experience_level == "entry":
                 recommendations.append("🔗 Add LinkedIn profile (essential) or GitHub (if technical)")
             else:
@@ -2159,19 +2286,19 @@ class ResumeAnalyzerML:
         
         # Bullet count - Level-specific expectations
         if experience_level == "entry":
-            if total_bullets < 10:
+            if total_bullets < 10 and not (total_bullets == 0 and has_list_like_lines):
                 recommendations.append(f"📝 Add more bullet points (currently {total_bullets}, aim for 12-20 for entry-level)")
-            elif total_bullets < 12:
-                recommendations.append(f"� Add a few more details (currently {total_bullets}, aim for 15-20)")
+            elif total_bullets < 12 and not (total_bullets == 0 and has_list_like_lines):
+                recommendations.append(f"📝 Add a few more details (currently {total_bullets}, aim for 15-20)")
         elif experience_level == "mid":
-            if total_bullets < 20:
+            if total_bullets < 20 and not (total_bullets == 0 and has_list_like_lines):
                 recommendations.append(f"📝 Add more accomplishment bullets (currently {total_bullets}, aim for 20-30 for mid-level)")
-            elif total_bullets < 25:
+            elif total_bullets < 25 and not (total_bullets == 0 and has_list_like_lines):
                 recommendations.append(f"📝 Expand your accomplishments (currently {total_bullets}, aim for 25-30)")
         else:  # senior
-            if total_bullets < 30:
+            if total_bullets < 30 and not (total_bullets == 0 and has_list_like_lines):
                 recommendations.append(f"📝 Add more detailed accomplishments (currently {total_bullets}, aim for 30-35+ for senior-level)")
-            elif total_bullets < 35:
+            elif total_bullets < 35 and not (total_bullets == 0 and has_list_like_lines):
                 recommendations.append(f"📝 Expand on your leadership impact (currently {total_bullets}, aim for 35+)")
         
         # Sections
@@ -2187,7 +2314,8 @@ class ResumeAnalyzerML:
                 recommendations.append(f"🔄 Replace repetitive '{verb.title()}' verb (used {count} times) - use it max 2 times")
         
         # Action verbs
-        if len(info["action_verbs"]) < 5:
+        # Avoid false negatives for very short resumes with quality content.
+        if len(info["action_verbs"]) < 5 and info.get("word_count", 0) >= 180:
             recommendations.append("💪 Use more action verbs (achieved, developed, implemented, led, etc.) to strengthen impact")
         elif len(info["action_verbs"]) < 10:
             recommendations.append("💪 Add more action verbs to better showcase your achievements")

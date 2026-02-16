@@ -7,6 +7,13 @@ import axios from 'axios';
 
 const API_URL = 'http://localhost:3001/api';
 
+const formatPercent = (value: number | undefined | null): string => {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) {
+    return '0.00';
+  }
+  return Number(value).toFixed(2);
+};
+
 interface Job {
   title: string;
   company: string;
@@ -24,8 +31,14 @@ interface ResumeAnalysis {
   score: number;
   status: string;
   statusMessage: string;
+  targetLevel?: 'entry' | 'mid' | 'senior';
+  strengths?: string[];
   insights: string[];
   recommendations: string[];
+  extractedInfo?: {
+    targetLevel?: 'entry' | 'mid' | 'senior';
+    experienceLevel?: 'entry' | 'mid' | 'senior';
+  };
   skills: {
     technical: { [key: string]: string[] };
     soft: string[];
@@ -266,6 +279,13 @@ const JobRecommendations = ({ analysis }: { analysis: ResumeAnalysis | null }) =
       if (filters.keywords) params.append('keywords', filters.keywords);
       params.append('days_posted', filters.days_posted.toString());
       params.append('min_match_score', filters.min_match_score.toString());
+      const levelForRecommendations =
+        analysis.targetLevel ||
+        analysis.extractedInfo?.targetLevel ||
+        analysis.extractedInfo?.experienceLevel;
+      if (levelForRecommendations) {
+        params.append('targetLevel', levelForRecommendations);
+      }
 
       const response = await axios.get<{
         success: boolean;
@@ -407,7 +427,7 @@ const JobRecommendations = ({ analysis }: { analysis: ResumeAnalysis | null }) =
                 </div>
                 {job.matchScore !== undefined && (
                   <div className="text-right">
-                    <div className="text-2xl font-bold text-red-500">{job.matchScore}%</div>
+                    <div className="text-2xl font-bold text-red-500">{formatPercent(job.matchScore)}%</div>
                     <div className="text-sm text-gray-400">Match</div>
                     {(job as any).matchLevel && (
                       <div className={`mt-2 px-3 py-1 rounded-full text-xs font-medium ${
@@ -466,7 +486,7 @@ const JobRecommendations = ({ analysis }: { analysis: ResumeAnalysis | null }) =
                 <div className="mb-4 flex gap-4 text-xs">
                   <div className="flex-1 bg-black/30 rounded p-2 border border-red-900/20">
                     <div className="text-gray-400 mb-1">AI Similarity</div>
-                    <div className="text-red-400 font-bold">{(job as any).semanticSimilarity}%</div>
+                    <div className="text-red-400 font-bold">{formatPercent((job as any).semanticSimilarity)}%</div>
                   </div>
                   {(job as any).seniorityPenalty > 0 && (
                     <div className="flex-1 bg-black/30 rounded p-2 border border-yellow-900/20">
@@ -518,6 +538,28 @@ const JobRecommendations = ({ analysis }: { analysis: ResumeAnalysis | null }) =
 function Home() {
   const navigate = useNavigate();
   const [analysis, setAnalysis] = useState<ResumeAnalysis | null>(null);
+  const [showNavbar, setShowNavbar] = useState(true);
+
+  useEffect(() => {
+    let lastScrollY = window.scrollY;
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+
+      if (currentScrollY <= 80) {
+        setShowNavbar(true);
+      } else if (currentScrollY > lastScrollY) {
+        setShowNavbar(false);
+      } else {
+        setShowNavbar(true);
+      }
+
+      lastScrollY = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -528,7 +570,7 @@ function Home() {
   return (
     <ResumeProvider>
       <div className="min-h-screen bg-dark text-white">
-        <nav className="fixed w-full z-50 bg-dark shadow-lg border-b border-red-900/30">
+        <nav className={`fixed w-full z-50 bg-dark shadow-lg border-b border-red-900/30 transition-transform duration-300 ${showNavbar ? 'translate-y-0' : '-translate-y-full'}`}>
           <div className="container mx-auto px-4 py-4 flex justify-between items-center">
             <span className="text-xl font-bold">
               Resume<span className="text-red-500">Score</span>
@@ -561,7 +603,7 @@ function Home() {
             <>
               {/* ATS Score Section */}
               <section className="py-8 bg-red-950/20 rounded-lg mb-8 border border-red-900/30">
-                <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="max-w-4xl mx-auto">
                   <div className="text-center p-8">
                     <div className="w-32 h-32 mx-auto mb-4 relative">
                       <svg className="w-full h-full transform -rotate-90">
@@ -586,24 +628,11 @@ function Home() {
                         />
                       </svg>
                       <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="text-3xl font-bold text-red-500">{analysis.score}</span>
+                        <span className="text-3xl font-bold text-red-500">{formatPercent(analysis.score)}</span>
                       </div>
                     </div>
                     <h2 className="text-2xl font-bold mb-2">ATS Score</h2>
                     <p className="text-gray-400">{analysis.statusMessage}</p>
-                  </div>
-                  <div className="p-8">
-                    <h3 className="text-xl font-bold mb-4">Key Insights</h3>
-                    <ul className="space-y-3">
-                      {analysis.insights.slice(0, 5).map((insight, i) => (
-                        <li key={i} className="flex items-start">
-                          <span className="w-6 h-6 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                            ✓
-                          </span>
-                          <span className="text-gray-300">{insight}</span>
-                        </li>
-                      ))}
-                    </ul>
                   </div>
                 </div>
               </section>
@@ -620,18 +649,14 @@ function Home() {
                       <h3 className="text-xl font-bold text-green-400">Strengths</h3>
                     </div>
                     <ul className="space-y-3">
-                      {analysis.insights
-                        .filter(insight => 
-                          insight.toLowerCase().includes('good') || 
-                          insight.toLowerCase().includes('strong') ||
-                          insight.toLowerCase().includes('well') ||
-                          insight.toLowerCase().includes('excellent') ||
-                          !insight.toLowerCase().includes('missing') &&
-                          !insight.toLowerCase().includes('weak') &&
-                          !insight.toLowerCase().includes('poor') &&
-                          !insight.toLowerCase().includes('add') &&
-                          !insight.toLowerCase().includes('improve')
-                        )
+                      {(analysis.strengths && analysis.strengths.length > 0
+                        ? analysis.strengths
+                        : analysis.insights.filter(insight =>
+                            insight.toLowerCase().includes('good') ||
+                            insight.toLowerCase().includes('strong') ||
+                            insight.toLowerCase().includes('well') ||
+                            insight.toLowerCase().includes('excellent')
+                          ))
                         .slice(0, 6)
                         .map((quality, i) => (
                           <li key={i} className="flex items-start text-sm">
@@ -639,12 +664,13 @@ function Home() {
                             <span className="text-gray-300">{quality}</span>
                           </li>
                         ))}
-                      {analysis.insights.filter(insight => 
-                        insight.toLowerCase().includes('good') || 
-                        insight.toLowerCase().includes('strong') ||
-                        insight.toLowerCase().includes('well') ||
-                        insight.toLowerCase().includes('excellent')
-                      ).length === 0 && (
+                      {(!analysis.strengths || analysis.strengths.length === 0) &&
+                        analysis.insights.filter(insight =>
+                          insight.toLowerCase().includes('good') ||
+                          insight.toLowerCase().includes('strong') ||
+                          insight.toLowerCase().includes('well') ||
+                          insight.toLowerCase().includes('excellent')
+                        ).length === 0 && (
                         <li className="text-sm text-gray-400 italic">Analyzing resume strengths...</li>
                       )}
                     </ul>

@@ -109,6 +109,11 @@ router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
     }
 
     const { location, keywords, days_posted, min_match_score } = req.query;
+    const requestedTargetLevelRaw = req.query.targetLevel as string | undefined;
+    const validLevels = ['entry', 'mid', 'senior'];
+    const requestedTargetLevel = requestedTargetLevelRaw && validLevels.includes(requestedTargetLevelRaw)
+      ? requestedTargetLevelRaw
+      : undefined;
 
     // Get user's latest resume
     const resume = await resumeModel.getLatestResume(userId);
@@ -140,6 +145,16 @@ router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
       || !resume.analysis_data.extractedInfo?.projects
       || !resume.analysis_data.extractedInfo?.education;
     
+    const storedTargetLevel =
+      resume.analysis_data?.targetLevel ||
+      resume.analysis_data?.extractedInfo?.targetLevel ||
+      resume.analysis_data?.extractedInfo?.experienceLevel ||
+      'entry';
+
+    const effectiveTargetLevel = requestedTargetLevel || storedTargetLevel;
+    const targetLevelChanged = !!requestedTargetLevel && requestedTargetLevel !== storedTargetLevel;
+    const needsReanalysis = targetLevelChanged || hasLimitedSkills || missingNewFields;
+
     console.log('🔍 AUTO-REANALYSIS CHECK:', {
       hasLimitedSkills,
       skillsCount: resume.analysis_data.extractedInfo?.skills?.length || 0,
@@ -147,37 +162,58 @@ router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
       hasProjects: !!resume.analysis_data.extractedInfo?.projects,
       hasEducation: !!resume.analysis_data.extractedInfo?.education,
       missingNewFields,
-      willReanalyze: true  // FORCED TO TRUE - Always reanalyze for now
+      storedTargetLevel,
+      requestedTargetLevel: requestedTargetLevel || null,
+      effectiveTargetLevel,
+      targetLevelChanged,
+      willReanalyze: needsReanalysis
     });
     
     console.log('📊 FULL extractedInfo.skills ARRAY:', JSON.stringify(resume.analysis_data.extractedInfo?.skills || [], null, 2));
     console.log('📚 EDUCATION:', JSON.stringify(resume.analysis_data.extractedInfo?.education || 'none', null, 2));
     console.log('🚀 PROJECTS:', JSON.stringify(resume.analysis_data.extractedInfo?.projects || 'none', null, 2));
     
-    const needsReanalysis = true;  // FORCED TO TRUE - Always reanalyze for now
-
     if (needsReanalysis) {
       console.log('⚠️  Detected outdated analysis. Re-analyzing resume with enhanced parser...');
       console.log(`   - Limited skills: ${hasLimitedSkills} (${resume.analysis_data.extractedInfo?.skills?.length || 0} skills found)`);
       console.log(`   - Missing new fields: ${missingNewFields}`);
-      
-      // Get target level from stored analysis data or default to entry
-      const targetLevel = resume.analysis_data?.targetLevel || 'entry';
+      console.log(`   - Target level changed: ${targetLevelChanged} (${storedTargetLevel} -> ${effectiveTargetLevel})`);
       
       const analysisService = (await import('../services/analysisService.js')).default;
-      const freshAnalysis = await analysisService.analyzeResume(resume.file_path, targetLevel);
+      const freshAnalysis = await analysisService.analyzeResume(resume.file_path, effectiveTargetLevel);
       
       if (freshAnalysis.success) {
+        const enrichedAnalysis = {
+          ...freshAnalysis,
+          targetLevel: effectiveTargetLevel,
+          extractedInfo: {
+            ...(freshAnalysis as any).extractedInfo,
+            experienceLevel: effectiveTargetLevel,
+            targetLevel: effectiveTargetLevel
+          }
+        };
+
         // Update the database with fresh analysis
-        await resumeModel.updateResumeStatus(resume.id, 'processed', freshAnalysis);
+        await resumeModel.updateResumeStatus(resume.id, 'processed', enrichedAnalysis);
         // Use fresh analysis for job matching
-        resume.analysis_data = freshAnalysis;
+        resume.analysis_data = enrichedAnalysis;
         console.log('✅ Resume re-analyzed successfully!');
-        console.log(`   - Skills extracted: ${(freshAnalysis as any).extractedInfo?.skills?.length || 0}`);
-        console.log(`   - Projects found: ${(freshAnalysis as any).extractedInfo?.projects?.length || 0}`);
-        console.log(`   - Education entries: ${(freshAnalysis as any).extractedInfo?.education?.length || 0}`);
+        console.log(`   - Skills extracted: ${(enrichedAnalysis as any).extractedInfo?.skills?.length || 0}`);
+        console.log(`   - Projects found: ${(enrichedAnalysis as any).extractedInfo?.projects?.length || 0}`);
+        console.log(`   - Education entries: ${(enrichedAnalysis as any).extractedInfo?.education?.length || 0}`);
       }
     }
+
+    // Always enforce effective target level for downstream matching
+    resume.analysis_data = {
+      ...resume.analysis_data,
+      targetLevel: effectiveTargetLevel,
+      extractedInfo: {
+        ...resume.analysis_data.extractedInfo,
+        experienceLevel: effectiveTargetLevel,
+        targetLevel: effectiveTargetLevel
+      }
+    };
 
     // Prepare filters
     const filters: any = {};
@@ -192,6 +228,8 @@ router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
       hasExtractedInfo: !!resume.analysis_data.extractedInfo,
       extractedInfoSkills: resume.analysis_data.extractedInfo?.skills || 'none',  // Show ALL skills, not just first 3
       extractedInfoSkillsCount: resume.analysis_data.extractedInfo?.skills?.length || 0,
+      targetLevel: resume.analysis_data.targetLevel || 'entry',
+      experienceLevelUsedForMatching: resume.analysis_data.extractedInfo?.experienceLevel || 'entry',
       topLevelKeys: Object.keys(resume.analysis_data)
     });
 
