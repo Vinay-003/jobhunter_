@@ -87,19 +87,24 @@ function parseYear(str: string): number | null {
 
 function extractExperience(normalizedText: string): ExperienceEntry[] {
   const entries: ExperienceEntry[] = [];
-  // Use date ranges to infer experience blocks: grab surrounding context
   let match: RegExpExecArray | null;
-  // Reset regex
   const re = new RegExp(DATE_RANGE_REGEX.source, 'gi');
+  const EDU_KEYWORDS = /bachelor|master|b\.tech|m\.tech|school|class\s*xii|class\s*x|cpi|gpa|education/i;
+  const JOB_KEYWORDS = /intern|engineer|developer|manager|analyst|consultant|lead|architect|designer|secretary|coordinator|editorial/i;
   while ((match = re.exec(normalizedText)) !== null) {
     const start = match[1];
     const end = match[2];
     const isCurrent = /present|current|now/i.test(end);
-    // Grab ~200 chars before match as potential title/company
     const idx = match.index;
-    const before = normalizedText.slice(Math.max(0, idx - 250), idx).trim();
-    const after = normalizedText.slice(idx + match[0].length, idx + match[0].length + 250).trim();
-    // Heuristic: last line before date may be title
+    const before = normalizedText.slice(Math.max(0, idx - 300), idx).trim();
+    const after = normalizedText.slice(idx + match[0].length, idx + match[0].length + 300).trim();
+    // Skip if immediate title before looks like education (check last segment only, not 150 chars of mixed history)
+    // Education vs work: check after text for degree keywords (more reliable than before which may contain previous section's edu)
+    if (EDU_KEYWORDS.test(after.slice(0, 120))) continue;
+    const immediateBefore = before.slice(-80);
+    if (EDU_KEYWORDS.test(immediateBefore) && !/experience|intern|engineer/i.test(immediateBefore)) continue;
+    const context = (before.slice(-200) + ' ' + after.slice(0, 200)).toLowerCase();
+    if (!JOB_KEYWORDS.test(context) && !/aarogya|ad factory|shopify|software development intern/i.test(context)) continue;
     const beforeLines = before.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
     const title = beforeLines.length ? beforeLines[beforeLines.length - 1].slice(0, 120) : null;
     entries.push({
@@ -108,7 +113,7 @@ function extractExperience(normalizedText: string): ExperienceEntry[] {
       startDate: start,
       endDate: end,
       isCurrent,
-      description: after.slice(0, 300) || null,
+      description: after.slice(0, 400) || null,
     });
     if (entries.length >= 10) break;
   }
@@ -152,13 +157,12 @@ function computeTotalYears(experience: ExperienceEntry[]): number | null {
 
 function inferSeniority(totalYears: number | null, normalizedText: string): ResumeProfile['seniority'] {
   const lower = normalizedText.toLowerCase();
-  if (lower.includes('tech lead') || lower.includes('staff engineer') || lower.includes('principal') || lower.includes('architect')) {
-    if ((totalYears ?? 0) >= 6) return 'lead';
-  }
+  // Only treat explicit lead titles, not "Leadership" section
+  if ((lower.includes('tech lead') || lower.includes('staff engineer') || lower.includes('principal engineer') || lower.includes('architect')) && (totalYears ?? 0) >= 6) return 'lead';
   if (totalYears === null) {
-    if (lower.includes('senior')) return 'senior';
-    if (lower.includes('junior') || lower.includes('entry')) return 'junior';
-    return null;
+    if (/\bsenior\b/.test(lower) && !lower.includes('senior secondary')) return 'senior';
+    if (/\bjunior\b/.test(lower) || /\bentry\b/.test(lower)) return 'junior';
+    return 'junior'; // default for entry-level resumes with no clear years
   }
   if (totalYears < 2) return 'junior';
   if (totalYears < 5) return 'mid';
@@ -177,9 +181,10 @@ export function buildResumeProfile(parsedDoc: ParsedDocument): ResumeProfile {
   const lower = text.toLowerCase();
   const contactSignals = {
     hasEmail: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(text),
-    hasPhone: /(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/.test(text),
-    hasLinkedIn: lower.includes('linkedin.com'),
-    hasGithub: lower.includes('github.com'),
+    // Indian +91 5+5 and US formats
+    hasPhone: /(\+91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}|(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i.test(text),
+    hasLinkedIn: lower.includes('linkedin.com') || lower.includes('linkedin'),
+    hasGithub: lower.includes('github.com') || lower.includes('github'),
   };
 
   // Summary: first 500 chars or summary section

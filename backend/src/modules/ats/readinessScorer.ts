@@ -203,20 +203,20 @@ export function scoreReadiness(
   allRules.push(...concisionRules);
 
   // ── 7. TargetLevel 5pts ──
-  // R7.1 seniority alignment with targetLevel (5)
   const targetLevelRules: RuleResult[] = [];
   {
     if (!targetLevel) {
       targetLevelRules.push(mkRule('target_level_alignment', 'targetLevel', 3, 5, 'No target level specified — partial credit', `targetLevel=null`));
     } else {
-      const tl = String(targetLevel).toLowerCase();
+      let tl = String(targetLevel).toLowerCase();
+      // Normalize entry -> junior for scoring
+      if (tl === 'entry') tl = 'junior';
       const seniority = profile.seniority;
       if (!seniority) {
         targetLevelRules.push(mkRule('target_level_alignment', 'targetLevel', 2, 5, 'Seniority not inferred — partial credit', `targetLevel=${tl} seniority=null`));
       } else if (seniority === tl) {
         targetLevelRules.push(mkRule('target_level_alignment', 'targetLevel', 5, 5, `Seniority matches target (${seniority})`, `targetLevel=${tl} seniority=${seniority}`));
       } else {
-        // adjacent levels get partial
         const order = ['junior', 'mid', 'senior', 'lead'];
         const ti = order.indexOf(tl);
         const si = order.indexOf(seniority);
@@ -241,8 +241,11 @@ export function scoreReadiness(
 
   const score = breakdown.reduce((s, b) => s + b.pointsAwarded, 0);
 
-  const strengths = allRules.filter((r) => r.status === 'pass').map((r) => r.message).slice(0, 5);
-  const warnings = allRules.filter((r) => r.status === 'fail' || r.status === 'warn').map((r) => r.message).slice(0, 10);
+  // Generate ResumeWorded-like detailed feedback
+  const detailed = generateDetailedFeedback(parsedDoc, profile, allRules);
+
+  const strengths = [...allRules.filter((r) => r.status === 'pass').map((r) => r.message), ...detailed.strengths].slice(0, 8);
+  const warnings = [...allRules.filter((r) => r.status === 'fail' || r.status === 'warn').map((r) => r.message), ...detailed.warnings].slice(0, 10);
 
   return {
     score,
@@ -251,6 +254,80 @@ export function scoreReadiness(
     strengths,
     warnings,
     version: VERSION,
+    // Extended details for UI
+    details: detailed,
+  } as ReadinessResult & { details: ReturnType<typeof generateDetailedFeedback> };
+}
+
+function generateDetailedFeedback(parsedDoc: ParsedDocument, profile: ResumeProfile, rules: RuleResult[]) {
+  const text = parsedDoc.normalizedText;
+  const lower = text.toLowerCase();
+  const strengths: string[] = [];
+  const warnings: string[] = [];
+  const improvements: string[] = [];
+  const sections: string[] = Object.keys(parsedDoc.sections);
+
+  // Impact: quantified achievements
+  const numbers = (text.match(/\b\d+(\.\d+)?\s*(%|\+|x|formats?|languages?|endpoints?|teams?|members?|sources?)\b/gi) || []).length;
+  const hasQuantified = numbers >= 3 || /\b\d+\s*(formats?|languages?|endpoints?|sources?|teams?|members?)\b/i.test(text);
+  if (hasQuantified) strengths.push(`Strong quantified impact: ${numbers} metrics found (e.g., 5 formats, 4 data sources, 19 endpoints)`);
+  else warnings.push('Add more quantified achievements (e.g., "Reduced latency by 30%", "Served 10k users")');
+
+  // Action verbs
+  const actionVerbs = ['built', 'deployed', 'maintain', 'integrated', 'designed', 'developed', 'engineered', 'secured', 'implemented', 'coordinated', 'mentored', 'won'];
+  const foundVerbs = actionVerbs.filter(v => lower.includes(v));
+  if (foundVerbs.length >= 5) strengths.push(`Strong action verbs: ${foundVerbs.slice(0,5).join(', ')}`);
+  else warnings.push('Use more strong action verbs (Built, Deployed, Engineered, Secured)');
+
+  // Projects: for entry-level, projects are crucial
+  const hasProjects = !!parsedDoc.sections['projects'] || lower.includes('github');
+  if (hasProjects) {
+    const projCount = (text.match(/github/gi) || []).length;
+    if (projCount >= 2) strengths.push(`Good project showcase: ${projCount} GitHub links with tech stacks`);
+    else warnings.push('Add more project details with tech stacks and GitHub links');
+  } else {
+    warnings.push('Add Projects section — crucial for entry-level');
+  }
+
+  // Skills depth
+  if (profile.skills.length >= 15) strengths.push(`Comprehensive skill coverage: ${profile.skills.length} skills across languages, frameworks, cloud`);
+  else if (profile.skills.length >= 8) strengths.push(`Solid skills: ${profile.skills.length} detected`);
+  else warnings.push('Expand Technical Skills — add tools, databases, and CS fundamentals');
+
+  // Education
+  if (parsedDoc.sections['education']) {
+    if (lower.includes('cpi') || lower.includes('gpa') || lower.includes('%')) strengths.push('Education well-detailed with CPI/percentage');
+    else warnings.push('Add CPI/percentage and dates to Education');
+  }
+
+  // Brevity & style
+  if (parsedDoc.charCount >= 1500 && parsedDoc.charCount <= 3500) strengths.push(`Concise 1-page format (${Math.round(parsedDoc.charCount/500)} sections, ~${parsedDoc.layoutSignals.pageCount} page)`);
+  if (lower.includes('responsible for') || lower.includes('worked on')) warnings.push('Replace weak phrases ("responsible for", "worked on") with action verbs');
+
+  // Contact
+  if (profile.contactSignals.hasEmail && profile.contactSignals.hasPhone && profile.contactSignals.hasLinkedIn) strengths.push('Complete contact block: email, phone, LinkedIn, GitHub');
+  
+  // Leadership & achievements
+  if (lower.includes('hackathon') || lower.includes('won') || lower.includes('2nd place')) strengths.push('Notable achievement: hackathon win adds credibility');
+  if (parsedDoc.sections['leadership'] || lower.includes('joint secretary')) strengths.push('Leadership experience demonstrates soft skills');
+
+  // Generate improvements (ResumeWorded style)
+  if (warnings.length === 0) improvements.push('Resume is ATS-ready — keep 1-page, single-column, quantified bullets. For FAANG, add system design keywords and STAR impact.');
+  else {
+    if (!hasQuantified) improvements.push('Quantify 2-3 bullets: add metrics (%/time/scale) to experience and projects.');
+    if (foundVerbs.length < 5) improvements.push('Start each bullet with a strong verb and keep to 1 line.');
+    if (!hasProjects) improvements.push('Entry-level: projects weigh heavily — add 1 more with live link and 3-bullet impact.');
+  }
+
+  return {
+    strengths,
+    warnings,
+    improvements,
+    sectionsFound: sections,
+    quantifiedMetrics: numbers,
+    actionVerbs: foundVerbs,
+    charCount: parsedDoc.charCount,
+    pageCount: parsedDoc.layoutSignals.pageCount,
   };
 }
 

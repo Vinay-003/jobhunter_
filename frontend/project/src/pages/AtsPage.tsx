@@ -200,11 +200,18 @@ export default function AtsPage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs tracking-widest text-gray-500">READINESS</p>
-                  <p className="text-3xl font-bold text-red-400">
+                  <p className={`text-3xl font-bold ${typeof readiness.score === 'number' && readiness.score >= 80 ? 'text-green-400' : typeof readiness.score === 'number' && readiness.score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
                     {typeof readiness.score === 'number' ? readiness.score : '—'}
                     <span className="text-sm font-normal text-gray-500"> /100</span>
                   </p>
-                  <p className="text-sm text-gray-300 mt-1">{readiness.statusMessage ?? readiness.level ?? readiness.status ?? ''}</p>
+                  <p className="text-sm text-gray-300 mt-1">
+                    {typeof readiness.score === 'number' && readiness.score >= 90 ? 'Excellent — ATS-ready' : typeof readiness.score === 'number' && readiness.score >= 80 ? 'Strong — minor tweaks' : typeof readiness.score === 'number' && readiness.score >= 60 ? 'Good — some gaps' : readiness.statusMessage ?? readiness.level ?? readiness.status ?? ''}
+                  </p>
+                  {(readiness as any).details && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {((readiness as any).details.sectionsFound ?? []).join(' • ')} • {(readiness as any).details.quantifiedMetrics ?? 0} quantified metrics
+                    </p>
+                  )}
                 </div>
                 {result?.resume?.id && (
                   <Link to={`/app/analysis/${result.resume.id}`} className="text-xs bg-white text-black px-3 py-1.5 rounded-lg">
@@ -213,16 +220,20 @@ export default function AtsPage() {
                 )}
               </div>
 
-              {readiness.categories && readiness.categories.length > 0 && (
+              {/* V2 breakdown is `breakdown` with pointsAwarded/pointsPossible, fallback to categories */}
+              {((readiness as any).breakdown ?? readiness.categories) && (
                 <div>
                   <p className="text-xs font-semibold text-gray-300 mb-2">Category breakdown</p>
                   <div className="space-y-2">
-                    {readiness.categories.map((c, i) => (
+                    {(((readiness as any).breakdown ?? readiness.categories) as any[]).map((c: any, i: number) => (
                       <div key={i} className="bg-black/30 rounded-lg p-3 border border-white/5">
                         <div className="flex justify-between text-sm">
-                          <span className="text-gray-300">{c.name ?? `Category ${i + 1}`}</span>
-                          <span className="text-red-400 font-medium">{c.score ?? '—'}/{c.max ?? 100}</span>
+                          <span className="text-gray-300 capitalize">{c.category ?? c.name ?? `Category ${i + 1}`}</span>
+                          <span className={`font-medium ${c.pointsAwarded === c.pointsPossible ? 'text-green-400' : c.pointsAwarded === 0 ? 'text-red-400' : 'text-yellow-400'}`}>
+                            {c.pointsAwarded ?? c.score ?? '—'}/{c.pointsPossible ?? c.max ?? 100}
+                          </span>
                         </div>
+                        {c.rules && <p className="text-xs text-gray-500 mt-1">{c.rules.slice(0,2).map((r: any) => r.message).join(' • ')}</p>}
                         {c.reasons && c.reasons.length > 0 && <p className="text-xs text-gray-500 mt-1">{c.reasons.join(' • ')}</p>}
                       </div>
                     ))}
@@ -254,28 +265,42 @@ export default function AtsPage() {
                 <div className="bg-green-950/10 border border-green-900/20 rounded-lg p-3">
                   <p className="text-xs font-semibold text-green-400 mb-2">Strengths</p>
                   <ul className="text-xs text-gray-300 space-y-1">
-                    {(readiness.strengths ?? readiness.insights ?? []).slice(0, 6).map((s, i) => (
+                    {(readiness.strengths ?? (readiness as any).details?.strengths ?? readiness.insights ?? []).slice(0, 6).map((s: string, i: number) => (
                       <li key={i} className="flex gap-1.5">
                         <span className="text-green-400">•</span>
                         <span>{s}</span>
                       </li>
                     ))}
-                    {(readiness.strengths ?? readiness.insights ?? []).length === 0 && <li className="text-gray-500 italic">No strengths listed</li>}
+                    {(readiness.strengths ?? (readiness as any).details?.strengths ?? readiness.insights ?? []).length === 0 && <li className="text-gray-500 italic">No strengths listed</li>}
                   </ul>
                 </div>
                 <div className="bg-yellow-950/10 border border-yellow-900/20 rounded-lg p-3">
                   <p className="text-xs font-semibold text-yellow-400 mb-2">Warnings</p>
                   <ul className="text-xs text-gray-300 space-y-1">
-                    {(readiness.warnings ?? readiness.recommendations ?? []).slice(0, 6).map((w, i) => (
+                    {(readiness.warnings ?? (readiness as any).details?.warnings ?? readiness.recommendations ?? []).slice(0, 6).map((w: string, i: number) => (
                       <li key={i} className="flex gap-1.5">
                         <span className="text-yellow-400">•</span>
                         <span>{w}</span>
                       </li>
                     ))}
-                    {(readiness.warnings ?? readiness.recommendations ?? []).length === 0 && <li className="text-gray-500 italic">No warnings</li>}
+                    {(readiness.warnings ?? (readiness as any).details?.warnings ?? readiness.recommendations ?? []).length === 0 && <li className="text-gray-500 italic">No warnings — excellent</li>}
                   </ul>
                 </div>
               </div>
+
+              {(readiness as any).details?.improvements && (readiness as any).details.improvements.length > 0 && (
+                <div className="bg-sky-950/10 border border-sky-900/20 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-sky-400 mb-2">Next steps (ResumeWorded-style)</p>
+                  <ul className="text-xs text-gray-300 space-y-1">
+                    {(readiness as any).details.improvements.map((imp: string, i: number) => (
+                      <li key={i} className="flex gap-1.5">
+                        <span className="text-sky-400">→</span>
+                        <span>{imp}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {(result as any)?.jdMatch && (
                 <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 space-y-3">

@@ -3,55 +3,43 @@
  */
 
 export const CANONICAL_SKILL_ALIASES: Record<string, string> = {
-  // JS ecosystem
-  js: 'JavaScript',
-  javascript: 'JavaScript',
-  'node.js': 'Node.js',
-  nodejs: 'Node.js',
-  'node js': 'Node.js',
-  'react.js': 'React',
-  reactjs: 'React',
-  'vue.js': 'Vue.js',
-  vuejs: 'Vue.js',
-  // TS
-  ts: 'TypeScript',
-  typescript: 'TypeScript',
-  // Python
-  py: 'Python',
-  python3: 'Python',
-  // others
+  // Languages
+  python: 'Python', py: 'Python', python3: 'Python',
+  java: 'Java',
+  'c++': 'C++', cpp: 'C++', 'c/c++': 'C/C++', c: 'C',
   'c#': 'C#',
-  'c++': 'C++',
-  cpp: 'C++',
-  golang: 'Go',
-  k8s: 'Kubernetes',
-  kubernetes: 'Kubernetes',
-  docker: 'Docker',
-  postgres: 'PostgreSQL',
-  postgresql: 'PostgreSQL',
-  psql: 'PostgreSQL',
-  mysql: 'MySQL',
-  mongo: 'MongoDB',
-  mongodb: 'MongoDB',
-  redis: 'Redis',
-  aws: 'AWS',
-  gcp: 'GCP',
-  azure: 'Azure',
-  'express.js': 'Express',
-  expressjs: 'Express',
-  express: 'Express',
-  nextjs: 'Next.js',
-  'next.js': 'Next.js',
-  tailwind: 'Tailwind CSS',
-  'tailwind css': 'Tailwind CSS',
-  html5: 'HTML',
-  css3: 'CSS',
-  sass: 'Sass',
-  scss: 'Sass',
-  graphql: 'GraphQL',
-  rest: 'REST',
-  'rest api': 'REST',
-  restful: 'REST',
+  sql: 'SQL', javascript: 'JavaScript', js: 'JavaScript',
+  typescript: 'TypeScript', ts: 'TypeScript',
+  go: 'Go', golang: 'Go',
+  // JS ecosystem
+  'node.js': 'Node.js', nodejs: 'Node.js', 'node js': 'Node.js',
+  'react.js': 'React', reactjs: 'React', react: 'React',
+  'vue.js': 'Vue.js', vuejs: 'Vue.js',
+  'next.js': 'Next.js', nextjs: 'Next.js', next: 'Next.js',
+  'express.js': 'Express', expressjs: 'Express', express: 'Express',
+  // Frameworks & DB
+  fastapi: 'FastAPI', flask: 'Flask', django: 'Django',
+  postgresql: 'PostgreSQL', postgres: 'PostgreSQL', psql: 'PostgreSQL',
+  mongodb: 'MongoDB', mongo: 'MongoDB',
+  mysql: 'MySQL', redis: 'Redis',
+  // Cloud & Tools
+  docker: 'Docker', kubernetes: 'Kubernetes', k8s: 'Kubernetes',
+  aws: 'AWS', gcp: 'GCP', azure: 'Azure',
+  git: 'Git', github: 'GitHub',
+  postman: 'Postman', linux: 'Linux',
+  playwright: 'Playwright', selenium: 'Selenium',
+  // Web
+  html: 'HTML', html5: 'HTML', css: 'CSS', css3: 'CSS',
+  tailwind: 'Tailwind CSS', 'tailwind css': 'Tailwind CSS',
+  sass: 'Sass', scss: 'Sass',
+  graphql: 'GraphQL', rest: 'REST', 'rest api': 'REST', restful: 'REST',
+  // Platforms
+  shopify: 'Shopify', razorpay: 'Razorpay',
+  cloudinary: 'Cloudinary', render: 'Render',
+  // CS
+  'data structures': 'Data Structures and Algorithms',
+  dsa: 'Data Structures and Algorithms',
+  oop: 'OOP', dbms: 'DBMS',
 };
 
 const aliasLowerMap = new Map<string, string>();
