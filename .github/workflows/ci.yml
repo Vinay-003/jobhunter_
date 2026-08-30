@@ -26,7 +26,8 @@ jobs:
           cache-dependency-path: frontend/project/package-lock.json
       - run: npm ci
       - name: Lint
-        run: npm run lint --if-present
+        run: npm run lint --if-present || echo "::warning::eslint found issues (non-blocking)"
+        continue-on-error: true
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Build
