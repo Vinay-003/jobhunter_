@@ -1,5 +1,11 @@
--- Drop existing table and indexes
-DROP TABLE IF EXISTS resumes CASCADE;
+-- ======================================================================
+-- WARNING: The DROP below is DESTRUCTIVE — it will delete all resume data.
+-- DO NOT run this migration in production. In production, use only
+-- CREATE TABLE IF NOT EXISTS and additive ALTER TABLE migrations.
+-- This DROP is retained for local/dev resets and CI ephemeral databases only.
+-- For production deploys, comment out or remove the DROP line.
+-- ======================================================================
+DROP TABLE IF EXISTS resumes CASCADE; -- DEV ONLY: destructive — remove for production
 
 CREATE TABLE IF NOT EXISTS resumes (
     id SERIAL PRIMARY KEY,
