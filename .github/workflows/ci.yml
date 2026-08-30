@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, master]
+  pull_request:
+    branches: [dev, master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: frontend (lint · typecheck · build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/project/package-lock.json
+      - run: npm ci
+      - name: Lint
+        run: npm run lint --if-present
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: https://example.onrender.com/api/v1
+
+  backend:
+    name: backend (lint · typecheck · tests · build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      # Bun is used in repo scripts; install for test compat
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: npm ci
+      - name: Lint
+        run: |
+          if npx --yes eslint --version >/dev/null 2>&1; then
+            npx eslint . --ext .ts || echo "::warning::eslint found issues"
+          else
+            echo "eslint not configured — skipping"
+          fi
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Tests
+        run: npm test --if-present
+        env:
+          NODE_ENV: test
+          JWT_SECRET: ci-test-secret-must-be-at-least-32-chars-long-xxxx
+          PG_DATABASE_STRING: postgresql://postgres:postgres@localhost:5432/postgres
+      - name: Build
+        run: npm run build
+
+  security:
+    name: security (audit · secret scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: npm audit (backend)
+        working-directory: backend
+        run: npm audit --audit-level=high || echo "::warning::npm audit found advisories"
+        continue-on-error: true
+
+      - name: npm audit (frontend)
+        working-directory: frontend/project
+        run: npm audit --audit-level=high || echo "::warning::npm audit found advisories"
+        continue-on-error: true
+
+      - name: Secret scan — gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      # Fallback / alternative: TruffleHog placeholder
+      # - name: Secret scan — trufflehog
+      #   uses: trufflesecurity/trufflehog@main
+      #   with:
+      #     path: ./
+      #     base: ${{ github.event.repository.default_branch }}
+      #     head: HEAD
+      #     extra_args: --debug --only-verified
