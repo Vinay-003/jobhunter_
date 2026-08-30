@@ -72,10 +72,11 @@ services:
 
   # ---------------------------------------------------------------------------
   # Frontend — Vite React SPA (static site)
-  # Render Blueprint static site type: `static` (alias `static_site`)
+  # Render requires `type: web` + `runtime: static` for static sites
   # ---------------------------------------------------------------------------
-  - type: static
+  - type: web
     name: jobhunter-frontend
+    runtime: static
     region: oregon
     branch: dev
     rootDir: frontend/project
