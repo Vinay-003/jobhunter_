@@ -14,7 +14,7 @@ services:
     name: jobhunter-backend
     runtime: node
     region: oregon
-    plan: starter
+    plan: free
     rootDir: backend
     branch: dev
     buildCommand: npm ci && npm run build
