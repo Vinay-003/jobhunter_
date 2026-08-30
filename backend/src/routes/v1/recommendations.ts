@@ -34,7 +34,7 @@ const createRunSchema = z.object({
   keywords: z.string().optional(),
 });
 
-router.post('/runs', authenticateAny, validate({ body: createRunSchema }), async (req:any,res)=>{
+router.post('/', authenticateAny, validate({ body: createRunSchema }), async (req:any,res)=>{
   const userId = String(req.user.id);
   const { resumeId, targetRoles, locations, workModes, daysPosted } = req.body;
   try {
@@ -142,7 +142,7 @@ router.post('/runs', authenticateAny, validate({ body: createRunSchema }), async
   }
 });
 
-router.get('/runs/:id', authenticateAny, async (req:any,res)=>{
+router.get('/:id', authenticateAny, async (req:any,res)=>{
   const userId = String(req.user.id);
   const id = req.params.id;
   try {
@@ -152,7 +152,7 @@ router.get('/runs/:id', authenticateAny, async (req:any,res)=>{
   } catch(e:any){ res.status(404).json({ success:false, message:'Run not found'}); }
 });
 
-router.get('/runs/:id/results', authenticateAny, async (req:any,res)=>{
+router.get('/:id/results', authenticateAny, async (req:any,res)=>{
   const userId = String(req.user.id);
   const id = req.params.id;
   try {

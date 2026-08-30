@@ -70,16 +70,15 @@ router.post('/', authenticateAny, upload.single('resume'), async (req:any,res)=>
     const originalFilename = req.file.originalname;
     try {
       const r = await pool.query(
-        `INSERT INTO resumes (id, user_id, original_filename, storage_bucket, storage_object_path, sha256, file_size_bytes, page_count, parser_version, processing_status, is_latest, file_name, file_path)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$12)
+        `INSERT INTO resumes (id, user_id, original_filename, storage_bucket, storage_object_path, sha256, file_size_bytes, page_count, parser_version, processing_status, is_latest)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)
          RETURNING *`,
-        [resumeId, userId, originalFilename, storage.bucket, storage.path, sha256, buf.length, pageCount, parserVersion, 'uploaded', originalFilename, storage.path]
+        [resumeId, userId, originalFilename, storage.bucket, storage.path, sha256, buf.length, pageCount, parserVersion, 'uploaded']
       );
       row = r.rows[0];
-      // set others not latest
       await pool.query('UPDATE resumes SET is_latest=false WHERE user_id=$1 AND id<>$2', [userId, resumeId]).catch(()=>{});
     } catch(e:any) {
-      // fallback old schema: file_name/file_path/upload_date
+      // fallback legacy: file_name/file_path (for old DB)
       try {
         await pool.query('UPDATE resumes SET is_latest=false WHERE user_id=$1', [userId]);
         const r2 = await pool.query('INSERT INTO resumes (user_id, file_name, file_path, is_latest, status) VALUES ($1,$2,$3,true,$4) RETURNING *', [userId, originalFilename, storage.path, 'uploaded']);

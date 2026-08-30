@@ -61,13 +61,13 @@ $$ LANGUAGE plpgsql;
 -- Generated columns cannot have BEFORE INSERT/UPDATE triggers assigning them.
 DO $$
 DECLARE
-  is_generated BOOLEAN;
+  v_is_generated BOOLEAN;
 BEGIN
-  SELECT (is_generated = 'ALWAYS') INTO is_generated
-  FROM information_schema.columns
-  WHERE table_name = 'jobs' AND column_name = 'search_vector';
+  SELECT (c.is_generated = 'ALWAYS') INTO v_is_generated
+  FROM information_schema.columns c
+  WHERE c.table_name = 'jobs' AND c.column_name = 'search_vector';
 
-  IF is_generated IS DISTINCT FROM true THEN
+  IF v_is_generated IS DISTINCT FROM true THEN
     -- Plain column — ensure trigger exists
     IF NOT EXISTS (
       SELECT 1 FROM pg_trigger WHERE tgname = 'trg_jobs_search_vector'

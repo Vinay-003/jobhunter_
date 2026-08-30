@@ -26,18 +26,32 @@ router.post('/signup', validate({ body: signupSchema }), async (req, res) => {
   const displayName = (display_name || username || '').trim();
   const userName = (username || displayName).trim();
   try {
-    const exists = await pool.query('SELECT id FROM users WHERE email=$1 OR username=$2 LIMIT 1', [normalizedEmail, userName]);
+    // V2: check email only (username not required); legacy: check OR username if column exists
+    let exists;
+    try {
+      exists = await pool.query('SELECT id FROM users WHERE email=$1 OR username=$2 LIMIT 1', [normalizedEmail, userName]);
+    } catch (e:any) {
+      if (e.code === '42703') { // column username does not exist -> V2 schema
+        exists = await pool.query('SELECT id FROM users WHERE email=$1 LIMIT 1', [normalizedEmail]);
+      } else throw e;
+    }
     if (exists.rows.length) return res.status(400).json({ success:false, message:'User already exists with this email or username'});
     const hash = await bcrypt.hash(password, 10);
-    // handle uuid vs serial id: use gen_random_uuid if users.id is uuid, else serial auto
     let row;
+    // Try V2 schema first: (email, password_hash, display_name)
     try {
-      const r = await pool.query('INSERT INTO users (username,email,password_hash,display_name) VALUES ($1,$2,$3,$4) RETURNING id, username, email, display_name', [userName, normalizedEmail, hash, displayName]);
-      row = r.rows[0];
+      const r = await pool.query('INSERT INTO users (email,password_hash,display_name) VALUES ($1,$2,$3) RETURNING id, email, display_name', [normalizedEmail, hash, displayName]);
+      row = { ...r.rows[0], username: r.rows[0].display_name };
     } catch (e:any) {
-      // fallback if display_name column missing or type mismatch
-      const r = await pool.query('INSERT INTO users (username,email,password_hash) VALUES ($1,$2,$3) RETURNING id, username, email', [userName, normalizedEmail, hash]);
-      row = r.rows[0];
+      if (e.code !== '42703' && !e.message.includes('column')) throw e;
+      // Fallback legacy: try username variants
+      try {
+        const r = await pool.query('INSERT INTO users (username,email,password_hash,display_name) VALUES ($1,$2,$3,$4) RETURNING id, username, email, display_name', [userName, normalizedEmail, hash, displayName]);
+        row = r.rows[0];
+      } catch (e2:any) {
+        const r = await pool.query('INSERT INTO users (username,email,password_hash) VALUES ($1,$2,$3) RETURNING id, username, email', [userName, normalizedEmail, hash]);
+        row = r.rows[0];
+      }
     }
     res.status(201).json({ success:true, message:'User created', user: row });
   } catch (e:any) {
@@ -73,7 +87,7 @@ router.post('/login', validate({ body: loginSchema }), async (req, res) => {
     if (jwtSecret) {
       jwtToken = jwt.sign({ id:user.id, email:user.email }, jwtSecret, { expiresIn:'7d' });
     }
-    res.json({ success:true, message:'Login successful', token: jwtToken, sessionToken: token, user:{ id:user.id, username:user.username, email:user.email }});
+    res.json({ success:true, message:'Login successful', token: jwtToken, sessionToken: token, user:{ id:user.id, username:user.username ?? user.display_name, email:user.email, display_name: user.display_name }});
   } catch (e) {
     console.error('login error', e);
     res.status(500).json({ success:false, message:'Error during login'});
@@ -112,7 +126,12 @@ router.get('/session', async (req, res)=>{
   // try opaque session first
   const sess = await Session.verifySession(token).catch(()=>null);
   if (sess) {
-    const u = await pool.query('SELECT id, username, email, display_name FROM users WHERE id=$1', [sess.user_id]);
+    let u;
+    try {
+      u = await pool.query('SELECT id, username, email, display_name FROM users WHERE id=$1', [sess.user_id]);
+    } catch {
+      u = await pool.query('SELECT id, email, display_name FROM users WHERE id=$1', [sess.user_id]);
+    }
     return res.json({ success:true, user: u.rows[0] });
   }
   // fallback JWT
@@ -120,7 +139,12 @@ router.get('/session', async (req, res)=>{
     const secret = process.env.JWT_SECRET;
     if (!secret) throw new Error('no secret');
     const decoded:any = jwt.verify(token, secret);
-    const u = await pool.query('SELECT id, username, email, display_name FROM users WHERE id=$1', [decoded.id]);
+    let u;
+    try {
+      u = await pool.query('SELECT id, username, email, display_name FROM users WHERE id=$1', [decoded.id]);
+    } catch {
+      u = await pool.query('SELECT id, email, display_name FROM users WHERE id=$1', [decoded.id]);
+    }
     if (!u.rows.length) return res.status(401).json({ success:false, message:'Invalid session'});
     return res.json({ success:true, user: u.rows[0] });
   } catch {
