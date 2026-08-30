@@ -1,5 +1,6 @@
 import type { EmbeddingProvider } from './EmbeddingProvider.js';
 import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { MockEmbeddingProvider } from './MockEmbeddingProvider.js';
 
 /**
@@ -16,9 +17,11 @@ import { MockEmbeddingProvider } from './MockEmbeddingProvider.js';
  * Subsequent calls are ~50-150ms per batch.
  */
 
-const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
-// anass1209 fine-tune is not on Xenova hub; base matches architecture (384d)
-const FALLBACK_MODEL = process.env.LOCAL_EMBEDDING_MODEL || DEFAULT_MODEL;
+const DEFAULT_MODEL = process.env.EMBEDDING_MODEL_ID || 'anass1209/resume-job-matcher-all-MiniLM-L6-v2';
+// Xenova ONNX mirror for base; anass fine-tune is not on Xenova hub (needs Python)
+// If DEFAULT_MODEL is anass, Local will try Python sentence_transformers first, then fallback to Xenova base
+const FALLBACK_ONNX = 'Xenova/all-MiniLM-L6-v2';
+const RESOLVED_MODEL = process.env.LOCAL_EMBEDDING_MODEL || DEFAULT_MODEL;
 
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly modelId: string;
@@ -29,7 +32,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private failed = false;
 
   constructor(opts?: { modelId?: string }) {
-    this.modelId = opts?.modelId ?? FALLBACK_MODEL;
+    this.modelId = opts?.modelId ?? RESOLVED_MODEL;
   }
 
   async embed(input: { texts: string[]; purpose: 'resume' | 'job' | 'jd' }): Promise<{ vectors: number[][]; modelId: string; dimension: number }> {
@@ -53,6 +56,15 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   }
 
   private async embedChunk(texts: string[]): Promise<number[][]> {
+    // If model is anass fine-tune, try Python sentence_transformers first (true fine-tune)
+    if (this.modelId.includes('anass1209')) {
+      const pyVectors = await this.embedViaPython(texts).catch(() => null);
+      if (pyVectors) return pyVectors;
+      // fallback to base ONNX (same arch, 384d) if Python unavailable
+      console.warn(`[LocalEmbeddingProvider] anass Python failed, falling back to ${FALLBACK_ONNX} ONNX`);
+      const basePipe = await this.getPipeForModel(FALLBACK_ONNX);
+      if (basePipe) return this.runOnnx(basePipe, texts);
+    }
     const pipe = await this.getPipe();
     if (!pipe) {
       const r = await this.mock.embed({ texts, purpose: 'jd' as any });
@@ -86,36 +98,92 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   }
 
   private async getPipe(): Promise<any> {
-    if (this.pipe) return this.pipe;
+    return this.getPipeForModel(this.modelId);
+  }
+
+  private pipeCache = new Map<string, any>();
+  private async getPipeForModel(modelId: string): Promise<any> {
+    if (this.pipeCache.has(modelId)) return this.pipeCache.get(modelId);
     if (this.loading) return this.loading;
     this.loading = (async () => {
       try {
-        // dynamic import so not hard dep
-        // @ts-ignore - optional dep, may not be installed
+        // @ts-ignore - optional dep
         const mod: any = await import('@xenova/transformers').catch((e) => {
           console.warn('[LocalEmbeddingProvider] @xenova/transformers not installed, fallback to mock. Install: npm i @xenova/transformers onnxruntime-node');
           throw e;
         });
-        // optional: disable telemetry, set cache
         if (mod.env) {
           mod.env.allowLocalModels = true;
-          // use node cache dir
           mod.env.cacheDir = './.cache/huggingface';
         }
-        console.log(`[LocalEmbeddingProvider] loading ${this.modelId} ... (first run downloads ~80MB)`);
-        const pipe = await mod.pipeline('feature-extraction', this.modelId);
-        this.pipe = pipe;
-        console.log(`[LocalEmbeddingProvider] loaded ${this.modelId}`);
+        console.log(`[LocalEmbeddingProvider] loading ${modelId} ... (first run downloads ~80MB)`);
+        const pipe = await mod.pipeline('feature-extraction', modelId);
+        this.pipeCache.set(modelId, pipe);
+        if (modelId === this.modelId) this.pipe = pipe;
+        console.log(`[LocalEmbeddingProvider] loaded ${modelId}`);
         return pipe;
       } catch (e: any) {
         console.warn(`[LocalEmbeddingProvider] load failed: ${e.message} -> mock`);
-        this.failed = true;
         return null;
       } finally {
         this.loading = null;
       }
     })();
     return this.loading;
+  }
+
+  private async runOnnx(pipe: any, texts: string[]): Promise<number[][]> {
+    const vectors: number[][] = [];
+    for (const t of texts) {
+      const out = await pipe(t, { pooling: 'mean', normalize: true });
+      const arr = Array.from(out.data as Float32Array);
+      if (arr.length !== this.dimension) {
+        const fixed = new Array(this.dimension).fill(0);
+        for (let i = 0; i < Math.min(arr.length, this.dimension); i++) fixed[i] = arr[i];
+        vectors.push(fixed);
+      } else vectors.push(arr);
+    }
+    return vectors;
+  }
+
+  private async embedViaPython(texts: string[]): Promise<number[][] | null> {
+    // Try sentence_transformers with anass model via Python (true fine-tune)
+    // Requires: pip install sentence-transformers==5.0.0 transformers==4.44.2 torch --no-deps torchvision fix
+    return new Promise((resolve) => {
+      try {
+        const py = spawn('python3', ['-c', `
+import sys, json
+try:
+    from sentence_transformers import SentenceTransformer
+    model_id = sys.argv[1]
+    texts = json.loads(sys.argv[2])
+    m = SentenceTransformer(model_id)
+    vecs = m.encode(texts, normalize_embeddings=True).tolist()
+    print(json.dumps(vecs))
+except Exception as e:
+    print(json.dumps({"error": str(e)}), file=sys.stderr)
+    sys.exit(1)
+`, this.modelId, JSON.stringify(texts)]);
+        let out = '', err = '';
+        const t = setTimeout(() => { try { py.kill(); } catch {} resolve(null); }, 30000);
+        py.stdout.on('data', (d: Buffer) => out += d.toString());
+        py.stderr.on('data', (d: Buffer) => err += d.toString());
+        py.on('close', (code: number) => {
+          clearTimeout(t);
+          if (code !== 0) {
+            console.warn('[LocalEmbeddingProvider] Python anass failed:', err.slice(0,400));
+            resolve(null);
+          } else {
+            try {
+              const vecs = JSON.parse(out);
+              if (Array.isArray(vecs) && Array.isArray(vecs[0])) resolve(vecs as number[][]);
+              else resolve(null);
+            } catch { resolve(null); }
+          }
+        });
+        py.on('error', () => resolve(null));
+      } catch { resolve(null); }
+    });
   }
 
   /** quick self-test for local dev */
