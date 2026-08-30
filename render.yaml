@@ -76,7 +76,7 @@ services:
   # Static sites cannot have `region` (Render picks automatically)
   # ---------------------------------------------------------------------------
   - type: web
-    name: jobhunter-frontend
+    name: jobhunter
     runtime: static
     branch: dev
     rootDir: frontend/project
