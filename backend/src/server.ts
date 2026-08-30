@@ -52,9 +52,8 @@ app.use('/api', jobRoutes);
 import v1Router from './routes/v1/index.js';
 app.use('/api/v1', v1Router);
 
-// Health check endpoint
+// Health check endpoint - keep log quiet (Render hits every 5s)
 app.get('/health', (req, res) => {
-  console.log('Health check endpoint hit');
   res.json({ 
     status: 'ok',
     timestamp: new Date().toISOString(),

@@ -39,10 +39,10 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     async function check() {
       try {
-        // Prefer V2 session endpoint, fallback to legacy
-        const res = await api.get('/v1/auth/session').catch(async () => {
-          return api.get('/auth/session').catch(() => api.get('/latest-resume').then(() => ({ data: { user: { id: 1 } } })));
-        });
+        // V2 session endpoint is /auth/session (baseURL already is /api/v1)
+        const res = await api.get('/auth/session').catch(() =>
+          api.get('/latest-resume').then(() => ({ data: { user: { id: 1 } } })),
+        );
         // If we get 200, consider authed (even if shape varies)
         if (!cancelled) {
           const data = res.data as { user?: unknown; success?: boolean };
@@ -80,7 +80,7 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     api
-      .get('/v1/auth/session')
+      .get('/auth/session')
       .then(() => setIsAuthed(true))
       .catch(() => setIsAuthed(false))
       .finally(() => setChecked(true));

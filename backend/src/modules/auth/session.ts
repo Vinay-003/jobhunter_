@@ -129,17 +129,23 @@ export async function authenticateSession(req: Request, res: Response, next: Nex
 }
 
 export function setSessionCookie(res: Response, token: string) {
+  const isProd = process.env.NODE_ENV === 'production';
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax' as const,
+    secure: isProd,
+    sameSite: (isProd ? 'none' : 'lax') as const,
     maxAge: TTL_DAYS * 24 * 60 * 60 * 1000,
     path: '/',
   });
 }
 
 export function clearSessionCookie(res: Response) {
-  res.clearCookie(COOKIE_NAME, { path: '/' });
+  const isProd = process.env.NODE_ENV === 'production';
+  res.clearCookie(COOKIE_NAME, {
+    path: '/',
+    secure: isProd,
+    sameSite: (isProd ? 'none' : 'lax') as const,
+  });
 }
 
 export default {
