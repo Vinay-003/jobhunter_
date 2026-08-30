@@ -9,6 +9,7 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
+    "noImplicitAny": false,
     "skipLibCheck": true,
     "outDir": "./dist",
     "rootDir": "./src"
