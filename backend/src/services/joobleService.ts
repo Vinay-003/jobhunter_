@@ -3,7 +3,7 @@ import axios from 'axios';
 import pool from '../config/database.js';
 
 const JOOBLE_API_URL = 'https://jooble.org/api/';
-const JOOBLE_API_KEY = 'b5c200c7-8bb9-4908-be33-9ac162971afe';
+const JOOBLE_API_KEY = process.env.JOOBLE_API_KEY || '';
 const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://localhost:5000';
 
 interface JoobleSearchParams {
@@ -41,13 +41,14 @@ export class JoobleService {
    */
   async searchJobs(params: JoobleSearchParams): Promise<JoobleResponse> {
     try {
-      // Check if we've hit the API limit
+      if (!JOOBLE_API_KEY) {
+        console.warn('JOOBLE_API_KEY not configured, using database only');
+        return this.getJobsFromDatabase(params);
+      }
       if (this.apiCallCount >= this.API_LIMIT) {
         console.warn('Jooble API limit reached, fetching from database');
         return this.getJobsFromDatabase(params);
       }
-
-      console.log('Calling Jooble API with params:', params);
 
       const response = await axios.post<JoobleResponse>(
         `${JOOBLE_API_URL}${JOOBLE_API_KEY}`,
@@ -56,7 +57,7 @@ export class JoobleService {
           headers: {
             'Content-Type': 'application/json',
           },
-          timeout: 10000, // 10 second timeout
+          timeout: 10000,
         }
       );
 

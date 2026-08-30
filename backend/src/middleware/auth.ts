@@ -22,8 +22,12 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
     return res.status(401).json({ message: 'Authentication token required' });
   }
 
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    return res.status(500).json({ message: 'Server configuration error' });
+  }
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
+    const decoded = jwt.verify(token, secret) as {
       id: number;
       email: string;
     };

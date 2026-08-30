@@ -73,6 +73,14 @@ export class ResumeModel {
     return result.rows[0] || null;
   }
 
+  async getResumeByIdForUser(id: number, userId: number): Promise<Resume | null> {
+    const result = await this.pool.query(
+      'SELECT * FROM resumes WHERE id = $1 AND user_id = $2',
+      [id, userId]
+    );
+    return result.rows[0] || null;
+  }
+
   async updateResumeStatus(id: number, status: string, analysisData?: any): Promise<Resume> {
     const result = await this.pool.query(
       `UPDATE resumes 

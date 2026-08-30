@@ -185,7 +185,7 @@ router.get('/latest-resume', authenticateToken, async (req: express.Request, res
   }
 });
 
-// Get resume file endpoint
+// Get resume file endpoint - owner scoped to prevent IDOR
 router.get('/resume/:id', authenticateToken, async (req: express.Request, res: express.Response) => {
   try {
     const resumeId = parseInt(req.params.id);
@@ -196,7 +196,7 @@ router.get('/resume/:id', authenticateToken, async (req: express.Request, res: e
       });
     }
 
-    const resume = await resumeModel.getResumeById(resumeId);
+    const resume = await resumeModel.getResumeByIdForUser(resumeId, req.user!.id);
     if (!resume) {
       return res.status(404).json({
         success: false,
@@ -204,15 +204,13 @@ router.get('/resume/:id', authenticateToken, async (req: express.Request, res: e
       });
     }
 
-    // Check if file exists
-    if (!fs.existsSync(resume.file_path)) {
+    if (!resume.file_path || !fs.existsSync(resume.file_path)) {
       return res.status(404).json({
         success: false,
         message: 'Resume file not found'
       });
     }
 
-    // Send the file
     res.sendFile(resume.file_path);
   } catch (error) {
     console.error('Download error:', error);
@@ -241,9 +239,9 @@ router.get('/latest-resume-content', authenticateToken, async (req: express.Requ
       });
     }
 
-    // Set appropriate headers for PDF download
+    const safeFilename = String(resume.fileName).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${resume.fileName}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
     
     // Send the PDF content
     res.send(resume.content);
