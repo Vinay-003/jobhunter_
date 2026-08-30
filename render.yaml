@@ -17,11 +17,13 @@ services:
     plan: free
     rootDir: backend
     branch: dev
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: node dist/server.js
     healthCheckPath: /health
     # Alternative health path (also served): /api/v1/health
     envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
       - key: NODE_ENV
         value: production
       - key: PORT
@@ -80,7 +82,7 @@ services:
     runtime: static
     branch: dev
     rootDir: frontend/project
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     staticPublishPath: dist
     # SPA fallback — required for react-router
     routes:
