@@ -42,11 +42,15 @@ const tempDir = path.join(uploadsDir, 'temp');
   }
 });
 
-// Routes
+// Routes - legacy (keep for backward compat, will be deprecated)
 app.use('/api/auth', authRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api', analysisRoutes);
 app.use('/api', jobRoutes);
+
+// V1 API (spec-compliant)
+import v1Router from './routes/v1/index.js';
+app.use('/api/v1', v1Router);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

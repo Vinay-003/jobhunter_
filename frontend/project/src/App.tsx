@@ -1,37 +1,12 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import LoginPage from './pages/LoginPage';
-import SignupPage from './pages/SignupPage';
-import Home from './pages/Home';
+// src/App.tsx - V2 entry (legacy preserved as App.legacy.tsx)
+import { RouterProvider } from 'react-router-dom';
+import { AuthProvider } from './features/auth/AuthContext';
+import { router } from './app/router';
 
-const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
-  const token = localStorage.getItem('token');
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-  return <>{children}</>;
-};
-
-function App() {
+export default function App() {
   return (
-    <Router future={{
-        v7_relativeSplatPath: true,
-        v7_startTransition: true,
-      }}>
-      <Routes>
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route 
-          path="/home" 
-          element={
-            <PrivateRoute>
-              <Home />
-            </PrivateRoute>
-          } 
-        />
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <RouterProvider router={router} />
+    </AuthProvider>
   );
 }
-
-export default App;
