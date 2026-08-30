@@ -1,5 +1,7 @@
 import type { EmbeddingProvider } from './EmbeddingProvider.js';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { MockEmbeddingProvider } from './MockEmbeddingProvider.js';
 
@@ -147,11 +149,15 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   }
 
   private async embedViaPython(texts: string[]): Promise<number[][] | null> {
-    // Try sentence_transformers with anass model via Python (true fine-tune)
-    // Requires: pip install sentence-transformers==5.0.0 transformers==4.44.2 torch --no-deps torchvision fix
     return new Promise((resolve) => {
       try {
-        const py = spawn('python3', ['-c', `
+        const venvPy = path.resolve(process.cwd(), 'backend/python/venv/bin/python');
+        const altVenvPy = path.resolve(process.cwd(), 'python/venv/bin/python');
+        let pyPath = 'python3';
+        if (fs.existsSync(venvPy)) pyPath = venvPy;
+        else if (fs.existsSync(altVenvPy)) pyPath = altVenvPy;
+        else if (process.env.PYTHON_PATH && fs.existsSync(process.env.PYTHON_PATH)) pyPath = process.env.PYTHON_PATH;
+        const py = spawn(pyPath, ['-c', `
 import sys, json
 try:
     from sentence_transformers import SentenceTransformer
