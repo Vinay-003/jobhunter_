@@ -73,11 +73,11 @@ services:
   # ---------------------------------------------------------------------------
   # Frontend — Vite React SPA (static site)
   # Render requires `type: web` + `runtime: static` for static sites
+  # Static sites cannot have `region` (Render picks automatically)
   # ---------------------------------------------------------------------------
   - type: web
     name: jobhunter-frontend
     runtime: static
-    region: oregon
     branch: dev
     rootDir: frontend/project
     buildCommand: npm ci && npm run build
