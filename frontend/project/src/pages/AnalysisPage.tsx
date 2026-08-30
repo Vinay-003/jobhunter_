@@ -36,21 +36,33 @@ export default function AnalysisPage() {
     if (!id) return;
     (async () => {
       try {
-        // Try analyze endpoint first? but we need fetch resume. Use latest-resume fallback if id matches latest.
-        // Primary: GET /resume/:id is not analysis, but latest-resume returns analysisData.
-        // We'll try GET /latest-resume and if id matches use it; else try POST /analyze/:id to ensure analysis exists.
-        const resumeRes = await api.get('/latest-resume').catch(() => null);
-        const resume = (resumeRes?.data as { resume?: { id: number; analysisData?: AnalysisData; fileName?: string; uploadDate?: string } })?.resume;
-        if (resume && String(resume.id) === String(id) && resume.analysisData) {
-          setData(resume.analysisData);
-          setMeta({ fileName: resume.fileName, uploadDate: resume.uploadDate });
-        } else {
-          // Trigger analysis fetch for id
-          const analyzeRes = await api.post(`/analyze/${id}`, {}).catch(async () => api.post('/analyze', {}));
-          const d = analyzeRes.data as { analysis?: AnalysisData; readiness?: AnalysisData } & AnalysisData;
-          const normalized = (d as { analysis?: AnalysisData }).analysis ?? (d as { readiness?: AnalysisData }).readiness ?? d;
-          setData(normalized as AnalysisData);
+        // V2: GET /analyses/:id (analysisId, not resumeId)
+        const analysisRes = await api.get(`/analyses/${id}`);
+        const d = analysisRes.data as { analysis?: any; readiness?: any } & Record<string, unknown>;
+        const analysis = (d as { analysis?: AnalysisData }).analysis ?? d;
+        // V2 shape: analysis.score_breakdown_json, evidence_json, readiness_score
+        // Try to map to UI shape
+        const mapped: AnalysisData = {
+          score: (analysis as any).readiness_score ?? (analysis as any).readiness?.score ?? (analysis as any).score,
+          statusMessage: (analysis as any).evidence_json?.rules ? 'V2 Analysis' : undefined,
+          categories: (analysis as any).score_breakdown_json?.map((b: any) => ({ name: b.category, score: b.pointsAwarded, max: b.pointsPossible })) ?? (analysis as any).breakdown,
+          rules: (analysis as any).evidence_json?.rules ?? (analysis as any).rules,
+          strengths: (analysis as any).evidence_json?.strengths ?? (analysis as any).strengths,
+          warnings: (analysis as any).evidence_json?.warnings ?? (analysis as any).warnings,
+          insights: (analysis as any).evidence_json?.strengths,
+          recommendations: (analysis as any).evidence_json?.warnings,
+        };
+        // Try to fetch resume meta if analysis has resume_id
+        const resumeId = (analysis as any).resume_id;
+        if (resumeId) {
+          try {
+            const r = await api.get(`/resumes/${resumeId}`);
+            const resume = (r.data as { resume?: { fileName?: string; uploadDate?: string } })?.resume;
+            if (resume) setMeta({ fileName: resume.fileName, uploadDate: resume.uploadDate });
+          } catch {}
         }
+        if (mapped.score !== undefined || mapped.categories) setData(mapped);
+        else setData(analysis as AnalysisData);
       } catch (err) {
         setError(getApiErrorMessage(err));
       } finally {

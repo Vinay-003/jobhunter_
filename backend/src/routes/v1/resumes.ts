@@ -65,25 +65,51 @@ router.post('/', authenticateAny, upload.single('resume'), async (req:any,res)=>
 
     const storage = await uploadFile(userId, resumeId, buf, req.file.originalname);
 
-    // DB insert with fallback handling for serial vs uuid schema
+    // DB insert - handle is_latest via transaction: clear old latest BEFORE insert to avoid unique violation
     let row;
     const originalFilename = req.file.originalname;
+    const client = await pool.connect();
     try {
-      const r = await pool.query(
-        `INSERT INTO resumes (id, user_id, original_filename, storage_bucket, storage_object_path, sha256, file_size_bytes, page_count, parser_version, processing_status, is_latest)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)
-         RETURNING *`,
-        [resumeId, userId, originalFilename, storage.bucket, storage.path, sha256, buf.length, pageCount, parserVersion, 'uploaded']
-      );
-      row = r.rows[0];
-      await pool.query('UPDATE resumes SET is_latest=false WHERE user_id=$1 AND id<>$2', [userId, resumeId]).catch(()=>{});
-    } catch(e:any) {
-      // fallback legacy: file_name/file_path (for old DB)
       try {
-        await pool.query('UPDATE resumes SET is_latest=false WHERE user_id=$1', [userId]);
-        const r2 = await pool.query('INSERT INTO resumes (user_id, file_name, file_path, is_latest, status) VALUES ($1,$2,$3,true,$4) RETURNING *', [userId, originalFilename, storage.path, 'uploaded']);
-        row = r2.rows[0];
-      } catch(e2){ throw e; }
+        await client.query('BEGIN');
+        await client.query('UPDATE resumes SET is_latest=false WHERE user_id=$1 AND is_latest=true', [userId]);
+        const r = await client.query(
+          `INSERT INTO resumes (id, user_id, original_filename, storage_bucket, storage_object_path, sha256, file_size_bytes, page_count, parser_version, processing_status, is_latest)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)
+           RETURNING *`,
+          [resumeId, userId, originalFilename, storage.bucket, storage.path, sha256, buf.length, pageCount, parserVersion, 'uploaded']
+        );
+        row = r.rows[0];
+        await client.query('COMMIT');
+      } catch(e:any) {
+        await client.query('ROLLBACK');
+        // fallback legacy: file_name/file_path (for old DB)
+        if (e.code === '42703' || e.message?.includes('original_filename')) {
+          await client.query('BEGIN');
+          await client.query('UPDATE resumes SET is_latest=false WHERE user_id=$1', [userId]);
+          const r2 = await client.query('INSERT INTO resumes (user_id, file_name, file_path, is_latest, status) VALUES ($1,$2,$3,true,$4) RETURNING *', [userId, originalFilename, storage.path, 'uploaded']);
+          row = r2.rows[0];
+          await client.query('COMMIT');
+        } else {
+          // is_latest race - retry by clearing and inserting again
+          if (e.code === '23505' && e.constraint?.includes('one_latest')) {
+            await client.query('BEGIN');
+            await client.query('UPDATE resumes SET is_latest=false WHERE user_id=$1 AND is_latest=true', [userId]);
+            const r = await client.query(
+              `INSERT INTO resumes (id, user_id, original_filename, storage_bucket, storage_object_path, sha256, file_size_bytes, page_count, parser_version, processing_status, is_latest)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true)
+               RETURNING *`,
+              [resumeId, userId, originalFilename, storage.bucket, storage.path, sha256, buf.length, pageCount, parserVersion, 'uploaded']
+            );
+            row = r.rows[0];
+            await client.query('COMMIT');
+          } else {
+            throw e;
+          }
+        }
+      }
+    } finally {
+      client.release();
     }
 
     try {

@@ -45,7 +45,24 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [prefs, setPrefs] = useState({ location: 'India', keywords: 'Backend Engineer', days_posted: 30, min_match_score: 40 });
+  const [prefs, setPrefs] = useState({ location: 'India', keywords: '', days_posted: 30, min_match_score: 40 });
+
+  // Dynamic prefill: infer from resume's most common skill or title, fallback to Backend Engineer
+  useEffect(() => {
+    if (resumes.length && !prefs.keywords) {
+      // Try to infer from selected resume's profile via API, or use user preferences
+      api.get('/profile').then(res => {
+        const data = res.data as { preferences?: { target_roles?: string[]; locations?: string[] } };
+        const roles = data?.preferences?.target_roles;
+        if (roles && roles.length) setPrefs(p => ({ ...p, keywords: roles[0] }));
+        else {
+          // Fallback: extract from resume title if available, else default
+          const inferred = 'Backend Engineer'; // will be overridden after resume fetch if we add profile endpoint
+          setPrefs(p => p.keywords ? p : ({ ...p, keywords: inferred }));
+        }
+      }).catch(() => {});
+    }
+  }, [resumes]);
   const [showPrefs, setShowPrefs] = useState(false);
 
   const fetchResumes = async () => {

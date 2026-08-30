@@ -213,9 +213,9 @@ export default function AtsPage() {
                     </p>
                   )}
                 </div>
-                {result?.resume?.id && (
-                  <Link to={`/app/analysis/${result.resume.id}`} className="text-xs bg-white text-black px-3 py-1.5 rounded-lg">
-                    View analysis
+                {(result as any)?.analysisId && (
+                  <Link to={`/app/analysis/${(result as any).analysisId}`} className="text-xs bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-1.5 rounded-lg">
+                    View full report
                   </Link>
                 )}
               </div>

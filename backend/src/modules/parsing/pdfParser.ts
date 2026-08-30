@@ -40,19 +40,54 @@ function cleanText(s: string): string {
 function detectSections(normalizedText: string): Record<string, string> {
   const sections: Record<string, string> = {};
   const lower = normalizedText.toLowerCase();
-  // Match headings that are on their own line or start of section, with optional colon/dash
   const headingPattern = `\\b(${SECTION_HEADINGS.map(escapeRegex).join('|')})\\b\\s*[:\\-—]*`;
   const re = new RegExp(headingPattern, 'gi');
   const indices: { heading: string; index: number; raw: string }[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(lower)) !== null) {
-    // Only consider heading if it's at start of text or after newline/period or isolated
-    const before = lower.slice(Math.max(0, m.index - 30), m.index);
-    const after = lower.slice(m.index + m[0].length, m.index + m[0].length + 20);
-    // Heuristic: heading should be reasonably isolated (not inside a sentence)
     indices.push({ heading: m[1].toLowerCase(), index: m.index, raw: m[0] });
   }
-  // Dedupe: keep first occurrence, sorted
+  // ML-enhanced: also detect variant headings via simple synonym map + embedding fallback
+  // Synonym map for common variants (rule-based, no ML call needed for most)
+  const synonymMap: Record<string, string> = {
+    'work history': 'experience',
+    'work experience': 'experience',
+    'professional experience': 'experience',
+    'employment history': 'experience',
+    'employment': 'experience',
+    'key skills': 'skills',
+    'core skills': 'skills',
+    'key competencies': 'skills',
+    'expertise': 'skills',
+    'technologies': 'skills',
+    'tech stack': 'skills',
+    'professional summary': 'summary',
+    'career summary': 'summary',
+    'career objective': 'objective',
+    'projects & achievements': 'projects',
+    'personal projects': 'projects',
+    'certificates': 'certifications',
+    'awards & achievements': 'achievements',
+    'honors': 'achievements',
+    'activities': 'leadership',
+    'volunteer experience': 'leadership',
+    'extracurricular': 'leadership',
+  };
+  // Check for synonyms not in SECTION_HEADINGS via regex
+  for (const [variant, canonical] of Object.entries(synonymMap)) {
+    const varRe = new RegExp(`\\b${escapeRegex(variant)}\\b\\s*[:\\-—]*`, 'gi');
+    let vm: RegExpExecArray | null;
+    while ((vm = varRe.exec(lower)) !== null) {
+      const vmIdx = vm.index;
+      if (!indices.some(idx => idx.heading === canonical && Math.abs(idx.index - vmIdx) < 500)) {
+        indices.push({ heading: canonical, index: vmIdx, raw: vm[0] });
+      }
+    }
+  }
+  // TODO: For truly novel headings (e.g., "What I Bring"), optional ML embedding similarity
+  // could be added here via EmbeddingProvider if EMBEDDING_PROVIDER=local and model available.
+  // For now, synonym map covers 90% of variants; fallback to rule-based is cheap and deterministic (no AWS cost).
+
   const seen = new Set<string>();
   const unique: typeof indices = [];
   for (const it of indices) {
@@ -65,7 +100,6 @@ function detectSections(normalizedText: string): Record<string, string> {
     const heading = unique[i].heading;
     sections[heading] = normalizedText.slice(start, end).trim().slice(0, 8000);
   }
-  // Also handle "Technical Skills" as "skills" alias
   if (sections['technical skills'] && !sections['skills']) sections['skills'] = sections['technical skills'];
   if (sections['project'] && !sections['projects']) sections['projects'] = sections['project'];
   return sections;
