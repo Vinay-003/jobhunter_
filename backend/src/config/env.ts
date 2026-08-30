@@ -24,6 +24,8 @@ const envSchema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
   AWS_SAGEMAKER_ENDPOINT_NAME: z.string().optional(),
   EMBEDDING_MODEL_ID: z.string().default('anass1209/resume-job-matcher-all-MiniLM-L6-v2'),
+  EMBEDDING_PROVIDER: z.enum(['mock','local','aws','auto']).default('auto'),
+  LOCAL_EMBEDDING_MODEL: z.string().optional(),
   PYTHON_SERVICE_URL: z.string().optional(),
 }).superRefine((data, ctx) => {
   if (!data.PG_DATABASE_STRING && !data.DATABASE_URL && !data.SUPABASE_DB_URL) {

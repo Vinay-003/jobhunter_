@@ -13,6 +13,7 @@ import { matchJd } from '../../modules/jd/matcher.js';
 import { downloadFile } from '../../modules/storage/supabaseStorage.js';
 import { MockEmbeddingProvider } from '../../providers/embeddings/MockEmbeddingProvider.js';
 import { AwsSageMakerEmbeddingProvider } from '../../providers/embeddings/AwsSageMakerEmbeddingProvider.js';
+import { LocalEmbeddingProvider } from '../../providers/embeddings/LocalEmbeddingProvider.js';
 
 const router = Router();
 
@@ -31,7 +32,12 @@ const PARSER_VERSION='2.0.0';
 const JD_MATCHER_VERSION='2.0.0';
 
 function getEmbeddingProvider(){
-  if (process.env.AWS_SAGEMAKER_ENDPOINT_NAME && process.env.AWS_ACCESS_KEY_ID) {
+  const provider = (process.env.EMBEDDING_PROVIDER || 'auto').toLowerCase();
+  if (provider === 'local' || process.env.USE_LOCAL_EMBEDDINGS === 'true') {
+    return new LocalEmbeddingProvider({ modelId: process.env.LOCAL_EMBEDDING_MODEL });
+  }
+  if (provider === 'mock') return new MockEmbeddingProvider();
+  if (provider === 'aws' || (process.env.AWS_SAGEMAKER_ENDPOINT_NAME && process.env.AWS_ACCESS_KEY_ID)) {
     return new AwsSageMakerEmbeddingProvider();
   }
   return new MockEmbeddingProvider();
