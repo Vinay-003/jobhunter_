@@ -11,7 +11,7 @@ services:
   # Backend — Node.js API (Express + TypeScript)
   # ---------------------------------------------------------------------------
   - type: web
-    name: jobhunter-backend
+    name: jobhunter
     runtime: node
     region: oregon
     plan: free
