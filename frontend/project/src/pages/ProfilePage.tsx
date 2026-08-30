@@ -18,8 +18,7 @@ export default function ProfilePage() {
     setErr('');
     setMsg('');
     try {
-      // Backend may expect filters via jobs or profile endpoint; try profile first then fallback
-      await api.put('/v1/profile', { jobPreferences: prefs }).catch(() => api.put('/profile', { jobPreferences: prefs }).catch(() => api.post('/jobs/preferences', prefs)));
+      await api.put('/profile', { jobPreferences: prefs });
       setMsg('Preferences saved');
     } catch (e2) {
       setErr(getApiErrorMessage(e2));

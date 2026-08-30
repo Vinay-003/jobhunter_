@@ -30,20 +30,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refresh = useCallback(async () => {
     try {
       setLoading(true);
-      // Primary V2 endpoint, fallback to legacy token check if backend not yet migrated
-      const res = await api.get('/v1/auth/session').catch(async (err: unknown) => {
-        // Fallback: try legacy /latest-resume or /auth/me style? If 404, try /auth/session without v1
-        const msg = getApiErrorMessage(err);
-        if (String(msg).includes('404') || (err as { status?: number })?.status === 404) {
-          try {
-            return await api.get('/auth/session');
-          } catch {
-            // If still 404, we are not authenticated - return null gracefully
-            return { data: { user: null } } as { data: { user: User | null } };
-          }
-        }
-        throw err;
-      });
+      const res = await api.get('/auth/session');
       const u = (res.data as { user?: User })?.user ?? null;
       setUser(u);
       setError(null);
@@ -98,19 +85,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      await api.post('/v1/auth/logout').catch(() => api.post('/auth/logout').catch(() => {}));
-    } finally {
-      setUser(null);
-      setLoading(false);
-    }
+      await api.post('/auth/logout');
+    } catch {}
+    setUser(null);
+    setLoading(false);
   };
 
   const logoutAll = async () => {
     try {
-      await api.post('/v1/auth/logout-all').catch(() => api.post('/auth/logout-all').catch(() => {}));
-    } finally {
-      setUser(null);
-    }
+      await api.post('/auth/logout-all');
+    } catch {}
+    setUser(null);
   };
 
   return (
