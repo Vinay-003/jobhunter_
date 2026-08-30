@@ -71,33 +71,37 @@ export default function AtsPage() {
       const form = new FormData();
       form.append('resume', file);
       form.append('targetLevel', targetLevel);
-      if (mode === 'match') form.append('jobDescription', jobDescription);
 
-      // Upload
-      const uploadRes = await api.post('/upload-resume', form, {
+      // V2: POST /resumes
+      const uploadRes = await api.post('/resumes', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      const resumeId = (uploadRes.data as { resume?: { id: number } })?.resume?.id;
+      const resumeId = (uploadRes.data as { resume?: { id: string } })?.resume?.id ?? (uploadRes.data as { id?: string })?.id;
+      if (!resumeId) throw new Error('Upload failed: no resume id');
 
-      // Analyze (legacy endpoint supports targetLevel)
+      // V2: POST /analyses/readiness or /analyses/jd-match
       let analysisRes;
-      if (resumeId) {
-        analysisRes = await api.post(`/analyze/${resumeId}`, { targetLevel, jobDescription: mode === 'match' ? jobDescription : undefined });
+      if (mode === 'resume') {
+        analysisRes = await api.post('/analyses/readiness', { resumeId, targetLevel });
       } else {
-        analysisRes = await api.post('/analyze', { targetLevel, jobDescription: mode === 'match' ? jobDescription : undefined });
+        analysisRes = await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel });
       }
 
-      const data = analysisRes.data as { analysis?: Readiness; readiness?: Readiness; resume?: { id: number } } & Readiness;
-      // Normalize: some backends return { analysis } others { success, analysis }
-      const normalized = {
-        readiness: (data as { readiness?: Readiness }).readiness ?? (data as { analysis?: Readiness }).analysis ?? (data as Readiness),
-        analysis: (data as { analysis?: Readiness }).analysis,
-        resume: (data as { resume?: { id: number } }).resume ?? (resumeId ? { id: resumeId } : undefined),
+      const data = analysisRes.data as any;
+      const readiness = data.readiness ?? data.analysis ?? data.jdMatch ?? data;
+      // V2 returns { readiness: { score, breakdown, rules... }, jdMatch?: { score, breakdown, responsibilityCoverage } }
+      const normalized: any = {
+        readiness: data.readiness ?? data.analysis ?? data,
+        jdMatch: data.jdMatch,
+        analysis: data.readiness ?? data.analysis,
+        resume: { id: resumeId },
+        raw: data,
       };
-      // If data itself looks like readiness (has score), keep it
-      if (!normalized.readiness && typeof (data as { score?: number }).score === 'number') {
-        normalized.readiness = data as Readiness;
+      if (data.jdMatch) {
+        normalized.readiness = data.readiness;
+        normalized.jdMatch = data.jdMatch;
       }
+      if (typeof data.score === 'number' && !normalized.readiness?.score) normalized.readiness = data;
       setResult(normalized);
     } catch (err) {
       setError(getApiErrorMessage(err));
@@ -272,6 +276,39 @@ export default function AtsPage() {
                   </ul>
                 </div>
               </div>
+
+              {(result as any)?.jdMatch && (
+                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 space-y-3">
+                  <p className="text-xs tracking-widest text-gray-500">JD MATCH</p>
+                  <p className="text-3xl font-bold text-emerald-400">
+                    {(result as any).jdMatch.score ?? '—'}
+                    <span className="text-sm font-normal text-gray-500"> /100</span>
+                    <span className="ml-2 text-xs font-normal text-gray-400">{(result as any).confidence ?? (result as any).jdMatch?.confidence ?? ''}</span>
+                  </p>
+                  {(result as any).jdMatch.breakdown && (
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {Object.entries((result as any).jdMatch.breakdown).map(([k, v]) => (
+                        <span key={k} className="bg-black/30 border border-white/5 rounded-full px-2 py-1">
+                          {k}: {String(v)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {(result as any).jdMatch.deterministic?.missingRequired?.length > 0 && (
+                    <p className="text-xs text-red-400">Missing: {(result as any).jdMatch.deterministic.missingRequired.join(', ')}</p>
+                  )}
+                  {(result as any).jdMatch.responsibilityCoverage && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-gray-400">Responsibility coverage</p>
+                      {(result as any).jdMatch.responsibilityCoverage.slice(0, 3).map((r: any, i: number) => (
+                        <p key={i} className="text-xs text-gray-500">
+                          • {r.responsibility?.slice(0, 80)} — <span className="text-gray-300">{Math.round(r.matchScore * 100)}%</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="pt-2 flex gap-2">
                 <Link to="/app/jobs" className="text-xs bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-lg">

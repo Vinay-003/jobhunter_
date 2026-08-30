@@ -40,24 +40,54 @@ function safeText(s: string): string {
 
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [resumes, setResumes] = useState<{ id: string; fileName: string }[]>([]);
+  const [selectedResume, setSelectedResume] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [prefs, setPrefs] = useState({ location: '', keywords: '', days_posted: 30, min_match_score: 50 });
+  const [prefs, setPrefs] = useState({ location: 'India', keywords: 'Backend Engineer', days_posted: 30, min_match_score: 40 });
   const [showPrefs, setShowPrefs] = useState(false);
 
+  const fetchResumes = async () => {
+    try {
+      const res = await api.get('/resumes');
+      const data = res.data as { resumes?: { id: string; fileName: string }[] };
+      const list = data.resumes ?? [];
+      setResumes(list);
+      if (list.length && !selectedResume) setSelectedResume(list[0].id);
+    } catch {}
+  };
+
   const fetchJobs = async () => {
+    if (!selectedResume) {
+      setError('Select a resume first (upload at ATS Check)');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams();
-      if (prefs.location) params.set('location', prefs.location);
-      if (prefs.keywords) params.set('keywords', prefs.keywords);
-      params.set('days_posted', String(prefs.days_posted));
-      params.set('min_match_score', String(prefs.min_match_score));
-      const res = await api.get(`/jobs/recommendations?${params.toString()}`);
-      const data = res.data as { recommendations?: Job[]; jobs?: Job[] };
-      setJobs(data.recommendations ?? data.jobs ?? []);
+      const res = await api.post('/recommendation-runs', {
+        resumeId: selectedResume,
+        targetRoles: prefs.keywords ? [prefs.keywords] : ['Backend Engineer'],
+        locations: prefs.location ? [prefs.location] : ['India'],
+        workModes: ['remote', 'hybrid'],
+      });
+      const data = res.data as { recommendations?: Job[]; results?: Job[] };
+      // V2 returns { recommendations: [{ fitScore, breakdown, confidence, ... }] }
+      const recs = (data.recommendations ?? data.results ?? []) as Job[];
+      // map V2 shape to UI shape if needed
+      const mapped = recs.map((j: any) => ({
+        ...j,
+        title: j.title ?? j.jobTitle,
+        company: j.company,
+        location: j.location,
+        snippet: j.snippet ?? j.description,
+        link: j.link ?? j.url,
+        fitScore: j.fitScore ?? j.matchScore,
+        confidence: j.confidence ?? j.matchLevel,
+        breakdown: j.breakdown ? Object.entries(j.breakdown).map(([k, v]) => ({ label: k, value: v as number })) : j.breakdown,
+      }));
+      setJobs(mapped);
     } catch (err) {
       setError(getApiErrorMessage(err));
     } finally {
@@ -69,19 +99,24 @@ export default function JobsPage() {
     setRefreshing(true);
     setError('');
     try {
-      await api.post('/jobs/refresh', { keywords: prefs.keywords || 'software developer', location: prefs.location || '' });
+      if (!selectedResume) {
+        setError('Select a resume first');
+        return;
+      }
       await fetchJobs();
-    } catch (err) {
-      setError(getApiErrorMessage(err));
     } finally {
       setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    fetchJobs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchResumes();
   }, []);
+
+  useEffect(() => {
+    if (selectedResume) fetchJobs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedResume]);
 
   return (
     <div className="space-y-6">
@@ -103,6 +138,25 @@ export default function JobsPage() {
             Refresh
           </button>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
+        <label className="text-xs text-gray-400">Resume</label>
+        {resumes.length === 0 ? (
+          <p className="text-sm text-gray-500 mt-1">No resumes found. Upload at ATS Check first.</p>
+        ) : (
+          <select
+            value={selectedResume}
+            onChange={(e) => setSelectedResume(e.target.value)}
+            className="mt-1 w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm"
+          >
+            {resumes.map((r) => (
+              <option key={r.id} value={r.id} className="bg-black">
+                {r.fileName} — {r.id.slice(0, 8)}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {showPrefs && (
