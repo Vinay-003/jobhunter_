@@ -95,29 +95,29 @@ const AuthForm: React.FC<AuthFormProps> = ({ type }) => {
               damping: 10 
             }}
           >
-            <BriefcaseBusiness size={48} className="text-primary-500" />
+            <BriefcaseBusiness size={48} className="text-amber-400" />
           </motion.div>
         </div>
-        <h1 className="text-3xl font-bold mb-2 bg-gradient-to-r from-primary-300 to-accent-300 text-transparent bg-clip-text">
+        <h1 className="text-3xl font-bold mb-2 bg-gradient-to-r from-amber-300 to-amber-500 text-transparent bg-clip-text" style={{ fontFamily: 'Fraunces, serif' }}>
           {type === 'login' ? 'Welcome Back' : 'Create Account'}
         </h1>
-        <p className="text-dark-300">
+        <p className="text-stone-500">
           {type === 'login' 
             ? 'Sign in to access your professional profile' 
             : 'Start your professional journey with us'}
         </p>
       </div>
 
-      <div className="card-border bg-dark-900/70 p-8">
+      <div className="card-border bg-stone-900/70 p-8">
         <form onSubmit={handleSubmit}>
           {type === 'signup' && (
             <div className="mb-6">
-              <label htmlFor="name" className="block text-sm font-medium text-dark-300 mb-2">
+              <label htmlFor="name" className="block text-sm font-medium text-stone-400 mb-2">
                 Full Name
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <User size={18} className="text-dark-400" />
+                  <User size={18} className="text-stone-500" />
                 </div>
                 <input
                   id="name"
@@ -133,12 +133,12 @@ const AuthForm: React.FC<AuthFormProps> = ({ type }) => {
           )}
           
           <div className="mb-6">
-            <label htmlFor="email" className="block text-sm font-medium text-dark-300 mb-2">
+            <label htmlFor="email" className="block text-sm font-medium text-stone-400 mb-2">
               Email Address
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Mail size={18} className="text-dark-400" />
+                  <Mail size={18} className="text-stone-500" />
               </div>
               <input
                 id="email"
@@ -153,12 +153,12 @@ const AuthForm: React.FC<AuthFormProps> = ({ type }) => {
           </div>
           
           <div className="mb-8">
-            <label htmlFor="password" className="block text-sm font-medium text-dark-300 mb-2">
+            <label htmlFor="password" className="block text-sm font-medium text-stone-400 mb-2">
               Password
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Lock size={18} className="text-dark-400" />
+                  <Lock size={18} className="text-stone-500" />
               </div>
               <input
                 id="password"
@@ -173,7 +173,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ type }) => {
                 <button
                   type="button"
                   onClick={togglePasswordVisibility}
-                  className="text-dark-400 hover:text-dark-300 focus:outline-none"
+                  className="text-stone-500 hover:text-stone-300 focus:outline-none"
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
@@ -186,7 +186,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ type }) => {
             className="auth-btn"
             whileTap={{ scale: 0.98 }}
             whileHover={{ 
-              boxShadow: "0 0 15px rgba(255, 51, 51, 0.5)",
+              boxShadow: "0 0 15px rgba(250, 204, 21, 0.35)",
             }}
             disabled={isLoading}
           >
@@ -194,7 +194,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ type }) => {
           </motion.button>
           
           {error && (
-            <div className="mt-4 text-red-500 text-sm text-center">
+            <div className="mt-4 text-amber-200 bg-amber-400/10 border border-amber-400/20 rounded-xl px-3 py-2 text-sm text-center">
               {error}
             </div>
           )}

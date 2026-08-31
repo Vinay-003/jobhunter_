@@ -27,7 +27,7 @@ const modes = [
     title: 'Resume Health',
     description: 'A rule-based 100-point review of ATS readability, impact, bullet quality, skills evidence, completeness, and writing.',
     icon: FileSearch,
-    accent: 'violet',
+    accent: 'amber',
     tags: ['No AI similarity', 'Detailed report', 'Priority fixes'],
   },
   {
@@ -36,7 +36,7 @@ const modes = [
     title: 'Tailored Match',
     description: 'Keep your Resume Health score separate, then compare your evidence, required skills, responsibilities, and seniority to one JD.',
     icon: Briefcase,
-    accent: 'cyan',
+    accent: 'amber',
     tags: ['JD-specific', 'Semantic evidence', 'Missing skills'],
   },
 ];
@@ -71,7 +71,7 @@ function FileDropzone({
       onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
-      className={`relative overflow-hidden rounded-2xl border border-dashed p-6 transition sm:p-8 ${dragging ? 'border-violet-300/60 bg-violet-500/[0.08]' : file ? 'border-emerald-400/25 bg-emerald-400/[0.035]' : 'border-white/[0.12] bg-black/10 hover:border-violet-400/35 hover:bg-violet-400/[0.025]'}`}
+      className={`relative overflow-hidden rounded-2xl border border-dashed p-6 transition sm:p-8 ${dragging ? 'border-amber-400/40 bg-amber-400/10' : file ? 'border-emerald-400/25 bg-emerald-400/[0.035]' : 'border-stone-700 bg-stone-900/50 hover:border-amber-400/40 hover:bg-amber-400/[0.06]'}`}
     >
       <input
         ref={inputRef}
@@ -81,18 +81,18 @@ function FileDropzone({
         disabled={loading}
         onChange={(event: ChangeEvent<HTMLInputElement>) => validate(event.target.files?.[0] ?? null)}
       />
-      <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-violet-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-amber-500/10 blur-3xl" />
       <div className="relative flex flex-col items-center text-center">
-        <span className={`grid h-14 w-14 place-items-center rounded-2xl border ${file ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300' : 'border-white/[0.08] bg-white/[0.04] text-violet-300'}`}>
+        <span className={`grid h-14 w-14 place-items-center rounded-2xl border ${file ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300' : 'border-stone-700 bg-stone-800 text-amber-300'}`}>
           {file ? <CheckCircle size={24} /> : <UploadCloud size={24} />}
         </span>
-        <p className="mt-4 text-sm font-semibold text-white">{file ? file.name : 'Drop your resume here'}</p>
-        <p className="mt-1 max-w-md text-xs leading-5 text-slate-500">{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB • ready to analyze` : 'PDF only, up to 5 MB. Text-based PDFs give the most reliable structural analysis.'}</p>
+        <p className="mt-4 text-sm font-semibold text-stone-100">{file ? file.name : 'Drop your resume here'}</p>
+        <p className="mt-1 max-w-md text-xs leading-5 text-stone-500">{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB • ready to analyze` : 'PDF only, up to 5 MB. Text-based PDFs give the most reliable structural analysis.'}</p>
         <button
           type="button"
           disabled={loading}
           onClick={() => inputRef.current?.click()}
-          className="pointer-events-auto mt-4 rounded-xl border border-white/[0.09] bg-white/[0.045] px-4 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/[0.075] hover:text-white"
+          className="pointer-events-auto mt-4 rounded-xl border border-stone-700 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-300 transition hover:bg-stone-700 hover:text-stone-100"
         >
           {file ? 'Choose another file' : 'Browse PDF'}
         </button>
@@ -101,7 +101,7 @@ function FileDropzone({
             type="button"
             disabled={loading}
             onClick={() => onFile(null)}
-            className="pointer-events-auto absolute right-0 top-0 rounded-lg p-1.5 text-slate-600 transition hover:bg-white/5 hover:text-slate-300"
+            className="pointer-events-auto absolute right-0 top-0 rounded-lg p-1.5 text-stone-600 transition hover:bg-white/5 hover:text-stone-300"
             aria-label="Remove selected file"
           >
             <X size={15} />
@@ -176,8 +176,8 @@ export default function AtsPage() {
           <h1 className="jh-title mt-3">Know what is holding your resume back.</h1>
           <p className="jh-subtitle mt-3">Start with document quality. Add a job description only when you want role-specific matching. We keep those two signals separate so the score stays interpretable.</p>
         </div>
-        <div className="flex max-w-xl gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 text-xs text-slate-500">
-          <ShieldCheck className="mt-0.5 shrink-0 text-emerald-300" size={17} />
+        <div className="flex max-w-xl gap-3 rounded-2xl border border-stone-800 bg-stone-900/60 p-3 text-xs text-stone-500">
+          <ShieldCheck className="mt-0.5 shrink-0 text-amber-300" size={17} />
           <span>Your no-JD report is deterministic and rule-based. AWS embeddings are used only for tailored matching and job relevance, never to invent a generic resume score.</span>
         </div>
       </section>
@@ -190,22 +190,22 @@ export default function AtsPage() {
             <button
               key={item.id}
               onClick={() => { setMode(item.id); setError(''); }}
-              className={`relative overflow-hidden rounded-2xl border p-5 text-left transition md:p-6 ${active ? item.accent === 'violet' ? 'border-violet-400/30 bg-violet-500/[0.07]' : 'border-cyan-300/25 bg-cyan-400/[0.055]' : 'border-white/[0.07] bg-white/[0.025] hover:border-white/[0.12] hover:bg-white/[0.04]'}`}
+              className={`relative overflow-hidden rounded-2xl border p-5 text-left transition md:p-6 ${active ? 'border-amber-400/30 bg-amber-400/[0.07]' : 'border-stone-800 bg-stone-900/60 hover:border-stone-700 hover:bg-stone-900'}`}
             >
-              <div className={`absolute right-[-55px] top-[-55px] h-40 w-40 rounded-full blur-3xl ${item.accent === 'violet' ? 'bg-violet-500/10' : 'bg-cyan-400/10'}`} />
+              <div className="absolute right-[-55px] top-[-55px] h-40 w-40 rounded-full blur-3xl bg-amber-500/10" />
               <div className="relative flex items-start gap-4">
-                <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border ${active ? item.accent === 'violet' ? 'border-violet-300/20 bg-violet-400/10 text-violet-300' : 'border-cyan-300/20 bg-cyan-300/10 text-cyan-200' : 'border-white/[0.07] bg-white/[0.035] text-slate-500'}`}>
+                <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border ${active ? 'border-amber-400/20 bg-amber-400/10 text-amber-300' : 'border-stone-700 bg-stone-800 text-stone-500'}`}>
                   <Icon size={20} />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{item.eyebrow}</p>
-                      <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-white">{item.title}</h2>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-600">{item.eyebrow}</p>
+                      <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>{item.title}</h2>
                     </div>
-                    <span className={`grid h-6 w-6 place-items-center rounded-full border ${active ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : 'border-white/[0.08] text-transparent'}`}><Check size={13} /></span>
+                    <span className={`grid h-6 w-6 place-items-center rounded-full border ${active ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : 'border-stone-700 text-transparent'}`}><Check size={13} /></span>
                   </div>
-                  <p className="mt-2 max-w-xl text-xs leading-5 text-slate-500">{item.description}</p>
+                  <p className="mt-2 max-w-xl text-xs leading-5 text-stone-500">{item.description}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {item.tags.map((tag) => <span key={tag} className="jh-chip">{tag}</span>)}
                   </div>
@@ -220,30 +220,30 @@ export default function AtsPage() {
         <div className="jh-surface-strong p-5 md:p-6">
           <div className="mb-5 flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-white">Upload and analyze</p>
-              <p className="mt-1 text-xs text-slate-500">Your report opens as a dedicated diagnostic page after processing.</p>
+              <p className="text-sm font-semibold text-stone-100">Upload and analyze</p>
+              <p className="mt-1 text-xs text-stone-500">Your report opens as a dedicated diagnostic page after processing.</p>
             </div>
-            <span className="hidden rounded-full border border-white/[0.07] bg-black/15 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-600 sm:inline-flex">Step 1 of 1</span>
+            <span className="hidden rounded-full border border-stone-800 bg-stone-950 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-stone-600 sm:inline-flex">Step 1 of 1</span>
           </div>
 
           <FileDropzone file={file} loading={loading} onFile={handleFile} />
 
           <div className="mt-5 grid gap-4 md:grid-cols-[.65fr_1.35fr]">
             <div>
-              <label className="text-[11px] font-medium text-slate-500">Career level</label>
+              <label className="text-[11px] font-medium text-stone-500">Career level</label>
               <select value={targetLevel} onChange={(event) => setTargetLevel(event.target.value as TargetLevel)} className="jh-input mt-2">
-                <option value="entry" className="bg-[#0d1019]">Entry / early career</option>
-                <option value="mid" className="bg-[#0d1019]">Mid-level</option>
-                <option value="senior" className="bg-[#0d1019]">Senior</option>
+                <option value="entry" className="bg-stone-950">Entry / early career</option>
+                <option value="mid" className="bg-stone-950">Mid-level</option>
+                <option value="senior" className="bg-stone-950">Senior</option>
               </select>
-              <p className="mt-1.5 text-[10px] leading-4 text-slate-600">Used only to adapt reasonable depth/length expectations—not to award points for being senior.</p>
+              <p className="mt-1.5 text-[10px] leading-4 text-stone-600">Used only to adapt reasonable depth/length expectations—not to award points for being senior.</p>
             </div>
 
             {mode === 'match' ? (
               <div>
                 <div className="flex items-center justify-between gap-3">
-                  <label className="text-[11px] font-medium text-slate-500">Job description</label>
-                  <span className="text-[10px] text-slate-700">{jobDescription.length.toLocaleString()} chars</span>
+                  <label className="text-[11px] font-medium text-stone-500">Job description</label>
+                  <span className="text-[10px] text-stone-600">{jobDescription.length.toLocaleString()} chars</span>
                 </div>
                 <textarea
                   value={jobDescription}
@@ -255,22 +255,22 @@ export default function AtsPage() {
                 />
               </div>
             ) : (
-              <div className="rounded-2xl border border-white/[0.065] bg-black/10 p-4">
-                <p className="text-[11px] font-medium text-slate-400">What the report checks</p>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-500 sm:grid-cols-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-2">
+              <div className="rounded-2xl border border-stone-800 bg-stone-950 p-4">
+                <p className="text-[11px] font-medium text-stone-400">What the report checks</p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-stone-500 sm:grid-cols-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-2">
                   {['ATS parseability', 'Core completeness', 'Impact & metrics', 'Experience / projects', 'Skills evidence', 'Bullet writing', 'Concision', 'Consistency'].map((label) => (
-                    <span key={label} className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-violet-400/60" />{label}</span>
+                    <span key={label} className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-amber-400/70" />{label}</span>
                   ))}
                 </div>
               </div>
             )}
           </div>
 
-          {error && <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/[0.07] px-4 py-3 text-xs text-rose-200">{error}</div>}
+          {error && <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">{error}</div>}
 
-          <div className="mt-5 flex flex-col-reverse gap-3 border-t border-white/[0.06] pt-5 sm:flex-row sm:items-center sm:justify-between">
-            <span className="flex items-center gap-2 text-[11px] text-slate-600"><Lock size={13} /> Private resume storage through your existing Supabase setup</span>
-            <button onClick={analyze} disabled={loading || !file} className="jh-button-accent min-w-[170px]">
+          <div className="mt-5 flex flex-col-reverse gap-3 border-t border-stone-800 pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <span className="flex items-center gap-2 text-[11px] text-stone-500"><Lock size={13} /> Private resume storage through your existing Supabase setup</span>
+            <button onClick={analyze} disabled={loading || !file} className="jh-button-primary min-w-[170px]">
               {loading ? <><Loader2 size={16} className="animate-spin" /> Analyzing…</> : <>{mode === 'match' ? 'Analyze + match' : 'Build my report'} <ArrowRight size={15} /></>}
             </button>
           </div>
@@ -279,23 +279,23 @@ export default function AtsPage() {
         <aside className="space-y-4">
           <div className="jh-surface p-5">
             <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-400/[0.08] text-violet-300"><Gauge size={18} /></span>
-              <div><p className="text-sm font-semibold text-white">A score you can explain</p><p className="text-[11px] text-slate-600">Every point maps to a visible check.</p></div>
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-400/10 text-amber-300"><Gauge size={18} /></span>
+              <div><p className="text-sm font-semibold text-stone-100">A score you can explain</p><p className="text-[11px] text-stone-600">Every point maps to a visible check.</p></div>
             </div>
             <div className="mt-5 space-y-3">
               {[['20', 'Parseability & ATS structure'], ['20', 'Impact & measurable evidence'], ['15', 'Completeness'], ['15', 'Experience / project quality'], ['10', 'Skills clarity & evidence'], ['10', 'Writing & bullet quality'], ['5', 'Concision'], ['5', 'Consistency']].map(([points, label]) => (
-                <div key={label} className="flex items-center justify-between gap-4 border-b border-white/[0.045] pb-2.5 last:border-0 last:pb-0">
-                  <span className="text-xs text-slate-500">{label}</span>
-                  <span className="text-xs font-semibold text-slate-300">{points} pts</span>
+                <div key={label} className="flex items-center justify-between gap-4 border-b border-stone-800 pb-2.5 last:border-0 last:pb-0">
+                  <span className="text-xs text-stone-500">{label}</span>
+                  <span className="text-xs font-semibold text-stone-300">{points} pts</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-cyan-300/10 bg-gradient-to-br from-cyan-400/[0.055] to-violet-500/[0.035] p-5">
-            <FileText size={18} className="text-cyan-200" />
-            <p className="mt-3 text-sm font-semibold text-white">Why this is different</p>
-            <p className="mt-1.5 text-xs leading-5 text-slate-500">A generic report should diagnose document quality, not guess whether your resume fits a job that was never provided. Tailored Match handles relevance separately.</p>
+          <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.06] p-5">
+            <FileText size={18} className="text-amber-300" />
+            <p className="mt-3 text-sm font-semibold text-stone-100">Why this is different</p>
+            <p className="mt-1.5 text-xs leading-5 text-stone-500">A generic report should diagnose document quality, not guess whether your resume fits a job that was never provided. Tailored Match handles relevance separately.</p>
           </div>
         </aside>
       </section>

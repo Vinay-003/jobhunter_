@@ -15,7 +15,7 @@ const CreativeVisual: React.FC = () => {
   
   useEffect(() => {
     // Generate random particles for the background
-    const colors = ['#ff3333', '#cc0000', '#990000', '#ffd700'];
+    const colors = ['#FACC15', '#EAB308', '#92400E', '#F59E0B'];
     const newParticles: Particle[] = [];
     
     for (let i = 0; i < 50; i++) {
@@ -74,14 +74,14 @@ const CreativeVisual: React.FC = () => {
           transition={{ duration: 0.5 }}
           className="text-4xl sm:text-5xl font-bold mb-6 text-white"
         >
-          Build Your <span className="text-primary-400">Career</span> Story
+          Build Your <span className="text-amber-300">Career</span> Story
         </motion.h2>
         
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="text-lg text-gray-300 mb-10"
+          className="text-lg text-stone-400 mb-10"
         >
           Create a resume that stands out, highlights your strengths, and lands you the perfect job.
         </motion.p>
@@ -97,11 +97,11 @@ const CreativeVisual: React.FC = () => {
               transition={{ duration: 0.5, delay }}
             >
               <motion.div
-                className="w-16 h-16 flex items-center justify-center bg-dark-800/80 rounded-xl mb-2 border border-dark-700"
+                className="w-16 h-16 flex items-center justify-center bg-stone-900/80 rounded-xl mb-2 border border-stone-700"
                 whileHover={{ 
                   scale: 1.05, 
-                  backgroundColor: "rgba(102, 0, 0, 0.3)",
-                  borderColor: "#ff3333" 
+                  backgroundColor: "rgba(120, 113, 108, 0.15)",
+                  borderColor: "#FACC15" 
                 }}
                 animate={{ y: [0, -8, 0] }}
                 transition={{ 
@@ -114,7 +114,7 @@ const CreativeVisual: React.FC = () => {
                   } 
                 }}
               >
-                <Icon size={28} className="text-primary-400" />
+                <Icon size={28} className="text-amber-300" />
               </motion.div>
             </motion.div>
           ))}
@@ -125,40 +125,40 @@ const CreativeVisual: React.FC = () => {
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.6, delay: 0.4 }}
-          className="relative mx-auto w-64 h-80 bg-dark-800/80 rounded-lg shadow-2xl shadow-primary-900/20 overflow-hidden card-border"
+          className="relative mx-auto w-64 h-80 bg-stone-900/80 rounded-lg shadow-2xl shadow-amber-900/20 overflow-hidden card-border"
         >
-          <div className="absolute top-0 left-0 w-full h-12 bg-gradient-to-r from-primary-700 to-primary-600"></div>
+          <div className="absolute top-0 left-0 w-full h-12 bg-gradient-to-r from-amber-600 to-amber-500"></div>
           <div className="absolute top-12 left-0 p-3 w-full">
-            <div className="h-3 w-3/4 bg-dark-600 rounded-full mb-2"></div>
-            <div className="h-3 w-1/2 bg-dark-600 rounded-full mb-6"></div>
+            <div className="h-3 w-3/4 bg-stone-700 rounded-full mb-2"></div>
+            <div className="h-3 w-1/2 bg-stone-700 rounded-full mb-6"></div>
             
             <div className="flex items-start mb-4">
-              <div className="w-8 h-8 bg-primary-500/20 rounded-full flex items-center justify-center mr-2">
-                <User size={16} className="text-primary-400" />
+              <div className="w-8 h-8 bg-amber-400/10 rounded-full flex items-center justify-center mr-2">
+                <User size={16} className="text-amber-300" />
               </div>
               <div className="flex-1">
-                <div className="h-2 bg-dark-600 rounded-full mb-1"></div>
-                <div className="h-2 w-3/4 bg-dark-600 rounded-full"></div>
+                <div className="h-2 bg-stone-700 rounded-full mb-1"></div>
+                <div className="h-2 w-3/4 bg-stone-700 rounded-full"></div>
               </div>
             </div>
             
             <div className="flex items-start mb-4">
-              <div className="w-8 h-8 bg-primary-500/20 rounded-full flex items-center justify-center mr-2">
-                <BriefcaseBusiness size={16} className="text-primary-400" />
+              <div className="w-8 h-8 bg-amber-400/10 rounded-full flex items-center justify-center mr-2">
+                <BriefcaseBusiness size={16} className="text-amber-300" />
               </div>
               <div className="flex-1">
-                <div className="h-2 bg-dark-600 rounded-full mb-1"></div>
-                <div className="h-2 w-2/4 bg-dark-600 rounded-full"></div>
+                <div className="h-2 bg-stone-700 rounded-full mb-1"></div>
+                <div className="h-2 w-2/4 bg-stone-700 rounded-full"></div>
               </div>
             </div>
             
             <div className="flex items-start">
-              <div className="w-8 h-8 bg-primary-500/20 rounded-full flex items-center justify-center mr-2">
-                <Award size={16} className="text-primary-400" />
+              <div className="w-8 h-8 bg-amber-400/10 rounded-full flex items-center justify-center mr-2">
+                <Award size={16} className="text-amber-300" />
               </div>
               <div className="flex-1">
-                <div className="h-2 bg-dark-600 rounded-full mb-1"></div>
-                <div className="h-2 w-3/5 bg-dark-600 rounded-full"></div>
+                <div className="h-2 bg-stone-700 rounded-full mb-1"></div>
+                <div className="h-2 w-3/5 bg-stone-700 rounded-full"></div>
               </div>
             </div>
           </div>

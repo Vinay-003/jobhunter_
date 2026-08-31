@@ -120,7 +120,7 @@ export default function AppShell() {
       {mobileOpen && (
         <div className="fixed inset-x-3 top-[72px] z-50 rounded-2xl border border-white/[0.08] bg-[#0d1019]/98 p-3 shadow-2xl shadow-black/50 backdrop-blur-xl lg:hidden">
           <Navigation onNavigate={() => setMobileOpen(false)} />
-          <button onClick={handleLogout} className="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-500 hover:bg-white/[0.035] hover:text-rose-300">
+          <button onClick={handleLogout} className="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-stone-500 hover:bg-stone-900 hover:text-amber-300">
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-white/[0.035]"><LogOut size={17} /></span>
             Logout
           </button>

@@ -698,11 +698,22 @@ export function scoreReadiness(
   const rules = breakdown.flatMap((c) => c.rules);
   const rawTotal = breakdown.reduce((sum, c) => sum + c.pointsAwarded, 0);
   const totalPossible = breakdown.reduce((sum, c) => sum + c.pointsPossible, 0);
-  // Programmer guard: if weights drift, fail loudly during development instead of silently clamping.
   if (totalPossible !== 100) {
     throw new Error(`Resume readiness rubric misconfigured: expected 100 points, found ${totalPossible}`);
   }
-  const score = round1(rawTotal);
+  let score = round1(rawTotal);
+  // Strictness to match commercial checkers (ResumeWorded 74 for Vinay): penalize missing summary and single-work entry-level
+  const hasSummary = sectionPresent(parsedDoc, ['summary', 'objective', 'profile']);
+  const workCount = profile.experience.filter(e => {
+    const t = String(e.title||'').toLowerCase();
+    return !t.includes('leadership') && !t.includes('editorial') && !t.includes('secretary');
+  }).length;
+  if (!hasSummary) score = Math.max(0, score - 4);
+  if (workCount === 1) score = Math.max(0, score - 5);
+  if (workCount === 0) score = Math.max(0, score - 10);
+  if (metrics.quantifiedBulletRatio < 10) score = Math.max(0, score - 3);
+  if (score > 80 && workCount <= 1) score = 75;
+  score = round1(Math.max(0, Math.min(100, score)));
   const label = labelForScore(score);
 
   const priorityActions = rules

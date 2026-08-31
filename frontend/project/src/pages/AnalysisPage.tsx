@@ -157,8 +157,8 @@ function statusIcon(status?: Status) {
 }
 
 function priorityClasses(priority: Priority) {
-  if (priority === 'high') return 'border-rose-400/15 bg-rose-400/[0.045] text-rose-200';
-  if (priority === 'low') return 'border-cyan-300/10 bg-cyan-300/[0.035] text-cyan-200';
+  if (priority === 'high') return 'border-amber-400/20 bg-amber-400/[0.06] text-amber-200';
+  if (priority === 'low') return 'border-stone-700 bg-stone-800/60 text-stone-300';
   return 'border-amber-300/15 bg-amber-300/[0.04] text-amber-200';
 }
 
@@ -174,7 +174,7 @@ function CategoryPanel({ category }: { category: Category }) {
   const issues = (category.rules ?? []).filter((rule) => rule.status !== 'pass').length;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/[0.07] bg-white/[0.025]">
+    <div className="overflow-hidden rounded-2xl border border-stone-800 bg-stone-900/60">
       <button onClick={() => setOpen((value) => !value)} className="w-full p-4 text-left md:p-5">
         <div className="flex items-start gap-4">
           <div className="min-w-0 flex-1">
@@ -182,9 +182,9 @@ function CategoryPanel({ category }: { category: Category }) {
               <p className="text-sm font-semibold text-white">{category.label || category.category}</p>
               {issues > 0 && <span className="rounded-full bg-amber-300/[0.08] px-2 py-0.5 text-[10px] font-semibold text-amber-200">{issues} issue{issues === 1 ? '' : 's'}</span>}
             </div>
-            <p className="mt-1 text-[11px] leading-5 text-slate-600">{category.summary}</p>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/[0.055]">
-              <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-cyan-300" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
+            <p className="mt-1 text-[11px] leading-5 text-stone-500">{category.summary}</p>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-stone-800">
+              <div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.max(0, Math.min(100, percent))}%` }} />
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-3">
@@ -198,9 +198,9 @@ function CategoryPanel({ category }: { category: Category }) {
       </button>
 
       {open && (
-        <div className="border-t border-white/[0.055] px-4 py-2 md:px-5">
+        <div className="border-t border-stone-800/60 px-4 py-2 md:px-5">
           {(category.rules ?? []).map((rule, index) => (
-            <div key={rule.ruleId || index} className="flex gap-3 border-b border-white/[0.045] py-4 last:border-0">
+            <div key={rule.ruleId || index} className="flex gap-3 border-b border-stone-800/50 py-4 last:border-0">
               <span className="mt-0.5 shrink-0">{statusIcon(rule.status)}</span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -208,8 +208,8 @@ function CategoryPanel({ category }: { category: Category }) {
                   <span className="text-[10px] font-medium text-slate-600">{rule.pointsAwarded ?? 0}/{rule.pointsPossible ?? 0} pts</span>
                 </div>
                 {rule.message && <p className="mt-1 text-[11px] leading-5 text-slate-500">{rule.message}</p>}
-                {rule.evidence && <p className="mt-1.5 break-words rounded-lg bg-black/15 px-2.5 py-2 text-[10px] leading-4 text-slate-600">Evidence: {rule.evidence}</p>}
-                {rule.status !== 'pass' && rule.recommendation && <p className="mt-2 text-[11px] leading-5 text-slate-400"><span className="font-semibold text-violet-300">Fix:</span> {rule.recommendation}</p>}
+                {rule.evidence && <p className="mt-1.5 break-words rounded-lg bg-stone-950 border border-stone-800 px-2.5 py-2 text-[10px] leading-4 text-stone-500">Evidence: {rule.evidence}</p>}
+                {rule.status !== 'pass' && rule.recommendation && <p className="mt-2 text-[11px] leading-5 text-slate-400"><span className="font-semibold text-amber-300">Fix:</span> {rule.recommendation}</p>}
               </div>
             </div>
           ))}
@@ -324,9 +324,9 @@ export default function AnalysisPage() {
         </div>
       </div>
 
-      <section className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-[#0e111c]/90 p-5 shadow-2xl shadow-black/20 md:p-7">
-        <div className="pointer-events-none absolute -left-20 -top-24 h-72 w-72 rounded-full bg-violet-500/[0.10] blur-3xl" />
-        <div className="pointer-events-none absolute -right-16 top-0 h-64 w-64 rounded-full bg-cyan-400/[0.06] blur-3xl" />
+      <section className="relative overflow-hidden rounded-3xl border border-stone-800 bg-[#1C1917]/90 p-5 shadow-2xl shadow-black/20 md:p-7">
+        <div className="pointer-events-none absolute -left-20 -top-24 h-72 w-72 rounded-full bg-amber-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -right-16 top-0 h-64 w-64 rounded-full bg-stone-700/10 blur-3xl" />
         <div className="relative grid gap-7 xl:grid-cols-[1fr_auto] xl:items-center">
           <div>
             <p className="jh-eyebrow"><Sparkles size={13} /> Resume health report</p>
@@ -342,7 +342,7 @@ export default function AnalysisPage() {
 
           <div className="flex items-center gap-5 xl:pr-2">
             <div className="relative grid h-36 w-36 place-items-center rounded-full p-[9px]" style={{ background: ring }}>
-              <div className="grid h-full w-full place-items-center rounded-full border border-white/[0.07] bg-[#0b0e17] text-center shadow-inner shadow-black/30">
+              <div className="grid h-full w-full place-items-center rounded-full border border-stone-800 bg-[#0C0A09] text-center shadow-inner shadow-black/30">
                 <div>
                   <p className="text-4xl font-semibold tracking-[-0.05em] text-white">{score}</p>
                   <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-slate-600">out of 100</p>
@@ -358,16 +358,16 @@ export default function AnalysisPage() {
       </section>
 
       {view.jdMatch && (
-        <section className="rounded-2xl border border-cyan-300/10 bg-gradient-to-br from-cyan-400/[0.055] to-violet-500/[0.035] p-5 md:p-6">
+        <section className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-5 md:p-6">
           <div className="grid gap-5 lg:grid-cols-[auto_1fr_auto] lg:items-center">
-            <span className="grid h-12 w-12 place-items-center rounded-xl bg-cyan-300/[0.08] text-cyan-200"><Target size={21} /></span>
+            <span className="grid h-12 w-12 place-items-center rounded-xl bg-amber-400/10 text-amber-300"><Target size={21} /></span>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-200/60">Separate job-specific signal</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-amber-300/70">Separate job-specific signal</p>
               <h2 className="mt-1 text-lg font-semibold text-white">Tailored Match</h2>
-              <p className="mt-1 text-xs leading-5 text-slate-500">This measures fit to the JD you supplied. It does not change the Resume Health score above.</p>
+              <p className="mt-1 text-xs leading-5 text-stone-500">This measures fit to the JD you supplied. It does not change the Resume Health score above.</p>
             </div>
             <div className="text-left lg:text-right">
-              <p className="text-3xl font-semibold tracking-[-0.04em] text-cyan-200">{view.jdMatch.score ?? '—'}<span className="text-sm font-normal text-slate-600">/100</span></p>
+              <p className="text-3xl font-semibold tracking-[-0.04em] text-amber-300">{view.jdMatch.score ?? '—'}<span className="text-sm font-normal text-stone-600">/100</span></p>
               <p className="text-[10px] text-slate-600">{view.confidence ? `${view.confidence} confidence` : 'JD-specific fit'}</p>
             </div>
           </div>
@@ -418,7 +418,7 @@ export default function AnalysisPage() {
                     {!!action.potentialGain && <span className="text-[10px] opacity-60">up to +{action.potentialGain} pts</span>}
                   </div>
                   <p className="mt-1.5 text-[11px] leading-5 text-slate-400">{action.why}</p>
-                  <p className="mt-2 text-[11px] leading-5 text-slate-200"><span className="font-semibold text-violet-300">Do this:</span> {action.how}</p>
+                  <p className="mt-2 text-[11px] leading-5 text-slate-200"><span className="font-semibold text-amber-300">Do this:</span> {action.how}</p>
                 </div>
               </div>
             </div>
@@ -435,9 +435,9 @@ export default function AnalysisPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center rounded-2xl border border-violet-400/10 bg-violet-400/[0.035] p-5">
+      <section className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center rounded-2xl border border-amber-400/15 bg-amber-400/[0.06] p-5">
         <div>
-          <div className="flex items-center gap-2 text-xs font-semibold text-violet-200"><Briefcase size={15} /> Ready to test market fit?</div>
+          <div className="flex items-center gap-2 text-xs font-semibold text-amber-200"><Briefcase size={15} className="text-amber-300" /> Ready to test market fit?</div>
           <p className="mt-1.5 max-w-2xl text-xs leading-5 text-slate-500">Resume Health tells you whether the document is strong. Job Matches tells you where that evidence is most relevant.</p>
         </div>
         <Link to="/app/jobs" className="jh-button-primary">Open Job Matches <ArrowRight size={14} /></Link>

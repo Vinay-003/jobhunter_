@@ -105,7 +105,7 @@ function scoreTone(score: number) {
   if (score >= 80) return { text: 'text-emerald-200', bg: 'bg-emerald-300/[0.08]', border: 'border-emerald-300/15' };
   if (score >= 65) return { text: 'text-amber-200', bg: 'bg-amber-300/[0.07]', border: 'border-amber-300/15' };
   if (score >= 50) return { text: 'text-stone-300', bg: 'bg-stone-700/30', border: 'border-stone-700' };
-  return { text: 'text-red-300', bg: 'bg-red-500/[0.06]', border: 'border-red-500/15' };
+  return { text: 'text-stone-300', bg: 'bg-stone-800/60', border: 'border-stone-700' };
 }
 
 function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelect: () => void }) {
@@ -143,7 +143,7 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
             </div>
           )}
         </div>
-        <ChevronRight size={15} className={`mt-3 shrink-0 ${active ? 'text-violet-300' : 'text-slate-700'}`} />
+        <ChevronRight size={15} className={`mt-3 shrink-0 ${active ? 'text-amber-300' : 'text-slate-700'}`} />
       </div>
     </button>
   );
@@ -188,7 +188,7 @@ function JobDetail({ job }: { job: Job }) {
               return (
                 <div key={`${item.label}-${index}`} className="rounded-xl border border-white/[0.055] bg-black/10 p-3">
                   <div className="flex items-center justify-between gap-3"><span className="truncate text-[10px] capitalize text-slate-500">{item.label.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ')}</span><span className="text-[11px] font-semibold text-slate-300">{shown}</span></div>
-                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.055]"><div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-cyan-300" style={{ width: `${Math.max(4, Math.min(100, shown))}%` }} /></div>
+                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.055]"><div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.max(4, Math.min(100, shown))}%` }} /></div>
                 </div>
               );
             })}
@@ -212,10 +212,10 @@ function JobDetail({ job }: { job: Job }) {
       </div>
 
       {(reasons.length > 0 || job.evidence?.length) && (
-        <div className="rounded-xl border border-violet-400/10 bg-violet-400/[0.025] p-4">
-          <p className="text-[11px] font-semibold text-violet-200">Why this job surfaced</p>
-          <ul className="mt-2.5 space-y-2 text-[11px] leading-5 text-slate-500">
-            {[...reasons, ...(job.evidence ?? [])].slice(0, 6).map((reason, index) => <li key={index} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-violet-300/60" /><span>{reason}</span></li>)}
+        <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.06] p-4">
+          <p className="text-[11px] font-semibold text-amber-200">Why this job surfaced</p>
+          <ul className="mt-2.5 space-y-2 text-[11px] leading-5 text-stone-500">
+            {[...reasons, ...(job.evidence ?? [])].slice(0, 6).map((reason, index) => <li key={index} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-amber-300/70" /><span>{reason}</span></li>)}
           </ul>
         </div>
       )}
@@ -330,8 +330,8 @@ export default function JobsPage() {
       </section>
 
       {showFilters && (
-        <section className="rounded-2xl border border-violet-400/10 bg-violet-400/[0.025] p-4 md:p-5">
-          <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-xs font-semibold text-slate-300"><Filter size={14} className="text-violet-300" /> Search profile</div><button onClick={() => setShowFilters(false)} className="rounded-lg p-1.5 text-slate-600 hover:bg-white/5 hover:text-white"><X size={14} /></button></div>
+        <section className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.04] p-4 md:p-5">
+          <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-xs font-semibold text-stone-300"><Filter size={14} className="text-amber-300" /> Search profile</div><button onClick={() => setShowFilters(false)} className="rounded-lg p-1.5 text-stone-500 hover:bg-white/5 hover:text-white"><X size={14} /></button></div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div><label className="text-[10px] font-medium text-slate-600">Resume</label><select value={selectedResume} onChange={(event) => setSelectedResume(event.target.value)} className="jh-input mt-1.5">{resumes.map((resume) => <option key={resume.id} value={resume.id} className="bg-[#0d1019]">{resume.fileName ?? resume.file_name ?? resume.id.slice(0, 8)}</option>)}</select></div>
             <div><label className="text-[10px] font-medium text-slate-600">Target role</label><input value={prefs.targetRole} onChange={(event) => setPrefs((current) => ({ ...current, targetRole: event.target.value }))} className="jh-input mt-1.5" placeholder="e.g. Backend Engineer" /></div>
@@ -348,14 +348,14 @@ export default function JobsPage() {
         <div className="flex min-h-[45vh] items-center justify-center gap-2 text-sm text-slate-500"><Loader2 size={18} className="animate-spin" /> Ranking opportunities for this resume…</div>
       ) : resumes.length === 0 ? (
         <div className="mx-auto max-w-xl rounded-3xl border border-white/[0.07] bg-white/[0.025] px-6 py-12 text-center">
-          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-violet-400/[0.07] text-violet-300"><Briefcase size={23} /></span>
+          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-amber-400/10 text-amber-300"><Briefcase size={23} /></span>
           <h2 className="mt-4 text-lg font-semibold text-white">Analyze a resume first</h2>
           <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-slate-500">JobHunter needs a parsed resume profile before it can retrieve and rank relevant roles.</p>
           <Link to="/app/ats" className="jh-button-primary mt-5">Go to Resume Health <ChevronRight size={14} /></Link>
         </div>
       ) : visibleJobs.length === 0 ? (
         <div className="mx-auto max-w-xl rounded-3xl border border-white/[0.07] bg-white/[0.025] px-6 py-12 text-center">
-          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-cyan-400/[0.06] text-cyan-200"><Search size={23} /></span>
+          <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-stone-800 text-stone-500"><Search size={23} /></span>
           <h2 className="mt-4 text-lg font-semibold text-white">No matches above your threshold</h2>
           <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-slate-500">Lower the minimum fit score, broaden the target role/location, or refresh the provider cache.</p>
           <button onClick={() => setShowFilters(true)} className="jh-button-ghost mt-5">Adjust preferences</button>

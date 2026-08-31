@@ -14,19 +14,19 @@ import ProfilePage from '../pages/ProfilePage';
 
 function PrivacyPage() {
   return (
-    <div className="max-w-3xl mx-auto px-4 py-12 text-gray-300">
-      <h1 className="text-2xl font-bold text-white mb-4">Privacy Policy</h1>
+    <div className="max-w-3xl mx-auto px-4 py-12 text-stone-400">
+      <h1 className="text-2xl font-bold text-stone-100 mb-4" style={{ fontFamily: 'Fraunces, serif' }}>Privacy Policy</h1>
       <p className="text-sm leading-relaxed">We store resumes securely and only use data to provide ATS scoring and job matching. Contact support for data deletion requests.</p>
-      <a href="/" className="text-red-400 text-sm mt-4 inline-block">← Back to home</a>
+      <a href="/" className="text-amber-300 hover:text-amber-200 text-sm mt-4 inline-block">← Back to home</a>
     </div>
   );
 }
 function TermsPage() {
   return (
-    <div className="max-w-3xl mx-auto px-4 py-12 text-gray-300">
-      <h1 className="text-2xl font-bold text-white mb-4">Terms of Service</h1>
+    <div className="max-w-3xl mx-auto px-4 py-12 text-stone-400">
+      <h1 className="text-2xl font-bold text-stone-100 mb-4" style={{ fontFamily: 'Fraunces, serif' }}>Terms of Service</h1>
       <p className="text-sm leading-relaxed">Use JobHunter responsibly. Uploaded content must be your own. We provide analysis for informational purposes only.</p>
-      <a href="/" className="text-red-400 text-sm mt-4 inline-block">← Back to home</a>
+      <a href="/" className="text-amber-300 hover:text-amber-200 text-sm mt-4 inline-block">← Back to home</a>
     </div>
   );
 }
@@ -65,7 +65,7 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
 
   if (state === 'loading') {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-gray-400 text-sm">
+      <div className="min-h-screen bg-[#0C0A09] flex items-center justify-center text-stone-500 text-sm">
         Checking session…
       </div>
     );
@@ -86,7 +86,7 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
       .finally(() => setChecked(true));
   }, []);
 
-  if (!checked) return <div className="min-h-screen bg-[#0a0a0f]" />;
+  if (!checked) return <div className="min-h-screen bg-[#0C0A09]" />;
   if (isAuthed) return <Navigate to="/app/ats" replace />;
   return <>{children}</>;
 }
