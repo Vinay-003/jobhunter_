@@ -1,129 +1,127 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700;9..144,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #f7f8fb;
-  background: #070910;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  color: #F5F5F4;
+  background: #0C0A09;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  --jh-bg: #070910;
-  --jh-panel: rgba(15, 18, 29, 0.82);
-  --jh-panel-strong: rgba(18, 22, 35, 0.96);
-  --jh-line: rgba(255, 255, 255, 0.075);
-  --jh-muted: #9299a8;
-  --jh-violet: #8b5cf6;
-  --jh-cyan: #22d3ee;
-  --jh-green: #34d399;
-  --jh-amber: #fbbf24;
-  --jh-rose: #fb7185;
+  --jh-bg: #0C0A09;
+  --jh-bg-soft: #1C1917;
+  --jh-panel: #1C1917;
+  --jh-panel-strong: #292524;
+  --jh-line: rgba(231, 229, 228, 0.08);
+  --jh-line-strong: rgba(231, 229, 228, 0.14);
+  --jh-muted: #A8A29E;
+  --jh-muted-strong: #78716C;
+  --jh-paper: #F5F5F4;
+  --jh-amber: #FACC15;
+  --jh-amber-strong: #EAB308;
+  --jh-amber-soft: rgba(250, 204, 21, 0.12);
+  --jh-emerald: #10B981;
+  --jh-rose: #F43F5E;
 }
 
 * { box-sizing: border-box; }
 html { background: var(--jh-bg); scroll-behavior: smooth; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--jh-bg); }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--jh-bg); color: var(--jh-paper); }
 button, input, textarea, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
-::selection { background: rgba(139, 92, 246, 0.4); color: white; }
+::selection { background: rgba(250, 204, 21, 0.3); color: #0C0A09; }
 
 @layer base {
   body {
-    @apply bg-dark-950 text-white font-sans;
+    @apply bg-[#0C0A09] text-stone-100 font-sans;
   }
-
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-display;
+  h1, h2, h3 {
+    font-family: 'Fraunces', Georgia, serif;
+    letter-spacing: -0.02em;
+  }
+  h4, h5, h6 {
+    @apply font-sans font-semibold;
+  }
+  code, pre {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
   }
 }
 
 @layer components {
-  /* Existing auth/landing primitives — retained for compatibility. */
   .auth-input {
-    @apply w-full bg-dark-800/80 border-2 border-dark-700 rounded-lg px-4 py-3
-    text-white placeholder:text-dark-400 focus:outline-none focus:border-primary-500
-    transition-all duration-300;
+    @apply w-full bg-stone-900 border border-stone-800 rounded-xl px-4 py-3
+    text-stone-100 placeholder:text-stone-500 focus:outline-none focus:border-amber-400/40 focus:ring-2 focus:ring-amber-400/10
+    transition-all duration-200;
   }
-
   .auth-btn {
-    @apply w-full bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400
-    text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300
-    focus:outline-none focus:ring-2 focus:ring-primary-300 focus:ring-opacity-50 shadow-lg;
+    @apply w-full bg-amber-400 hover:bg-amber-300 text-stone-900 font-semibold py-3 px-6 rounded-xl
+    transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-amber-400/30;
   }
-
   .auth-link {
-    @apply text-primary-300 hover:text-primary-200 transition-colors duration-300 underline;
+    @apply text-amber-300 hover:text-amber-200 transition-colors duration-200;
   }
+  .particle { @apply absolute rounded-full opacity-20 pointer-events-none; }
 
-  .particle {
-    @apply absolute rounded-full opacity-20 pointer-events-none;
-  }
-
-  /* V3 authenticated workspace design system. */
   .jh-surface {
-    @apply rounded-2xl border border-white/[0.08] bg-white/[0.035] shadow-2xl shadow-black/10;
-    backdrop-filter: blur(18px);
+    @apply rounded-[20px] border border-stone-800 bg-stone-900/60 shadow-2xl shadow-black/20;
+    backdrop-filter: blur(12px);
   }
   .jh-surface-strong {
-    @apply rounded-2xl border border-white/[0.09] bg-[#10131f]/95 shadow-2xl shadow-black/20;
+    @apply rounded-[20px] border border-stone-700/60 bg-stone-900 shadow-2xl shadow-black/20;
   }
   .jh-eyebrow {
-    @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-violet-300;
+    @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300;
   }
   .jh-title {
-    @apply text-3xl font-semibold tracking-[-0.035em] text-white md:text-4xl;
+    font-family: 'Fraunces', serif;
+    @apply text-3xl font-bold tracking-[-0.02em] text-stone-100 md:text-[34px];
   }
   .jh-subtitle {
-    @apply max-w-2xl text-sm leading-6 text-slate-400 md:text-[15px];
+    @apply max-w-2xl text-sm leading-6 text-stone-400;
   }
   .jh-button-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#090b12] transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-amber-400 px-5 py-2.5 text-sm font-semibold text-stone-900 transition hover:bg-amber-300 disabled:opacity-40;
   }
   .jh-button-accent {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-950/30 transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-stone-800 px-5 py-2.5 text-sm font-medium text-stone-100 border border-stone-700 hover:bg-stone-700 transition disabled:opacity-40;
   }
   .jh-button-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3.5 py-2.5 text-sm font-medium text-slate-300 transition hover:border-white/15 hover:bg-white/[0.065] hover:text-white;
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-stone-800 bg-stone-900/60 px-4 py-2.5 text-sm text-stone-400 hover:text-stone-100 hover:border-stone-700 transition;
   }
   .jh-input {
-    @apply w-full rounded-xl border border-white/[0.09] bg-black/20 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-violet-400/60 focus:ring-2 focus:ring-violet-500/10;
+    @apply w-full rounded-xl border border-stone-800 bg-stone-900 px-3.5 py-2.5 text-sm text-stone-100 outline-none transition placeholder:text-stone-600 focus:border-amber-400/40 focus:ring-2 focus:ring-amber-400/10;
   }
   .jh-chip {
-    @apply inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-300;
+    @apply inline-flex items-center rounded-full border border-stone-800 bg-stone-900 px-2.5 py-1 text-xs font-medium text-stone-400;
   }
 }
 
-/* Existing public/auth visual effects — retained. */
+/* Restored visuals */
 .gradient-bg {
-  background: linear-gradient(145deg, #540404, #330000, #0f0f0f);
-  background-size: 200% 200%;
-  animation: gradient 15s ease infinite;
+  background: #0C0A09;
 }
-
 .card-border {
   position: relative;
-  border-radius: 0.75rem;
+  border-radius: 1rem;
   overflow: hidden;
 }
 .card-border::before {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: 0.75rem;
-  padding: 2px;
-  background: linear-gradient(45deg, #ff3333, #cc0000, #ffd700, #990000);
-  background-size: 400% 400%;
-  animation: gradient 15s ease infinite;
+  border-radius: 1rem;
+  padding: 1.5px;
+  background: linear-gradient(90deg, #FACC15, #78716C);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
+  opacity: 0.6;
 }
 
-/* Authenticated workspace background. Public screens can still override it via gradient-bg. */
 body::before {
   content: "";
   position: fixed;
@@ -131,9 +129,9 @@ body::before {
   pointer-events: none;
   z-index: -2;
   background:
-    radial-gradient(circle at 16% -5%, rgba(139, 92, 246, 0.16), transparent 28rem),
-    radial-gradient(circle at 90% 8%, rgba(34, 211, 238, 0.09), transparent 26rem),
-    linear-gradient(180deg, #080a12 0%, #070910 42%, #06070c 100%);
+    radial-gradient(800px circle at 15% -10%, rgba(250,204,21,0.09), transparent 60%),
+    radial-gradient(600px circle at 85% 5%, rgba(16,185,129,0.06), transparent 60%),
+    linear-gradient(180deg, #0C0A09 0%, #0C0A09 100%);
 }
 body::after {
   content: "";
@@ -141,24 +139,15 @@ body::after {
   inset: 0;
   pointer-events: none;
   z-index: -1;
-  opacity: 0.16;
-  background-image:
-    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(to bottom, black, transparent 65%);
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
 }
 
-.jh-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.28) transparent; }
+.jh-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(168,162,158,.3) transparent; }
 .jh-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
 .jh-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.jh-scrollbar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.24); border-radius: 999px; }
+.jh-scrollbar::-webkit-scrollbar-thumb { background: rgba(168,162,158,.25); border-radius: 999px; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

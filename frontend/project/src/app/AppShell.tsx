@@ -37,19 +37,19 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           className={({ isActive }) =>
             `group flex items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
               isActive
-                ? 'border-violet-400/20 bg-violet-400/[0.09] text-white'
-                : 'border-transparent text-slate-400 hover:border-white/[0.06] hover:bg-white/[0.035] hover:text-slate-100'
+                ? 'border-amber-400/20 bg-amber-400/[0.08] text-stone-100'
+                : 'border-transparent text-stone-500 hover:border-stone-800 hover:bg-stone-900/50 hover:text-stone-300'
             }`
           }
         >
           {({ isActive }) => (
             <>
-              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${isActive ? 'bg-violet-400/15 text-violet-300' : 'bg-white/[0.035] text-slate-500 group-hover:text-slate-300'}`}>
+              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${isActive ? 'bg-amber-400/15 text-amber-300' : 'bg-stone-800 text-stone-500 group-hover:text-stone-300'}`}>
                 <item.icon size={17} strokeWidth={1.8} />
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-medium">{item.label}</span>
-                <span className={`block truncate text-[11px] ${isActive ? 'text-violet-200/55' : 'text-slate-600 group-hover:text-slate-500'}`}>{item.hint}</span>
+                <span className={`block truncate text-[11px] ${isActive ? 'text-amber-200/60' : 'text-stone-600 group-hover:text-stone-500'}`}>{item.hint}</span>
               </span>
             </>
           )}
@@ -71,48 +71,48 @@ export default function AppShell() {
   };
 
   return (
-    <div className="min-h-screen text-white">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[268px] border-r border-white/[0.065] bg-[#080a12]/92 px-4 py-5 backdrop-blur-xl lg:flex lg:flex-col">
-        <button onClick={() => navigate('/app/ats')} className="mb-8 flex items-center gap-3 px-2 text-left">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 shadow-lg shadow-violet-950/30">
+    <div className="min-h-screen text-stone-100 bg-[#0C0A09]">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[268px] border-r border-stone-800 bg-[#0C0A09]/95 px-4 py-5 backdrop-blur-xl lg:flex lg:flex-col">
+        <button onClick={() => navigate('/app/ats')} className="mb-8 flex items-center gap-3 px-2 text-left group">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-400 text-stone-900 shadow-lg shadow-amber-900/20 group-hover:bg-amber-300 transition">
             <BarChart3 size={20} />
           </span>
           <span>
-            <span className="block text-[17px] font-semibold tracking-[-0.03em]">JobHunter</span>
-            <span className="block text-[10px] font-medium uppercase tracking-[0.16em] text-slate-600">Career workspace</span>
+            <span className="block text-[17px] font-semibold tracking-[-0.03em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>JobHunter</span>
+            <span className="block text-[10px] font-medium uppercase tracking-[0.16em] text-stone-600">Career workspace</span>
           </span>
         </button>
 
-        <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-700">Workspace</p>
+        <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-stone-700">Workspace</p>
         <Navigation />
 
         <div className="mt-auto space-y-3">
-          <div className="rounded-2xl border border-violet-400/10 bg-gradient-to-br from-violet-500/[0.08] to-cyan-400/[0.03] p-3.5">
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-200">
-              <Sparkles size={14} className="text-violet-300" /> One resume, two signals
+          <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.06] p-3.5">
+            <div className="flex items-center gap-2 text-xs font-medium text-stone-200">
+              <Sparkles size={14} className="text-amber-300" /> One resume, two signals
             </div>
-            <p className="mt-1.5 text-[11px] leading-5 text-slate-500">Resume Health measures document quality. Job Match measures fit for a specific role.</p>
+            <p className="mt-1.5 text-[11px] leading-5 text-stone-500">Resume Health measures document quality. Job Match measures fit for a specific role.</p>
           </div>
 
-          <div className="flex items-center gap-3 rounded-xl border border-white/[0.055] bg-white/[0.025] p-2.5">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-xs font-semibold text-slate-300">{initials(displayName)}</span>
+          <div className="flex items-center gap-3 rounded-xl border border-stone-800 bg-stone-900/60 p-2.5">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-stone-800 text-xs font-semibold text-stone-300">{initials(displayName)}</span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-medium text-slate-300">{displayName}</p>
-              <p className="text-[10px] text-slate-600">Signed in</p>
+              <p className="truncate text-xs font-medium text-stone-300">{displayName}</p>
+              <p className="text-[10px] text-stone-600">Signed in</p>
             </div>
-            <button onClick={handleLogout} className="rounded-lg p-2 text-slate-600 transition hover:bg-white/5 hover:text-rose-300" aria-label="Logout">
+            <button onClick={handleLogout} className="rounded-lg p-2 text-stone-600 transition hover:bg-stone-800 hover:text-amber-300" aria-label="Logout">
               <LogOut size={15} />
             </button>
           </div>
         </div>
       </aside>
 
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/[0.06] bg-[#080a12]/85 px-4 backdrop-blur-xl lg:hidden">
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-stone-800 bg-[#0C0A09]/85 px-4 backdrop-blur-xl lg:hidden">
         <button onClick={() => navigate('/app/ats')} className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400"><BarChart3 size={18} /></span>
-          <span className="font-semibold tracking-[-0.03em]">JobHunter</span>
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-400 text-stone-900"><BarChart3 size={18} /></span>
+          <span className="font-semibold tracking-[-0.03em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>JobHunter</span>
         </button>
-        <button onClick={() => setMobileOpen((value) => !value)} className="rounded-xl border border-white/[0.08] bg-white/[0.035] p-2.5 text-slate-300" aria-label="Toggle navigation">
+        <button onClick={() => setMobileOpen((value) => !value)} className="rounded-xl border border-stone-800 bg-stone-900 p-2.5 text-stone-300" aria-label="Toggle navigation">
           {mobileOpen ? <X size={19} /> : <Menu size={19} />}
         </button>
       </header>

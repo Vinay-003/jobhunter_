@@ -479,38 +479,40 @@ export function scoreReadiness(
   }
   breakdown.push(category('completeness', 'Core completeness', completeRules, 'Are the essential sections and contact signals present without forcing optional sections?'));
 
-  // 3) Impact & measurable evidence — 20
+  // 3) Impact & measurable evidence — 20 (STRICT: ResumeWorded 74 benchmark)
   const impactRules: RuleResult[] = [];
   {
     const ratio = bullets.length ? quantified.length / bullets.length : 0;
-    const pts = bullets.length === 0 ? 0 : ratio >= 0.5 ? 10 : ratio >= 0.35 ? 8 : ratio >= 0.2 ? 5 : quantified.length >= 1 ? 2.5 : 0;
+    // Stricter: was 0.5->10, now 0.6->10, and 0.2->5 becomes 0.15->3
+    const pts = bullets.length === 0 ? 0 : ratio >= 0.6 ? 10 : ratio >= 0.4 ? 7 : ratio >= 0.25 ? 4 : ratio >= 0.12 ? 2 : quantified.length >= 1 ? 1 : 0;
     impactRules.push(rule('impact_metrics', 'impact', 'Quantified achievements', pts, 10,
       bullets.length ? `${quantified.length} of ${bullets.length} evidence bullets contain a measurable result or scope signal.` : 'No reliable experience/project bullets were detected.', {
         evidence: `quantifiedRatio=${metrics.quantifiedBulletRatio}%`,
         recommendation: 'Add credible scale, speed, quality, revenue, cost, user, volume, or time metrics to the bullets where numbers genuinely exist.',
-        priority: pts < 5 ? 'high' : 'medium',
+        priority: pts < 4 ? 'high' : 'medium',
       }));
   }
   {
     const ratio = bullets.length ? outcomeBullets.length / bullets.length : 0;
-    const pts = bullets.length === 0 ? 0 : ratio >= 0.45 ? 6 : ratio >= 0.3 ? 5 : ratio >= 0.15 ? 3 : outcomeBullets.length >= 1 ? 1.5 : 0;
+    // Stricter: 0.5->6 becomes 0.6->6, and 0.15->3 becomes 0.2->2
+    const pts = bullets.length === 0 ? 0 : ratio >= 0.6 ? 6 : ratio >= 0.4 ? 4 : ratio >= 0.25 ? 2 : outcomeBullets.length >= 1 ? 1 : 0;
     impactRules.push(rule('impact_outcomes', 'impact', 'Outcome-oriented bullets', pts, 6,
       bullets.length ? `${outcomeBullets.length} bullet${outcomeBullets.length === 1 ? '' : 's'} communicate an outcome or improvement.` : 'No outcome evidence was detected.', {
         recommendation: 'Rewrite task-only bullets as action + context + outcome. Explain what changed because of your work.',
-        priority: pts < 3 ? 'high' : 'medium',
+        priority: pts < 2 ? 'high' : 'medium',
       }));
   }
   {
     const evidenceBullets = bullets.filter((b) => b.source === 'experience' || b.source === 'projects');
     let pts = 0;
-    if (evidenceBullets.length >= 8) pts = 4;
-    else if (evidenceBullets.length >= 5) pts = 3;
-    else if (evidenceBullets.length >= 3) pts = 2;
-    else if (evidenceBullets.length >= 1) pts = 1;
+    if (evidenceBullets.length >= 10) pts = 4;
+    else if (evidenceBullets.length >= 7) pts = 3;
+    else if (evidenceBullets.length >= 4) pts = 1.5;
+    else if (evidenceBullets.length >= 1) pts = 0.5;
     impactRules.push(rule('impact_evidence_volume', 'impact', 'Evidence density', pts, 4,
       `${evidenceBullets.length} substantive experience/project bullet${evidenceBullets.length === 1 ? '' : 's'} were detected.`, {
         recommendation: 'Give your strongest roles/projects multiple concise bullets with concrete scope, action, and result.',
-        priority: evidenceBullets.length < 3 ? 'high' : 'medium',
+        priority: evidenceBullets.length < 4 ? 'high' : 'medium',
       }));
   }
   breakdown.push(category('impact', 'Impact & evidence', impactRules, 'Does the resume prove outcomes instead of only listing responsibilities?'));
@@ -566,7 +568,7 @@ export function scoreReadiness(
   }
   breakdown.push(category('experience_quality', 'Experience & project quality', experienceRules, 'Does the resume show enough credible evidence for the candidate’s level?'));
 
-  // 5) Skills clarity & evidence — 10
+  // 5) Skills clarity & evidence — 10 (STRICT)
   const skillRules: RuleResult[] = [];
   {
     const hasSkillsSection = sectionPresent(parsedDoc, ['skills', 'technical skills']);
@@ -579,58 +581,63 @@ export function scoreReadiness(
   {
     const n = profile.skillsNormalized.length;
     let pts = 0;
-    if (n >= 8 && n <= 24) pts = 3;
-    else if (n >= 5 && n < 8) pts = 2.5;
-    else if (n > 24 && n <= 35) pts = 2;
-    else if (n >= 2) pts = 1.5;
+    // Stricter: 12-20 ideal, not 8-24; 23 is now 2 not 3 (ResumeWorded would flag 23 as borderline high)
+    if (n >= 12 && n <= 20) pts = 3;
+    else if (n >= 8 && n < 12) pts = 2.5;
+    else if (n > 20 && n <= 28) pts = 1.5;
+    else if (n > 28) pts = 1;
+    else if (n >= 5) pts = 2;
+    else if (n >= 2) pts = 1;
     else if (n === 1) pts = 0.5;
     skillRules.push(rule('skills_focus', 'skills', 'Skill focus', pts, 3,
       `${n} normalized hard skill${n === 1 ? '' : 's'} were detected.`, {
-        recommendation: n > 24
+        recommendation: n > 20
           ? 'Trim low-value or obsolete skills and keep the technologies/tools you can defend in an interview.'
           : 'Add the hard skills that are genuinely demonstrated by your experience/projects; avoid soft-skill keyword stuffing.',
-        priority: pts < 2 ? 'medium' : 'low',
+        priority: pts < 1.5 ? 'medium' : 'low',
       }));
   }
   {
     const n = profile.skillsNormalized.length;
     const ratio = n ? skillsEvidence / n : 0;
-    const pts = n === 0 ? 0 : ratio >= 0.5 ? 4 : ratio >= 0.3 ? 3 : ratio >= 0.15 ? 2 : skillsEvidence >= 1 ? 1 : 0;
+    // Stricter: 0.5->4 becomes 0.6->4
+    const pts = n === 0 ? 0 : ratio >= 0.6 ? 4 : ratio >= 0.4 ? 2.5 : ratio >= 0.2 ? 1 : skillsEvidence >= 1 ? 0.5 : 0;
     skillRules.push(rule('skills_evidence', 'skills', 'Skills backed by evidence', pts, 4,
       `${skillsEvidence} detected skill${skillsEvidence === 1 ? '' : 's'} also appear in experience/project evidence.`, {
         evidence: `skillsEvidence=${skillsEvidence}/${n}`,
         recommendation: 'Mention important skills naturally inside accomplishment bullets so they are supported by evidence, not only listed.',
-        priority: pts < 2 ? 'high' : 'medium',
+        priority: pts < 1 ? 'high' : 'medium',
       }));
   }
   breakdown.push(category('skills', 'Skills clarity', skillRules, 'Are hard skills focused and supported by real experience or projects?'));
 
-  // 6) Writing & bullet quality — 10
+  // 6) Writing & bullet quality — 10 (STRICT)
   const writingRules: RuleResult[] = [];
   {
     const ratio = bullets.length ? actionLed.length / bullets.length : 0;
-    const pts = bullets.length === 0 ? 0 : ratio >= 0.75 ? 4 : ratio >= 0.55 ? 3 : ratio >= 0.35 ? 2 : actionLed.length >= 1 ? 1 : 0;
+    // Stricter: 0.75->4 becomes 0.8->4
+    const pts = bullets.length === 0 ? 0 : ratio >= 0.8 ? 4 : ratio >= 0.6 ? 2.5 : ratio >= 0.4 ? 1.5 : actionLed.length >= 1 ? 0.5 : 0;
     writingRules.push(rule('writing_action_verbs', 'writing', 'Action-led bullets', pts, 4,
       bullets.length ? `${actionLed.length} of ${bullets.length} bullets begin with a strong action verb.` : 'No reliable bullets were detected.', {
         evidence: `actionLedRatio=${metrics.actionLedBulletRatio}%`,
         recommendation: 'Start accomplishment bullets with specific verbs such as Built, Reduced, Automated, Led, Improved, or Shipped.',
-        priority: pts < 2 ? 'high' : 'medium',
+        priority: pts < 1.5 ? 'high' : 'medium',
       }));
   }
   {
-    const pts = weakPhraseHits === 0 ? 3 : weakPhraseHits <= 2 ? 2 : weakPhraseHits <= 4 ? 1 : 0;
+    const pts = weakPhraseHits === 0 ? 3 : weakPhraseHits === 1 ? 2 : weakPhraseHits <= 3 ? 1 : 0;
     writingRules.push(rule('writing_weak_phrases', 'writing', 'Specific language', pts, 3,
       weakPhraseHits === 0 ? 'No major weak responsibility phrases were detected.' : `${weakPhraseHits} weak or generic phrase signal${weakPhraseHits === 1 ? '' : 's'} were detected.`, {
         recommendation: 'Replace phrases like “responsible for” or “worked on” with the exact action, object, and result.',
-        priority: weakPhraseHits >= 3 ? 'high' : 'medium',
+        priority: weakPhraseHits >= 2 ? 'high' : 'medium',
       }));
   }
   {
-    const pts = repeatedLeadVerbCount === 0 ? 3 : repeatedLeadVerbCount <= 2 ? 2 : repeatedLeadVerbCount <= 4 ? 1 : 0;
+    const pts = repeatedLeadVerbCount === 0 ? 3 : repeatedLeadVerbCount === 1 ? 2 : repeatedLeadVerbCount <= 3 ? 1 : 0;
     writingRules.push(rule('writing_repetition', 'writing', 'Verb variety', pts, 3,
       repeatedLeadVerbCount === 0 ? 'Lead verbs are reasonably varied.' : `${repeatedLeadVerbCount} repetitive lead-verb use${repeatedLeadVerbCount === 1 ? '' : 's'} beyond the recommended repetition threshold were detected.`, {
         recommendation: 'Vary repeated lead verbs when different verbs more precisely describe the work. Do not vary words just for novelty.',
-        priority: repeatedLeadVerbCount >= 3 ? 'medium' : 'low',
+        priority: repeatedLeadVerbCount >= 2 ? 'medium' : 'low',
       }));
   }
   breakdown.push(category('writing', 'Writing & bullet quality', writingRules, 'Are bullets direct, specific, and easy to scan?'));
