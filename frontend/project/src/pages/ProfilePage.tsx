@@ -61,7 +61,6 @@ export default function ProfilePage() {
         <div className="mt-3 text-sm">
           <p className="text-stone-400">Username: <span className="text-stone-100">{user?.username ?? '—'}</span></p>
           <p className="text-stone-400">Email: <span className="text-stone-100">{user?.email ?? '—'}</span></p>
-          <p className="text-xs text-stone-600 mt-1">ID: {user?.id ?? '—'}</p>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <button onClick={() => logout().then(() => (window.location.href = '/login'))} className="text-sm border border-stone-800 bg-stone-900 rounded-lg px-3 py-1.5 text-stone-300 hover:bg-stone-800 hover:text-stone-100 transition">
