@@ -401,37 +401,52 @@ export default function AnalysisPage() {
         ))}
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[.78fr_1.22fr]">
-        <div className="space-y-4">
-          <div className="flex items-end justify-between gap-4">
-            <div><p className="jh-eyebrow">What to fix first</p><h2 className="mt-2 text-xl font-semibold tracking-[-0.025em] text-white">Priority actions</h2></div>
-            <span className="text-[10px] text-slate-600">sorted by impact</span>
-          </div>
-          {actions.length ? actions.map((action, index) => (
-            <div key={action.id || index} className={`rounded-2xl border p-4 ${priorityClasses(action.priority)}`}>
-              <div className="flex gap-3">
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-black/15 text-xs font-semibold">{index + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-semibold text-white">{action.title}</p>
-                    <span className="rounded-full border border-white/10 bg-black/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] opacity-70">{action.priority}</span>
-                    {!!action.potentialGain && <span className="text-[10px] opacity-60">up to +{action.potentialGain} pts</span>}
+      {/* Priority actions — full-width, editorial, not side-by-side */}
+      <section className="space-y-5">
+        <div className="border-b border-stone-800 pb-4">
+          <p className="jh-eyebrow">What to fix first</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>Priority actions</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-500">Sorted by impact — fix the top 2 and re-scan. Each action maps to a visible check and shows how many points you can recover.</p>
+        </div>
+        {actions.length ? (
+          <div className="grid gap-4 md:grid-cols-2">
+            {actions.map((action, index) => (
+              <div key={action.id || index} className={`relative overflow-hidden rounded-2xl border p-5 ${priorityClasses(action.priority)}`}>
+                <div className="absolute right-0 top-0 h-24 w-24 -translate-y-8 translate-x-8 rounded-full bg-amber-400/5 blur-2xl" />
+                <div className="flex gap-4">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-stone-900 border border-stone-800 text-sm font-bold text-stone-100">{index + 1}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-[15px] font-semibold text-stone-100">{action.title}</p>
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${action.priority === 'high' ? 'bg-amber-400 text-stone-900' : action.priority === 'medium' ? 'bg-stone-800 text-stone-300' : 'bg-stone-800/60 text-stone-500'}`}>{action.priority}</span>
+                    </div>
+                    <p className="mt-2 text-[13px] leading-5 text-stone-400">{action.why}</p>
+                    <p className="mt-3 text-[13px] leading-5 text-stone-200"><span className="font-semibold text-amber-300">Do this:</span> {action.how}</p>
+                    {action.evidence && <p className="mt-2.5 break-words rounded-xl bg-stone-950 border border-stone-800 px-3 py-2 text-xs leading-4 text-stone-500">Evidence: {action.evidence}</p>}
+                    {!!action.potentialGain && <p className="mt-3 text-xs font-medium text-amber-300">↗ Up to +{action.potentialGain} points</p>}
                   </div>
-                  <p className="mt-1.5 text-[11px] leading-5 text-slate-400">{action.why}</p>
-                  <p className="mt-2 text-[11px] leading-5 text-slate-200"><span className="font-semibold text-amber-300">Do this:</span> {action.how}</p>
                 </div>
               </div>
-            </div>
-          )) : (
-            <div className="rounded-2xl border border-emerald-400/10 bg-emerald-400/[0.035] p-5 text-sm text-emerald-100/80"><Check size={17} className="mb-2" /> No high-impact fixes are currently flagged.</div>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          <div><p className="jh-eyebrow">100-point rubric</p><h2 className="mt-2 text-xl font-semibold tracking-[-0.025em] text-white">Score breakdown</h2></div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {(readiness.breakdown ?? []).map((category) => <CategoryPanel key={category.category || category.label} category={category} />)}
+            ))}
           </div>
+        ) : (
+          <div className="rounded-2xl border border-emerald-800 bg-emerald-950/20 p-8 text-center">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-emerald-500/10 text-emerald-300"><Check size={20} /></div>
+            <p className="mt-3 text-sm font-semibold text-emerald-100">No high-impact fixes — this version is solid.</p>
+            <p className="text-xs text-emerald-200/60 mt-1">Keep 1 page, single column, and quantified bullets.</p>
+          </div>
+        )}
+      </section>
+
+      {/* Score breakdown — own section, not cramped beside actions */}
+      <section className="space-y-5">
+        <div className="border-b border-stone-800 pb-4">
+          <p className="jh-eyebrow">100-point rubric</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>Score breakdown</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-500">Each category is independent. Hard refresh loads the same breakdown from <code className="text-stone-300">/api/v1/analyses/:id</code>.</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
+          {(readiness.breakdown ?? []).map((category) => <CategoryPanel key={category.category || category.label} category={category} />)}
         </div>
       </section>
 
