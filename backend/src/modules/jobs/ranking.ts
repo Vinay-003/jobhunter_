@@ -111,7 +111,7 @@ export async function rankJob(
     evidence.push(`Title overlap ${overlap}/${titleWords.length}`);
   }
 
-  // 4) Seniority 15
+  // 4) Seniority / Level 15 - with explicit penalties (ResumeWorded strict)
   let seniority = 0;
   {
     const seniorityOrder = ['junior', 'mid', 'senior', 'lead'];
@@ -125,14 +125,16 @@ export async function rankJob(
 
     if (!profileSen || !jobSen) {
       seniority = 8; // partial when unknown
-      evidence.push('Seniority unknown — partial');
+      evidence.push('Level: unknown — partial (no penalty)');
     } else if (profileSen === jobSen) {
       seniority = 15;
-      evidence.push(`Seniority match ${profileSen}`);
+      evidence.push(`Level match: ${profileSen} = ${jobSen} (no penalty)`);
     } else {
       const diff = Math.abs(seniorityOrder.indexOf(profileSen) - seniorityOrder.indexOf(jobSen));
+      // Explicit penalties: adjacent -5, far -10 to -15
       seniority = diff === 1 ? 10 : diff === 2 ? 5 : 0;
-      evidence.push(`Seniority diff ${profileSen} vs ${jobSen}`);
+      const penalty = 15 - seniority;
+      evidence.push(`Level penalty: ${penalty} pts — your ${profileSen} vs job ${jobSen} (diff ${diff})`);
     }
   }
 

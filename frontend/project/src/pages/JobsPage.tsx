@@ -103,9 +103,9 @@ function mapRecommendation(raw: any): Job {
 
 function scoreTone(score: number) {
   if (score >= 80) return { text: 'text-emerald-200', bg: 'bg-emerald-300/[0.08]', border: 'border-emerald-300/15' };
-  if (score >= 65) return { text: 'text-cyan-200', bg: 'bg-cyan-300/[0.07]', border: 'border-cyan-300/15' };
-  if (score >= 50) return { text: 'text-violet-200', bg: 'bg-violet-300/[0.07]', border: 'border-violet-300/15' };
-  return { text: 'text-amber-200', bg: 'bg-amber-300/[0.06]', border: 'border-amber-300/15' };
+  if (score >= 65) return { text: 'text-amber-200', bg: 'bg-amber-300/[0.07]', border: 'border-amber-300/15' };
+  if (score >= 50) return { text: 'text-stone-300', bg: 'bg-stone-700/30', border: 'border-stone-700' };
+  return { text: 'text-red-300', bg: 'bg-red-500/[0.06]', border: 'border-red-500/15' };
 }
 
 function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelect: () => void }) {
@@ -114,7 +114,7 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
   return (
     <button
       onClick={onSelect}
-      className={`w-full rounded-2xl border p-4 text-left transition ${active ? 'border-violet-400/25 bg-violet-400/[0.065] shadow-xl shadow-black/10' : 'border-white/[0.065] bg-white/[0.025] hover:border-white/[0.12] hover:bg-white/[0.04]'}`}
+      className={`w-full rounded-2xl border p-4 text-left transition ${active ? 'border-amber-400/30 bg-amber-400/[0.07] shadow-xl shadow-black/10' : 'border-stone-800 bg-stone-900/50 hover:border-stone-700 hover:bg-stone-800'}`}
     >
       <div className="flex gap-3.5">
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-white/[0.07] bg-white/[0.035] text-slate-400"><Building2 size={19} /></span>
@@ -312,7 +312,10 @@ export default function JobsPage() {
         <div>
           <p className="jh-eyebrow"><Sparkles size={13} /> Role discovery</p>
           <h1 className="jh-title mt-3">Job Matches</h1>
-          <p className="jh-subtitle mt-3">A dedicated workspace for opportunities ranked by evidence in your resume—not by your generic Resume Health score.</p>
+          <p className="jh-subtitle mt-3">A dedicated workspace for opportunities ranked by evidence in your resume—not by generic health.</p>
+          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-amber-400/20 bg-amber-400/10 px-2.5 py-1 text-xs text-amber-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" /> Mock embeddings (local) — no AWS cost on Render
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setShowFilters((value) => !value)} className="jh-button-ghost"><SlidersHorizontal size={14} /> Preferences</button>
