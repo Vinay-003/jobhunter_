@@ -4,38 +4,99 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #f7f8fb;
+  background: #070910;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --jh-bg: #070910;
+  --jh-panel: rgba(15, 18, 29, 0.82);
+  --jh-panel-strong: rgba(18, 22, 35, 0.96);
+  --jh-line: rgba(255, 255, 255, 0.075);
+  --jh-muted: #9299a8;
+  --jh-violet: #8b5cf6;
+  --jh-cyan: #22d3ee;
+  --jh-green: #34d399;
+  --jh-amber: #fbbf24;
+  --jh-rose: #fb7185;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--jh-bg); scroll-behavior: smooth; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--jh-bg); }
+button, input, textarea, select { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+::selection { background: rgba(139, 92, 246, 0.4); color: white; }
+
 @layer base {
   body {
     @apply bg-dark-950 text-white font-sans;
   }
-  
+
   h1, h2, h3, h4, h5, h6 {
     @apply font-display;
   }
 }
 
 @layer components {
+  /* Existing auth/landing primitives — retained for compatibility. */
   .auth-input {
-    @apply w-full bg-dark-800/80 border-2 border-dark-700 rounded-lg px-4 py-3 
+    @apply w-full bg-dark-800/80 border-2 border-dark-700 rounded-lg px-4 py-3
     text-white placeholder:text-dark-400 focus:outline-none focus:border-primary-500
     transition-all duration-300;
   }
-  
+
   .auth-btn {
     @apply w-full bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400
     text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300
     focus:outline-none focus:ring-2 focus:ring-primary-300 focus:ring-opacity-50 shadow-lg;
   }
-  
+
   .auth-link {
     @apply text-primary-300 hover:text-primary-200 transition-colors duration-300 underline;
   }
-  
+
   .particle {
     @apply absolute rounded-full opacity-20 pointer-events-none;
   }
+
+  /* V3 authenticated workspace design system. */
+  .jh-surface {
+    @apply rounded-2xl border border-white/[0.08] bg-white/[0.035] shadow-2xl shadow-black/10;
+    backdrop-filter: blur(18px);
+  }
+  .jh-surface-strong {
+    @apply rounded-2xl border border-white/[0.09] bg-[#10131f]/95 shadow-2xl shadow-black/20;
+  }
+  .jh-eyebrow {
+    @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-violet-300;
+  }
+  .jh-title {
+    @apply text-3xl font-semibold tracking-[-0.035em] text-white md:text-4xl;
+  }
+  .jh-subtitle {
+    @apply max-w-2xl text-sm leading-6 text-slate-400 md:text-[15px];
+  }
+  .jh-button-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-[#090b12] transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .jh-button-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-violet-950/30 transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .jh-button-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3.5 py-2.5 text-sm font-medium text-slate-300 transition hover:border-white/15 hover:bg-white/[0.065] hover:text-white;
+  }
+  .jh-input {
+    @apply w-full rounded-xl border border-white/[0.09] bg-black/20 px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-violet-400/60 focus:ring-2 focus:ring-violet-500/10;
+  }
+  .jh-chip {
+    @apply inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-300;
+  }
 }
 
+/* Existing public/auth visual effects — retained. */
 .gradient-bg {
   background: linear-gradient(145deg, #540404, #330000, #0f0f0f);
   background-size: 200% 200%;
@@ -47,20 +108,57 @@
   border-radius: 0.75rem;
   overflow: hidden;
 }
-
 .card-border::before {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: 0.75rem; 
+  border-radius: 0.75rem;
   padding: 2px;
   background: linear-gradient(45deg, #ff3333, #cc0000, #ffd700, #990000);
   background-size: 400% 400%;
   animation: gradient 15s ease infinite;
-  -webkit-mask: 
-    linear-gradient(#fff 0 0) content-box, 
-    linear-gradient(#fff 0 0);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
+}
+
+/* Authenticated workspace background. Public screens can still override it via gradient-bg. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -2;
+  background:
+    radial-gradient(circle at 16% -5%, rgba(139, 92, 246, 0.16), transparent 28rem),
+    radial-gradient(circle at 90% 8%, rgba(34, 211, 238, 0.09), transparent 26rem),
+    linear-gradient(180deg, #080a12 0%, #070910 42%, #06070c 100%);
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.16;
+  background-image:
+    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, black, transparent 65%);
+}
+
+.jh-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.28) transparent; }
+.jh-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+.jh-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.jh-scrollbar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.24); border-radius: 999px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
