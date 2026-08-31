@@ -28,7 +28,7 @@ function authenticateAny(req:any,res:any,next:any){
   }).catch(()=> res.status(401).json({ success:false, message:'Invalid session'}));
 }
 
-const PARSER_VERSION='2.0.0';
+const PARSER_VERSION='3.0.0';
 const JD_MATCHER_VERSION='2.0.0';
 
 function getEmbeddingProvider(){
@@ -82,7 +82,18 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
     await pool.query('INSERT INTO resume_profiles (resume_id, profile_json, profile_version) VALUES ($1,$2,$3) ON CONFLICT (resume_id) DO UPDATE SET profile_json=$2, profile_version=$3', [row.id, JSON.stringify(profile), PARSER_VERSION]).catch(()=>{});
     const analysisId = crypto.randomUUID();
     const breakdown = readiness.breakdown;
-    const evidence = { rules: readiness.rules, strengths: readiness.strengths, warnings: readiness.warnings };
+    const evidence = {
+      rules: readiness.rules,
+      strengths: readiness.strengths,
+      warnings: readiness.warnings,
+      priorityActions: readiness.priorityActions,
+      metrics: readiness.metrics,
+      scoreLabel: readiness.scoreLabel,
+      scoreMessage: readiness.scoreMessage,
+      issueCount: readiness.issueCount,
+      highPriorityIssueCount: readiness.highPriorityIssueCount,
+      methodology: readiness.methodology,
+    };
     try {
       await pool.query(`INSERT INTO analyses (id, user_id, resume_id, analysis_type, readiness_score, score_breakdown_json, evidence_json, target_level, scorer_version, parser_version, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())`, [analysisId, userId, row.id, 'readiness', readiness.score, JSON.stringify(breakdown), JSON.stringify(evidence), targetLevel||null, SCORER_VERSION, PARSER_VERSION]);
     } catch(e){ /* table may not exist yet, ignore */ }
@@ -138,7 +149,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     let modelId = 'mock';
     let dimension = 384;
     try {
-      const resp = await provider.embed({ texts: uniq.slice(0,32), purpose:'jd' });
+      const resp = await provider.embed({ texts: uniq, purpose:'jd' });
       vectors = resp.vectors;
       modelId = resp.modelId;
       dimension = resp.dimension;
@@ -183,7 +194,20 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     const analysisId = crypto.randomUUID();
     const jdHash = crypto.createHash('sha256').update(jobDescription).digest('hex');
     try {
-      await pool.query(`INSERT INTO analyses (id, user_id, resume_id, analysis_type, readiness_score, jd_match_score, score_breakdown_json, evidence_json, target_level, jd_hash, scorer_version, parser_version, embedding_model_id, matching_version, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())`, [analysisId, userId, row.id, 'jd_match', readiness.score, jdMatchScore, JSON.stringify({ readiness: readiness.breakdown, jdMatch:{ explicitPts, semanticScore, rolePts, domainPts, eduPts }, deterministic }), JSON.stringify({ responsibilityCoverage, deterministic }), targetLevel||null, jdHash.slice(0,32), SCORER_VERSION, PARSER_VERSION, modelId, JD_MATCHER_VERSION]);
+      await pool.query(`INSERT INTO analyses (id, user_id, resume_id, analysis_type, readiness_score, jd_match_score, score_breakdown_json, evidence_json, target_level, jd_hash, scorer_version, parser_version, embedding_model_id, matching_version, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())`, [analysisId, userId, row.id, 'jd_match', readiness.score, jdMatchScore, JSON.stringify({ readiness: readiness.breakdown, jdMatch:{ explicitPts, semanticScore, rolePts, domainPts, eduPts }, deterministic }), JSON.stringify({
+        rules: readiness.rules,
+        strengths: readiness.strengths,
+        warnings: readiness.warnings,
+        priorityActions: readiness.priorityActions,
+        metrics: readiness.metrics,
+        scoreLabel: readiness.scoreLabel,
+        scoreMessage: readiness.scoreMessage,
+        issueCount: readiness.issueCount,
+        highPriorityIssueCount: readiness.highPriorityIssueCount,
+        methodology: readiness.methodology,
+        responsibilityCoverage,
+        deterministic,
+      }), targetLevel||null, jdHash.slice(0,32), SCORER_VERSION, PARSER_VERSION, modelId, JD_MATCHER_VERSION]);
     } catch{}
 
     res.json({ success:true, analysisId, resumeId: row.id, readiness, jdMatch:{ score: jdMatchScore, breakdown:{ explicitMustHave: explicitPts, responsibilitySemantic: semanticScore, roleAlignment: rolePts, domain: domainPts, education: eduPts, confidence }, responsibilityCoverage, deterministic, jd }, versions:{ scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION, matcherVersion: JD_MATCHER_VERSION, embeddingModelId: modelId, dimension }, confidence });

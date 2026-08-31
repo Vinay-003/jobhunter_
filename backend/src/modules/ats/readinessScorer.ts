@@ -2,54 +2,348 @@ import type { ParsedDocument } from '../parsing/pdfParser.js';
 import type { ResumeProfile } from '../parsing/resumeProfile.js';
 
 /**
- * ATS Readiness Scorer — exact 100pt rubric:
- * 25 layout, 15 sections, 25 experience, 15 skills, 10 consistency, 5 concision, 5 targetLevel.
- * Each category returns {pointsAwarded, pointsPossible, rules: {ruleId, category, status, pointsAwarded, pointsPossible, message, evidence}[]}.
- * Sum totals 100. No clamp needed but ensure 0-100.
+ * Resume Health / ATS Readiness Scorer v3
+ *
+ * Important product rule:
+ * - This is a NO-JD score. It never uses embeddings, target-role similarity, job keywords,
+ *   salary, seniority fit, or any other job-specific signal.
+ * - It measures whether the document is parseable, complete, evidence-rich, concise,
+ *   and recruiter-readable.
+ * - Job-specific fit belongs in the JD matcher and job recommendation pipeline.
+ *
+ * Exact 100 point rubric:
+ *  20 Parseability & ATS structure
+ *  15 Core completeness
+ *  20 Impact & measurable evidence
+ *  15 Experience / project quality
+ *  10 Skills clarity & evidence
+ *  10 Writing & bullet quality
+ *   5 Concision & readability
+ *   5 Consistency & hygiene
  */
 
-export const VERSION = '2.0.0';
+export const VERSION = '3.0.0';
 
-export type RuleStatus = 'pass' | 'fail' | 'warn';
+export type RuleStatus = 'pass' | 'warn' | 'fail';
+export type Priority = 'high' | 'medium' | 'low';
 
 export type RuleResult = {
   ruleId: string;
   category: string;
+  label: string;
   status: RuleStatus;
   pointsAwarded: number;
   pointsPossible: number;
   message: string;
   evidence?: string;
+  recommendation?: string;
+  priority?: Priority;
 };
 
 export type CategoryBreakdown = {
   category: string;
+  label: string;
   pointsAwarded: number;
   pointsPossible: number;
+  percent: number;
+  summary: string;
   rules: RuleResult[];
+};
+
+export type PriorityAction = {
+  id: string;
+  title: string;
+  category: string;
+  priority: Priority;
+  why: string;
+  how: string;
+  potentialGain: number;
+  evidence?: string;
+};
+
+export type ResumeHealthMetrics = {
+  pageCount: number;
+  wordCount: number;
+  sectionCount: number;
+  skillsCount: number;
+  bulletCount: number;
+  quantifiedBulletCount: number;
+  quantifiedBulletRatio: number;
+  actionLedBulletCount: number;
+  actionLedBulletRatio: number;
+  outcomeBulletCount: number;
+  weakPhraseHits: number;
+  repeatedLeadVerbCount: number;
+  extractionConfidence: number;
+  hasEmail: boolean;
+  hasPhone: boolean;
+  hasLinkedIn: boolean;
+  hasGithub: boolean;
 };
 
 export type ReadinessResult = {
   score: number;
+  scoreLabel: string;
+  scoreMessage: string;
   breakdown: CategoryBreakdown[];
   rules: RuleResult[];
   strengths: string[];
   warnings: string[];
+  priorityActions: PriorityAction[];
+  metrics: ResumeHealthMetrics;
+  issueCount: number;
+  highPriorityIssueCount: number;
   version: string;
+  methodology: {
+    mode: 'rule_based_no_jd';
+    note: string;
+    totalPossible: 100;
+  };
 };
 
-type TargetLevel = 'junior' | 'mid' | 'senior' | 'lead' | string | null | undefined;
+type TargetLevel = 'entry' | 'junior' | 'mid' | 'senior' | 'lead' | string | null | undefined;
 
-function mkRule(
+type BulletCandidate = {
+  text: string;
+  source: 'experience' | 'projects' | 'other';
+  quantified: boolean;
+  actionLed: boolean;
+  outcomeLed: boolean;
+  weakPhraseHits: number;
+  leadVerb: string | null;
+};
+
+const ACTION_VERBS = new Set([
+  'achieved', 'accelerated', 'automated', 'built', 'created', 'cut', 'decreased', 'delivered', 'designed',
+  'developed', 'drove', 'enabled', 'engineered', 'established', 'executed', 'expanded', 'generated', 'grew',
+  'implemented', 'improved', 'increased', 'launched', 'led', 'managed', 'migrated', 'optimized', 'owned',
+  'reduced', 'refactored', 'resolved', 'saved', 'scaled', 'shipped', 'simplified', 'spearheaded', 'streamlined',
+  'tested', 'trained', 'transformed', 'upgraded', 'wrote', 'analyzed', 'coordinated', 'integrated', 'deployed',
+  'maintained', 'mentored', 'negotiated', 'planned', 'produced', 'restructured', 'secured', 'standardized',
+]);
+
+const OUTCOME_TERMS = [
+  'increased', 'improved', 'reduced', 'decreased', 'grew', 'saved', 'cut', 'boosted', 'accelerated', 'raised',
+  'generated', 'achieved', 'exceeded', 'lowered', 'optimized', 'scaled', 'resulting in', 'leading to', 'which led to',
+  'throughput', 'latency', 'conversion', 'revenue', 'cost', 'time saved', 'accuracy', 'adoption', 'retention',
+];
+
+const WEAK_PHRASES = [
+  'responsible for', 'worked on', 'helped with', 'helped to', 'participated in', 'assisted with', 'duties included',
+  'tasked with', 'involved in', 'hard working', 'hardworking', 'team player', 'go getter', 'self motivated',
+  'detail oriented', 'results driven', 'results-oriented', 'excellent communication skills', 'good communication skills',
+  'passionate about', 'dynamic professional', 'highly motivated', 'proven track record',
+];
+
+const COMMON_TYPOS = [
+  'teh', 'recieve', 'occured', 'seperate', 'definately', 'experiance', 'responcible', 'managment', 'acheivement',
+  'profesional', 'adress', 'succesful',
+];
+
+const REQUIRED_HEADINGS = ['experience', 'education', 'skills'];
+const STANDARD_HEADINGS = new Set([
+  'summary', 'objective', 'profile', 'education', 'experience', 'work experience', 'employment', 'employment history',
+  'skills', 'technical skills', 'projects', 'project', 'certifications', 'certificates', 'awards', 'achievements',
+  'publications', 'languages', 'leadership', 'activities', 'volunteer',
+]);
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
+}
+
+function pct(points: number, possible: number): number {
+  if (!possible) return 100;
+  return Math.round((points / possible) * 100);
+}
+
+function statusFor(points: number, possible: number): RuleStatus {
+  const p = possible ? points / possible : 1;
+  if (p >= 0.85) return 'pass';
+  if (p >= 0.45) return 'warn';
+  return 'fail';
+}
+
+function rule(
   ruleId: string,
   category: string,
+  label: string,
   pointsAwarded: number,
   pointsPossible: number,
   message: string,
-  evidence?: string,
+  extras: Partial<Pick<RuleResult, 'evidence' | 'recommendation' | 'priority'>> = {},
 ): RuleResult {
-  const status: RuleStatus = pointsAwarded === pointsPossible ? 'pass' : pointsAwarded === 0 ? 'fail' : 'warn';
-  return { ruleId, category, status, pointsAwarded, pointsPossible, message, evidence };
+  const awarded = round1(clamp(pointsAwarded, 0, pointsPossible));
+  return {
+    ruleId,
+    category,
+    label,
+    status: statusFor(awarded, pointsPossible),
+    pointsAwarded: awarded,
+    pointsPossible,
+    message,
+    ...extras,
+  };
+}
+
+function labelForScore(score: number): { label: string; message: string } {
+  if (score >= 90) return { label: 'Excellent', message: 'Polished, parseable, and evidence-rich. Focus on job-specific tailoring next.' };
+  if (score >= 80) return { label: 'Strong', message: 'A strong base with a few improvements that can materially increase recruiter clarity.' };
+  if (score >= 70) return { label: 'Competitive', message: 'Usable today, but several high-value fixes can make the resume easier to scan and more persuasive.' };
+  if (score >= 55) return { label: 'Needs work', message: 'The document is readable, but important structure or content signals are weakening it.' };
+  return { label: 'High risk', message: 'Fix parseability, missing sections, and evidence quality before relying on this resume.' };
+}
+
+function normalizeLine(line: string): string {
+  return line.replace(/^\s*[•◦▪▫‣⁃*\-–—]+\s*/, '').replace(/\s+/g, ' ').trim();
+}
+
+function hasMetric(text: string): boolean {
+  const patterns = [
+    /\b\d+(?:\.\d+)?\s*%\b/,
+    /[$€£₹]\s*\d[\d,.]*\b/,
+    /\b\d+(?:\.\d+)?\s*[xX]\b/,
+    /\b\d+(?:\.\d+)?\s*(?:k|m|b|million|billion|thousand)\b/i,
+    /\b\d+(?:\.\d+)?\s*(?:users?|customers?|clients?|requests?|records?|transactions?|files?|services?|endpoints?|teams?|members?|hours?|days?|weeks?|months?|minutes?|seconds?)\b/i,
+    /\b(?:from|to|by|under|over|within)\s+\d+(?:\.\d+)?\b/i,
+  ];
+  return patterns.some((r) => r.test(text));
+}
+
+function leadVerb(text: string): string | null {
+  const first = normalizeLine(text).toLowerCase().match(/^([a-z][a-z-]{2,})\b/)?.[1] ?? null;
+  return first && ACTION_VERBS.has(first) ? first : null;
+}
+
+function weakHits(text: string): number {
+  const lower = text.toLowerCase();
+  return WEAK_PHRASES.reduce((sum, phrase) => sum + (lower.includes(phrase) ? 1 : 0), 0);
+}
+
+function outcomeLed(text: string): boolean {
+  const lower = text.toLowerCase();
+  return OUTCOME_TERMS.some((t) => lower.includes(t));
+}
+
+function extractBulletCandidates(parsedDoc: ParsedDocument): BulletCandidate[] {
+  const candidates: BulletCandidate[] = [];
+  const seen = new Set<string>();
+
+  const add = (raw: string, source: BulletCandidate['source']) => {
+    const text = normalizeLine(raw);
+    if (text.length < 25 || text.length > 360) return;
+    const key = text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const verb = leadVerb(text);
+    candidates.push({
+      text,
+      source,
+      quantified: hasMetric(text),
+      actionLed: !!verb,
+      outcomeLed: outcomeLed(text),
+      weakPhraseHits: weakHits(text),
+      leadVerb: verb,
+    });
+  };
+
+  // First preference: real visual lines retained by the parser.
+  for (const page of parsedDoc.pages) {
+    for (const line of page.split(/\n+/)) {
+      if (/^\s*[•◦▪▫‣⁃*\-–—]\s+/.test(line)) add(line, 'other');
+    }
+  }
+
+  // Section fallback catches resumes exported without bullet glyphs.
+  for (const [heading, body] of Object.entries(parsedDoc.sections)) {
+    const source: BulletCandidate['source'] = heading.includes('project') ? 'projects' : heading.includes('experience') || heading.includes('employment') ? 'experience' : 'other';
+    if (source === 'other') continue;
+    const lines = body.split(/\n+|(?<=[.;])\s+(?=[A-Z])/).map((s) => s.trim()).filter(Boolean);
+    for (const line of lines) add(line, source);
+  }
+
+  return candidates.slice(0, 80);
+}
+
+function sectionPresent(parsedDoc: ParsedDocument, names: string[]): boolean {
+  const keys = Object.keys(parsedDoc.sections).map((s) => s.toLowerCase());
+  return names.some((name) => keys.some((k) => k === name || k.includes(name)));
+}
+
+function countDateTokens(text: string): number {
+  const months = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+  const re = new RegExp(`\\b(?:${months}\\s+)?(?:19|20)\\d{2}\\b`, 'gi');
+  return (text.match(re) || []).length;
+}
+
+
+function hasRecentExperience(profile: ResumeProfile): boolean {
+  const currentYear = new Date().getFullYear();
+  const cutoff = currentYear - 2;
+  return profile.experience.some((entry) => {
+    if (entry.isCurrent) return true;
+    const text = `${entry.startDate || ''} ${entry.endDate || ''}`;
+    const years = [...text.matchAll(/\b(?:19|20)\d{2}\b/g)].map((m) => Number(m[0]));
+    return years.some((year) => year >= cutoff && year <= currentYear + 1);
+  });
+}
+
+function countRepeatedLeadVerbs(bullets: BulletCandidate[]): number {
+  const counts = new Map<string, number>();
+  for (const b of bullets) {
+    if (!b.leadVerb) continue;
+    counts.set(b.leadVerb, (counts.get(b.leadVerb) || 0) + 1);
+  }
+  let repeats = 0;
+  for (const count of counts.values()) if (count > 3) repeats += count - 3;
+  return repeats;
+}
+
+function skillEvidenceCount(parsedDoc: ParsedDocument, profile: ResumeProfile): number {
+  if (!profile.skillsNormalized.length) return 0;
+  const evidenceText = [
+    parsedDoc.sections['experience'] || '',
+    parsedDoc.sections['work experience'] || '',
+    parsedDoc.sections['employment'] || '',
+    parsedDoc.sections['projects'] || '',
+    parsedDoc.sections['project'] || '',
+  ].join(' ').toLowerCase();
+  if (!evidenceText.trim()) return 0;
+  return profile.skillsNormalized.filter((skill) => {
+    const token = skill.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${token}\\b`, 'i').test(evidenceText);
+  }).length;
+}
+
+function category(category: string, label: string, rules: RuleResult[], summary: string): CategoryBreakdown {
+  const pointsAwarded = round1(rules.reduce((s, r) => s + r.pointsAwarded, 0));
+  const pointsPossible = rules.reduce((s, r) => s + r.pointsPossible, 0);
+  return {
+    category,
+    label,
+    pointsAwarded,
+    pointsPossible,
+    percent: pct(pointsAwarded, pointsPossible),
+    summary,
+    rules,
+  };
+}
+
+function actionFromRule(r: RuleResult): PriorityAction | null {
+  if (r.status === 'pass' || !r.recommendation) return null;
+  return {
+    id: r.ruleId,
+    title: r.label,
+    category: r.category,
+    priority: r.priority || (r.status === 'fail' ? 'high' : 'medium'),
+    why: r.message,
+    how: r.recommendation,
+    potentialGain: round1(r.pointsPossible - r.pointsAwarded),
+    evidence: r.evidence,
+  };
 }
 
 export function scoreReadiness(
@@ -57,328 +351,392 @@ export function scoreReadiness(
   profile: ResumeProfile,
   targetLevel: TargetLevel,
 ): ReadinessResult {
-  const allRules: RuleResult[] = [];
-  const lower = parsedDoc.normalizedText.toLowerCase();
+  const text = parsedDoc.normalizedText || '';
+  const lower = text.toLowerCase();
+  const words = text.split(/\s+/).filter(Boolean);
+  const wordCount = words.length;
+  const bullets = extractBulletCandidates(parsedDoc);
+  const quantified = bullets.filter((b) => b.quantified);
+  const actionLed = bullets.filter((b) => b.actionLed);
+  const outcomeBullets = bullets.filter((b) => b.outcomeLed);
+  const weakPhraseHits = bullets.reduce((sum, b) => sum + b.weakPhraseHits, 0) + weakHits(text.slice(0, 2500));
+  const repeatedLeadVerbCount = countRepeatedLeadVerbs(bullets);
+  const dateTokens = countDateTokens(text);
+  const standardSectionCount = Object.keys(parsedDoc.sections).filter((h) => STANDARD_HEADINGS.has(h.toLowerCase())).length;
+  const skillsEvidence = skillEvidenceCount(parsedDoc, profile);
 
-  // ── 1. Layout 25pts ──
-  // R1.1 pageCount 1-2 pages (10pts), R1.2 no multiColumn risk (5), R1.3 no excessive tables (5), R1.4 extraction confidence (5)
-  const layoutRules: RuleResult[] = [];
-  {
-    const pages = parsedDoc.layoutSignals.pageCount;
-    let pts = 0;
-    let msg = '';
-    if (pages >= 1 && pages <= 2) { pts = 10; msg = `Ideal page count: ${pages} page(s)`; }
-    else if (pages === 3) { pts = 5; msg = `Page count ${pages} — slightly long`; }
-    else if (pages === 0) { pts = 0; msg = 'No pages detected'; }
-    else { pts = 0; msg = `Page count ${pages} — too long`; }
-    layoutRules.push(mkRule('layout_page_count', 'layout', pts, 10, msg, `pages=${pages}`));
-  }
-  {
-    const risk = parsedDoc.layoutSignals.hasMultiColumnRisk;
-    layoutRules.push(mkRule('layout_columns', 'layout', risk ? 0 : 5, 5, risk ? 'Multi-column layout risk detected' : 'Single-column layout', `hasMultiColumnRisk=${risk}`));
-  }
-  {
-    const tables = parsedDoc.layoutSignals.excessiveTables;
-    layoutRules.push(mkRule('layout_tables', 'layout', tables ? 0 : 5, 5, tables ? 'Excessive tables detected' : 'No excessive tables', `excessiveTables=${tables}`));
-  }
-  {
-    const conf = parsedDoc.extractionConfidence;
-    let pts = 0;
-    if (conf >= 0.85) pts = 5;
-    else if (conf >= 0.6) pts = 3;
-    else if (conf >= 0.4) pts = 1;
-    else pts = 0;
-    layoutRules.push(mkRule('layout_confidence', 'layout', pts, 5, `Extraction confidence ${(conf * 100).toFixed(0)}%`, `confidence=${conf}`));
-  }
-  const layoutAwarded = layoutRules.reduce((s, r) => s + r.pointsAwarded, 0);
-  allRules.push(...layoutRules);
+  const metrics: ResumeHealthMetrics = {
+    pageCount: parsedDoc.layoutSignals.pageCount,
+    wordCount,
+    sectionCount: Object.keys(parsedDoc.sections).length,
+    skillsCount: profile.skills.length,
+    bulletCount: bullets.length,
+    quantifiedBulletCount: quantified.length,
+    quantifiedBulletRatio: bullets.length ? round1((quantified.length / bullets.length) * 100) : 0,
+    actionLedBulletCount: actionLed.length,
+    actionLedBulletRatio: bullets.length ? round1((actionLed.length / bullets.length) * 100) : 0,
+    outcomeBulletCount: outcomeBullets.length,
+    weakPhraseHits,
+    repeatedLeadVerbCount,
+    extractionConfidence: parsedDoc.extractionConfidence,
+    hasEmail: profile.contactSignals.hasEmail,
+    hasPhone: profile.contactSignals.hasPhone,
+    hasLinkedIn: profile.contactSignals.hasLinkedIn,
+    hasGithub: profile.contactSignals.hasGithub,
+  };
 
-  // ── 2. Sections 15pts ── + summary check (strict)
-  const sectionsRules: RuleResult[] = [];
-  {
-    const hasExp = !!parsedDoc.sections['experience'] || !!parsedDoc.sections['work experience'] || !!parsedDoc.sections['employment'];
-    sectionsRules.push(mkRule('sections_experience', 'sections', hasExp ? 5 : 0, 5, hasExp ? 'Experience section present' : 'Missing experience section', `keys=${Object.keys(parsedDoc.sections).join(',')}`));
-  }
-  {
-    const hasEdu = !!parsedDoc.sections['education'];
-    sectionsRules.push(mkRule('sections_education', 'sections', hasEdu ? 5 : 0, 5, hasEdu ? 'Education section present' : 'Missing education section'));
-  }
-  {
-    const hasSkills = !!parsedDoc.sections['skills'] || !!parsedDoc.sections['technical skills'];
-    sectionsRules.push(mkRule('sections_skills', 'sections', hasSkills ? 5 : 0, 5, hasSkills ? 'Skills section present' : 'Missing skills section'));
-  }
-  // R2.4 Summary/objective (ResumeWorded strict: entry-level should have it, but we give partial)
-  {
-    const hasSummary = !!parsedDoc.sections['summary'] || !!parsedDoc.sections['objective'] || lower.includes('summary') || lower.includes('objective');
-    // Strict: missing summary is -5 for entry-level, but we keep it as 0 for now to match ResumeWorded's 74 (they penalize)
-    const pts = hasSummary ? 5 : 0;
-    sectionsRules.push(mkRule('sections_summary', 'sections', pts, 5, hasSummary ? 'Summary present' : 'Missing summary/objective — ResumeWorded penalizes', `hasSummary=${hasSummary}`));
-    // Adjust total to keep 15: if we add this, we need to scale down others. Instead, treat as bonus: sections is 15 total, so we will not count this in sectionsAwarded but as separate warning
-    // To keep 15 total, we make this 0/0 if missing, but we want to penalize: so we make sections 20 and then normalize to 15? Simpler: keep 15, but if missing summary, deduct from sections
-    // For now, we make it 5 but we will cap sections at 15 by not counting it if hasSummary is false? Actually we push it but we need to adjust pointsPossible
-    // To keep strict 74, we will count it: if missing, sectionsAwarded will be 10/20 -> scaled to 7.5/15
-  }
-  // For strictness, if hasSummary is false, we will later adjust sectionsAwarded to be out of 20 then scaled
-  const rawSectionsAwarded = sectionsRules.reduce((s, r) => s + r.pointsAwarded, 0);
-  const rawSectionsPossible = sectionsRules.reduce((s, r) => s + r.pointsPossible, 0);
-  // Scale to 15 (so missing summary = 10/20 = 7.5/15)
-  const sectionsAwarded = Math.round((rawSectionsAwarded / rawSectionsPossible) * 15);
-  // Replace last rule's pointsPossible for display: keep as is but we already scaled
-  allRules.push(...sectionsRules);
+  const breakdown: CategoryBreakdown[] = [];
 
-  // ── 3. Experience 25pts ── (strict for ResumeWorded 74)
-  const expRules: RuleResult[] = [];
+  // 1) Parseability & ATS structure — 20
+  const parseRules: RuleResult[] = [];
   {
-    const count = profile.experience.length;
-    // For entry-level, distinguish work vs leadership: leadership shouldn't count as full work
-    const workCount = profile.experience.filter(e => {
-      const title = (e.title || '').toLowerCase();
-      return !title.includes('leadership') && !title.includes('editorial') && !title.includes('secretary');
-    }).length;
+    const c = parsedDoc.extractionConfidence;
+    const pts = c >= 0.9 ? 6 : c >= 0.8 ? 5 : c >= 0.65 ? 3 : c >= 0.45 ? 1.5 : 0;
+    parseRules.push(rule('parse_extraction', 'parseability', 'Text extraction quality', pts, 6,
+      `The parser extracted this resume with ${Math.round(c * 100)}% confidence.`, {
+        evidence: `extractionConfidence=${c}`,
+        recommendation: 'Export a text-based PDF from Word/Google Docs and confirm the text can be selected/copied.',
+        priority: c < 0.65 ? 'high' : 'medium',
+      }));
+  }
+  {
+    const columnRisk = parsedDoc.layoutSignals.hasMultiColumnRisk;
+    const tableRisk = parsedDoc.layoutSignals.excessiveTables;
+    const pts = !columnRisk && !tableRisk ? 6 : columnRisk && tableRisk ? 0 : 3;
+    parseRules.push(rule('parse_layout', 'parseability', 'ATS-safe layout', pts, 6,
+      !columnRisk && !tableRisk ? 'No strong multi-column or table parsing risk was detected.' : 'The layout contains signals that can make resume parsing less reliable.', {
+        evidence: `multiColumnRisk=${columnRisk}; excessiveTables=${tableRisk}`,
+        recommendation: 'Use a single-column body and avoid using tables/text boxes for core resume content.',
+        priority: columnRisk || tableRisk ? 'high' : 'low',
+      }));
+  }
+  {
+    const p = parsedDoc.layoutSignals.pageCount;
     let pts = 0;
-    let msg = '';
-    // Strict: entry-level with 1 real work (Aarogya) is good but not perfect, need more impact
-    if (workCount >= 2) { pts = 10; msg = `${workCount} work experiences — strong`; }
-    else if (workCount === 1) {
-      // Check if that one has strong quantified impact
-      const hasStrongImpact = profile.experience.some(e => (e.description || '').match(/\b\d+\s*(formats?|languages?|sources?|endpoints?|teams?|members?)\b/i));
-      pts = hasStrongImpact ? 7 : 5;
-      msg = hasStrongImpact ? '1 strong work experience — good for entry-level' : '1 experience entry — add more quantified impact';
-    } else if (count >= 1) { pts = 5; msg = `1 leadership entry — add work experience`; }
-    else { pts = 0; msg = 'No experience entries detected'; }
-    expRules.push(mkRule('experience_entries', 'experience', pts, 10, msg, `count=${count} workCount=${workCount}`));
+    if (p === 1) pts = 4;
+    else if (p === 2) pts = 4;
+    else if (p === 3) pts = targetLevel && ['senior', 'lead'].includes(String(targetLevel).toLowerCase()) ? 3 : 2;
+    else if (p > 3 && p <= 4) pts = 1;
+    parseRules.push(rule('parse_pages', 'parseability', 'Page length', pts, 4,
+      p <= 2 ? `${p || 0} page${p === 1 ? '' : 's'} is easy to review.` : `${p || 0} pages is longer than most resumes need.`, {
+        evidence: `pageCount=${p}`,
+        recommendation: 'Compress older or lower-value content. Keep the highest-signal accomplishments and skills.',
+        priority: p > 3 ? 'high' : 'medium',
+      }));
   }
   {
-    const withDates = profile.experience.filter((e) => e.startDate).length;
-    const pts = withDates >= 1 ? 5 : 0;
-    expRules.push(mkRule('experience_dates', 'experience', pts, 5, withDates ? `Dates found (${withDates})` : 'No dates found', `withDates=${withDates}`));
+    const pts = standardSectionCount >= 3 ? 4 : standardSectionCount === 2 ? 2.5 : standardSectionCount === 1 ? 1 : 0;
+    parseRules.push(rule('parse_headings', 'parseability', 'Standard section headings', pts, 4,
+      `${standardSectionCount} standard section heading${standardSectionCount === 1 ? '' : 's'} were recognized.`, {
+        evidence: `sections=${Object.keys(parsedDoc.sections).join(', ') || 'none'}`,
+        recommendation: 'Use conventional headings such as Experience, Education, Skills, Projects, and Certifications.',
+        priority: standardSectionCount < 2 ? 'high' : 'medium',
+      }));
   }
-  {
-    const withDesc = profile.experience.filter((e) => e.description && e.description.length > 20).length;
-    let pts = 0;
-    if (withDesc >= 2) pts = 5;
-    else if (withDesc === 1) pts = 3;
-    else pts = 0;
-    expRules.push(mkRule('experience_descriptions', 'experience', pts, 5, withDesc ? `Descriptions present (${withDesc})` : 'Missing experience descriptions', `withDesc=${withDesc}`));
-  }
-  {
-    const hasCurrent = profile.experience.some((e) => e.isCurrent);
-    const hasRecent = profile.experience.some((e) => {
-      const y = e.endDate ? parseInt(e.endDate.match(/\d{4}/)?.[0] ?? '', 10) : NaN;
-      return !isNaN(y) && y >= new Date().getFullYear() - 2;
-    });
-    const pts = hasCurrent || hasRecent ? 5 : 0;
-    expRules.push(mkRule('experience_recency', 'experience', pts, 5, pts ? 'Recent/current experience found' : 'No recent/current experience', `hasCurrent=${hasCurrent} hasRecent=${hasRecent}`));
-  }
-  const expAwarded = expRules.reduce((s, r) => s + r.pointsAwarded, 0);
-  allRules.push(...expRules);
+  breakdown.push(category('parseability', 'ATS parseability', parseRules, 'Can common resume parsers reliably read the document structure and text?'));
 
-  // ── 4. Skills 15pts ──
-  // R4.1 skill count (10), R4.2 normalized skills present (5)
-  const skillsRules: RuleResult[] = [];
+  // 2) Core completeness — 15
+  const completeRules: RuleResult[] = [];
   {
-    const n = profile.skills.length;
+    const hasExp = sectionPresent(parsedDoc, ['experience', 'employment']);
+    const hasEdu = sectionPresent(parsedDoc, ['education']);
+    const hasSkills = sectionPresent(parsedDoc, ['skills']);
+    const hasProjects = sectionPresent(parsedDoc, ['projects', 'project']);
+    const isEntry = !targetLevel || ['entry', 'junior'].includes(String(targetLevel).toLowerCase());
     let pts = 0;
-    let msg = '';
-    // Strict: 10-20 is ideal, 29 is a bit high (keyword stuffing risk) but still strong for entry-level
-    if (n >= 10 && n <= 20) { pts = 10; msg = `${n} skills — well-balanced`; }
-    else if (n >= 6 && n < 10) { pts = 8; msg = `${n} skills — good`; }
-    else if (n > 20) { pts = 7; msg = `${n} skills — comprehensive but consider focusing on core (ResumeWorded)`; }
-    else if (n >= 3) { pts = 6; msg = `${n} skills — moderate`; }
-    else if (n >= 1) { pts = 3; msg = `${n} skill(s) — sparse`; }
-    else { pts = 0; msg = 'No skills detected'; }
-    skillsRules.push(mkRule('skills_count', 'skills', pts, 10, msg, `skills=${profile.skills.join(',')}`));
+    if (hasExp) pts += 3;
+    else if (isEntry && hasProjects) pts += 2.5;
+    if (hasEdu) pts += 2.5;
+    if (hasSkills) pts += 2.5;
+    completeRules.push(rule('complete_core_sections', 'completeness', 'Core sections', pts, 8,
+      `Experience: ${hasExp ? 'yes' : 'no'}, Education: ${hasEdu ? 'yes' : 'no'}, Skills: ${hasSkills ? 'yes' : 'no'}, Projects: ${hasProjects ? 'yes' : 'no'}.`, {
+        recommendation: isEntry
+          ? 'Include Skills and Education, plus either Experience or Projects with substantive evidence.'
+          : 'Include Experience, Skills, and Education using standard headings.',
+        priority: pts < 5 ? 'high' : 'medium',
+      }));
   }
-  {
-    const pts = profile.skillsNormalized.length > 0 ? 5 : 0;
-    skillsRules.push(mkRule('skills_normalized', 'skills', pts, 5, pts ? 'Skills normalized' : 'No normalized skills'));
-  }
-  const skillsAwarded = skillsRules.reduce((s, r) => s + r.pointsAwarded, 0);
-  allRules.push(...skillsRules);
-
-  // ── 5. Consistency 10pts ──
-  // R5.1 contact signals (5): email+phone, R5.2 education present (5)
-  const consistencyRules: RuleResult[] = [];
   {
     const { hasEmail, hasPhone } = profile.contactSignals;
-    let pts = 0;
-    if (hasEmail && hasPhone) pts = 5;
-    else if (hasEmail || hasPhone) pts = 3;
-    else pts = 0;
-    consistencyRules.push(mkRule('consistency_contact', 'consistency', pts, 5, pts === 5 ? 'Email and phone present' : pts === 3 ? 'Partial contact info' : 'Missing contact info', `email=${hasEmail} phone=${hasPhone}`));
+    const pts = hasEmail && hasPhone ? 4 : hasEmail || hasPhone ? 2 : 0;
+    completeRules.push(rule('complete_contact', 'completeness', 'Contact essentials', pts, 4,
+      hasEmail && hasPhone ? 'Email and phone are present.' : hasEmail || hasPhone ? 'Only one primary contact method was detected.' : 'Email and phone were not reliably detected.', {
+        evidence: `email=${hasEmail}; phone=${hasPhone}`,
+        recommendation: 'Place a professional email and reachable phone number in the main document body near your name.',
+        priority: pts < 4 ? 'high' : 'low',
+      }));
   }
   {
-    const hasEdu = profile.education.length > 0;
-    consistencyRules.push(mkRule('consistency_education', 'consistency', hasEdu ? 5 : 0, 5, hasEdu ? 'Education detected' : 'No education detected'));
+    let pts = 0;
+    if (dateTokens >= 4) pts = 3;
+    else if (dateTokens >= 2) pts = 2;
+    else if (dateTokens >= 1) pts = 1;
+    completeRules.push(rule('complete_dates', 'completeness', 'Career dates', pts, 3,
+      `${dateTokens} date signal${dateTokens === 1 ? '' : 's'} detected across the resume.`, {
+        recommendation: 'Use consistent month/year or year ranges for experience and education where dates matter.',
+        priority: dateTokens === 0 ? 'high' : 'medium',
+      }));
   }
-  const consistencyAwarded = consistencyRules.reduce((s, r) => s + r.pointsAwarded, 0);
-  allRules.push(...consistencyRules);
+  breakdown.push(category('completeness', 'Core completeness', completeRules, 'Are the essential sections and contact signals present without forcing optional sections?'));
 
-  // ── 6. Concision 5pts ──
-  // R6.1 charCount 1500-4000 ideal (5pts), else partial
+  // 3) Impact & measurable evidence — 20
+  const impactRules: RuleResult[] = [];
+  {
+    const ratio = bullets.length ? quantified.length / bullets.length : 0;
+    const pts = bullets.length === 0 ? 0 : ratio >= 0.5 ? 10 : ratio >= 0.35 ? 8 : ratio >= 0.2 ? 5 : quantified.length >= 1 ? 2.5 : 0;
+    impactRules.push(rule('impact_metrics', 'impact', 'Quantified achievements', pts, 10,
+      bullets.length ? `${quantified.length} of ${bullets.length} evidence bullets contain a measurable result or scope signal.` : 'No reliable experience/project bullets were detected.', {
+        evidence: `quantifiedRatio=${metrics.quantifiedBulletRatio}%`,
+        recommendation: 'Add credible scale, speed, quality, revenue, cost, user, volume, or time metrics to the bullets where numbers genuinely exist.',
+        priority: pts < 5 ? 'high' : 'medium',
+      }));
+  }
+  {
+    const ratio = bullets.length ? outcomeBullets.length / bullets.length : 0;
+    const pts = bullets.length === 0 ? 0 : ratio >= 0.45 ? 6 : ratio >= 0.3 ? 5 : ratio >= 0.15 ? 3 : outcomeBullets.length >= 1 ? 1.5 : 0;
+    impactRules.push(rule('impact_outcomes', 'impact', 'Outcome-oriented bullets', pts, 6,
+      bullets.length ? `${outcomeBullets.length} bullet${outcomeBullets.length === 1 ? '' : 's'} communicate an outcome or improvement.` : 'No outcome evidence was detected.', {
+        recommendation: 'Rewrite task-only bullets as action + context + outcome. Explain what changed because of your work.',
+        priority: pts < 3 ? 'high' : 'medium',
+      }));
+  }
+  {
+    const evidenceBullets = bullets.filter((b) => b.source === 'experience' || b.source === 'projects');
+    let pts = 0;
+    if (evidenceBullets.length >= 8) pts = 4;
+    else if (evidenceBullets.length >= 5) pts = 3;
+    else if (evidenceBullets.length >= 3) pts = 2;
+    else if (evidenceBullets.length >= 1) pts = 1;
+    impactRules.push(rule('impact_evidence_volume', 'impact', 'Evidence density', pts, 4,
+      `${evidenceBullets.length} substantive experience/project bullet${evidenceBullets.length === 1 ? '' : 's'} were detected.`, {
+        recommendation: 'Give your strongest roles/projects multiple concise bullets with concrete scope, action, and result.',
+        priority: evidenceBullets.length < 3 ? 'high' : 'medium',
+      }));
+  }
+  breakdown.push(category('impact', 'Impact & evidence', impactRules, 'Does the resume prove outcomes instead of only listing responsibilities?'));
+
+  // 4) Experience / project quality — 15
+  const experienceRules: RuleResult[] = [];
+  {
+    const expCount = profile.experience.length;
+    const hasProjects = sectionPresent(parsedDoc, ['projects', 'project']);
+    const isEntry = !targetLevel || ['entry', 'junior'].includes(String(targetLevel).toLowerCase());
+    let pts = 0;
+    if (expCount >= 2) pts = 5;
+    else if (expCount === 1) pts = isEntry ? 4.5 : 3.5;
+    else if (isEntry && hasProjects) pts = 4;
+    else if (hasProjects) pts = 2;
+    experienceRules.push(rule('experience_depth', 'experience_quality', 'Relevant evidence sections', pts, 5,
+      `${expCount} experience entr${expCount === 1 ? 'y' : 'ies'} detected${hasProjects ? ', plus a projects section' : ''}.`, {
+        recommendation: isEntry
+          ? 'If formal experience is limited, use strong projects, research, internships, freelancing, or leadership evidence instead of padding.'
+          : 'Prioritize the roles with the strongest relevance and measurable outcomes; avoid replacing experience with generic summaries.',
+        priority: pts < 3 ? 'high' : 'medium',
+      }));
+  }
+  {
+    const withDescription = profile.experience.filter((e) => (e.description || '').trim().length >= 40).length;
+    const expCount = profile.experience.length;
+    const ratio = expCount ? withDescription / expCount : 0;
+    const pts = expCount === 0 ? (bullets.length >= 4 ? 3 : 0) : ratio >= 0.8 ? 4 : ratio >= 0.5 ? 3 : withDescription >= 1 ? 1.5 : 0;
+    experienceRules.push(rule('experience_detail', 'experience_quality', 'Role detail quality', pts, 4,
+      expCount ? `${withDescription} of ${expCount} detected experience entries include substantive detail.` : 'Formal experience entries were not reliably parsed.', {
+        recommendation: 'For each important role, include concise accomplishment bullets instead of title/company/date alone.',
+        priority: pts < 2 ? 'high' : 'medium',
+      }));
+  }
+  {
+    const recent = hasRecentExperience(profile);
+    const pts = profile.experience.length === 0 ? 1.5 : recent ? 3 : 1.5;
+    experienceRules.push(rule('experience_recency', 'experience_quality', 'Recent work visibility', pts, 3,
+      profile.experience.length === 0 ? 'Recency could not be reliably inferred.' : recent ? 'Recent/current experience is easy to detect.' : 'Recent/current experience was not clearly detected.', {
+        recommendation: 'Keep recent work prominent and use explicit date ranges so chronology is easy to understand.',
+        priority: 'medium',
+      }));
+  }
+  {
+    const hasProgressionLanguage = /\b(promoted|promotion|progressed|advanced|lead|senior|owner|ownership|mentored|managed)\b/i.test(lower);
+    const isEntry = !targetLevel || ['entry', 'junior'].includes(String(targetLevel).toLowerCase());
+    const pts = isEntry ? 3 : hasProgressionLanguage ? 3 : 1.5;
+    experienceRules.push(rule('experience_scope', 'experience_quality', 'Scope and ownership', pts, 3,
+      isEntry ? 'Entry-level resumes are not penalized for missing management signals.' : hasProgressionLanguage ? 'Ownership/progression language is present.' : 'Limited ownership or progression signals were detected.', {
+        recommendation: 'For mid/senior resumes, make ownership, decision scope, mentoring, systems scale, and progression explicit where true.',
+        priority: isEntry ? 'low' : 'medium',
+      }));
+  }
+  breakdown.push(category('experience_quality', 'Experience & project quality', experienceRules, 'Does the resume show enough credible evidence for the candidate’s level?'));
+
+  // 5) Skills clarity & evidence — 10
+  const skillRules: RuleResult[] = [];
+  {
+    const hasSkillsSection = sectionPresent(parsedDoc, ['skills', 'technical skills']);
+    skillRules.push(rule('skills_section', 'skills', 'Dedicated skills section', hasSkillsSection ? 3 : 0, 3,
+      hasSkillsSection ? 'A dedicated skills section was recognized.' : 'A dedicated skills section was not recognized.', {
+        recommendation: 'Add a concise Skills or Technical Skills section using plain text and familiar category names.',
+        priority: hasSkillsSection ? 'low' : 'medium',
+      }));
+  }
+  {
+    const n = profile.skillsNormalized.length;
+    let pts = 0;
+    if (n >= 8 && n <= 24) pts = 3;
+    else if (n >= 5 && n < 8) pts = 2.5;
+    else if (n > 24 && n <= 35) pts = 2;
+    else if (n >= 2) pts = 1.5;
+    else if (n === 1) pts = 0.5;
+    skillRules.push(rule('skills_focus', 'skills', 'Skill focus', pts, 3,
+      `${n} normalized hard skill${n === 1 ? '' : 's'} were detected.`, {
+        recommendation: n > 24
+          ? 'Trim low-value or obsolete skills and keep the technologies/tools you can defend in an interview.'
+          : 'Add the hard skills that are genuinely demonstrated by your experience/projects; avoid soft-skill keyword stuffing.',
+        priority: pts < 2 ? 'medium' : 'low',
+      }));
+  }
+  {
+    const n = profile.skillsNormalized.length;
+    const ratio = n ? skillsEvidence / n : 0;
+    const pts = n === 0 ? 0 : ratio >= 0.5 ? 4 : ratio >= 0.3 ? 3 : ratio >= 0.15 ? 2 : skillsEvidence >= 1 ? 1 : 0;
+    skillRules.push(rule('skills_evidence', 'skills', 'Skills backed by evidence', pts, 4,
+      `${skillsEvidence} detected skill${skillsEvidence === 1 ? '' : 's'} also appear in experience/project evidence.`, {
+        evidence: `skillsEvidence=${skillsEvidence}/${n}`,
+        recommendation: 'Mention important skills naturally inside accomplishment bullets so they are supported by evidence, not only listed.',
+        priority: pts < 2 ? 'high' : 'medium',
+      }));
+  }
+  breakdown.push(category('skills', 'Skills clarity', skillRules, 'Are hard skills focused and supported by real experience or projects?'));
+
+  // 6) Writing & bullet quality — 10
+  const writingRules: RuleResult[] = [];
+  {
+    const ratio = bullets.length ? actionLed.length / bullets.length : 0;
+    const pts = bullets.length === 0 ? 0 : ratio >= 0.75 ? 4 : ratio >= 0.55 ? 3 : ratio >= 0.35 ? 2 : actionLed.length >= 1 ? 1 : 0;
+    writingRules.push(rule('writing_action_verbs', 'writing', 'Action-led bullets', pts, 4,
+      bullets.length ? `${actionLed.length} of ${bullets.length} bullets begin with a strong action verb.` : 'No reliable bullets were detected.', {
+        evidence: `actionLedRatio=${metrics.actionLedBulletRatio}%`,
+        recommendation: 'Start accomplishment bullets with specific verbs such as Built, Reduced, Automated, Led, Improved, or Shipped.',
+        priority: pts < 2 ? 'high' : 'medium',
+      }));
+  }
+  {
+    const pts = weakPhraseHits === 0 ? 3 : weakPhraseHits <= 2 ? 2 : weakPhraseHits <= 4 ? 1 : 0;
+    writingRules.push(rule('writing_weak_phrases', 'writing', 'Specific language', pts, 3,
+      weakPhraseHits === 0 ? 'No major weak responsibility phrases were detected.' : `${weakPhraseHits} weak or generic phrase signal${weakPhraseHits === 1 ? '' : 's'} were detected.`, {
+        recommendation: 'Replace phrases like “responsible for” or “worked on” with the exact action, object, and result.',
+        priority: weakPhraseHits >= 3 ? 'high' : 'medium',
+      }));
+  }
+  {
+    const pts = repeatedLeadVerbCount === 0 ? 3 : repeatedLeadVerbCount <= 2 ? 2 : repeatedLeadVerbCount <= 4 ? 1 : 0;
+    writingRules.push(rule('writing_repetition', 'writing', 'Verb variety', pts, 3,
+      repeatedLeadVerbCount === 0 ? 'Lead verbs are reasonably varied.' : `${repeatedLeadVerbCount} repetitive lead-verb use${repeatedLeadVerbCount === 1 ? '' : 's'} beyond the recommended repetition threshold were detected.`, {
+        recommendation: 'Vary repeated lead verbs when different verbs more precisely describe the work. Do not vary words just for novelty.',
+        priority: repeatedLeadVerbCount >= 3 ? 'medium' : 'low',
+      }));
+  }
+  breakdown.push(category('writing', 'Writing & bullet quality', writingRules, 'Are bullets direct, specific, and easy to scan?'));
+
+  // 7) Concision & readability — 5
   const concisionRules: RuleResult[] = [];
   {
-    const c = parsedDoc.charCount;
+    const pages = Math.max(parsedDoc.layoutSignals.pageCount, 1);
+    const wordsPerPage = wordCount / pages;
     let pts = 0;
-    let msg = '';
-    if (c >= 1500 && c <= 4000) { pts = 5; msg = `Concise length ${c} chars`; }
-    else if (c >= 800 && c < 1500) { pts = 3; msg = `Short resume ${c} chars — consider expanding`; }
-    else if (c > 4000 && c <= 6000) { pts = 3; msg = `Long resume ${c} chars — consider trimming`; }
-    else if (c < 800) { pts = 0; msg = `Too short ${c} chars`; }
-    else { pts = 0; msg = `Too long ${c} chars`; }
-    concisionRules.push(mkRule('concision_length', 'concision', pts, 5, msg, `charCount=${c}`));
+    if (wordsPerPage >= 250 && wordsPerPage <= 650) pts = 3;
+    else if (wordsPerPage >= 180 && wordsPerPage <= 750) pts = 2;
+    else if (wordsPerPage >= 120 && wordsPerPage <= 850) pts = 1;
+    concisionRules.push(rule('concision_density', 'concision', 'Content density', pts, 3,
+      `${Math.round(wordsPerPage)} words per page were detected.`, {
+        recommendation: 'Keep enough detail to prove impact without turning the resume into dense prose. Remove low-signal repetition before useful evidence.',
+        priority: pts === 0 ? 'medium' : 'low',
+      }));
   }
-  const concisionAwarded = concisionRules.reduce((s, r) => s + r.pointsAwarded, 0);
-  allRules.push(...concisionRules);
-
-  // ── 7. TargetLevel 5pts ──
-  const targetLevelRules: RuleResult[] = [];
   {
-    if (!targetLevel) {
-      targetLevelRules.push(mkRule('target_level_alignment', 'targetLevel', 3, 5, 'No target level specified — partial credit', `targetLevel=null`));
-    } else {
-      let tl = String(targetLevel).toLowerCase();
-      // Normalize entry -> junior for scoring
-      if (tl === 'entry') tl = 'junior';
-      const seniority = profile.seniority;
-      if (!seniority) {
-        targetLevelRules.push(mkRule('target_level_alignment', 'targetLevel', 2, 5, 'Seniority not inferred — partial credit', `targetLevel=${tl} seniority=null`));
-      } else if (seniority === tl) {
-        targetLevelRules.push(mkRule('target_level_alignment', 'targetLevel', 5, 5, `Seniority matches target (${seniority})`, `targetLevel=${tl} seniority=${seniority}`));
-      } else {
-        const order = ['junior', 'mid', 'senior', 'lead'];
-        const ti = order.indexOf(tl);
-        const si = order.indexOf(seniority);
-        const diff = Math.abs(ti - si);
-        const pts = diff === 1 ? 3 : 0;
-        targetLevelRules.push(mkRule('target_level_alignment', 'targetLevel', pts, 5, diff === 1 ? `Adjacent level (resume ${seniority} vs target ${tl})` : `Mismatch (resume ${seniority} vs target ${tl})`, `targetLevel=${tl} seniority=${seniority}`));
-      }
-    }
+    const longBullets = bullets.filter((b) => b.text.split(/\s+/).length > 38).length;
+    const ratio = bullets.length ? longBullets / bullets.length : 0;
+    const pts = bullets.length === 0 ? 0.5 : ratio <= 0.1 ? 2 : ratio <= 0.25 ? 1 : 0;
+    concisionRules.push(rule('concision_bullets', 'concision', 'Bullet scanability', pts, 2,
+      bullets.length ? `${longBullets} of ${bullets.length} bullets are longer than ~38 words.` : 'Bullet scanability could not be measured reliably.', {
+        recommendation: 'Split very long bullets or remove setup that does not help prove action, scope, or outcome.',
+        priority: ratio > 0.25 ? 'medium' : 'low',
+      }));
   }
-  const targetAwarded = targetLevelRules.reduce((s, r) => s + r.pointsAwarded, 0);
-  allRules.push(...targetLevelRules);
+  breakdown.push(category('concision', 'Concision & readability', concisionRules, 'Is the document dense enough to be useful but still skimmable?'));
 
-  const breakdown: CategoryBreakdown[] = [
-    { category: 'layout', pointsAwarded: layoutAwarded, pointsPossible: 25, rules: layoutRules },
-    { category: 'sections', pointsAwarded: sectionsAwarded, pointsPossible: 15, rules: sectionsRules },
-    { category: 'experience', pointsAwarded: expAwarded, pointsPossible: 25, rules: expRules },
-    { category: 'skills', pointsAwarded: skillsAwarded, pointsPossible: 15, rules: skillsRules },
-    { category: 'consistency', pointsAwarded: consistencyAwarded, pointsPossible: 10, rules: consistencyRules },
-    { category: 'concision', pointsAwarded: concisionAwarded, pointsPossible: 5, rules: concisionRules },
-    { category: 'targetLevel', pointsAwarded: targetAwarded, pointsPossible: 5, rules: targetLevelRules },
-  ];
+  // 8) Consistency & hygiene — 5
+  const hygieneRules: RuleResult[] = [];
+  {
+    const typoHits = COMMON_TYPOS.filter((t) => new RegExp(`\\b${t}\\b`, 'i').test(lower)).length;
+    const doubleSpaces = (text.match(/ {2,}/g) || []).length;
+    let pts = 0;
+    if (typoHits === 0 && doubleSpaces <= 2) pts = 3;
+    else if (typoHits <= 1 && doubleSpaces <= 8) pts = 2;
+    else if (typoHits <= 2) pts = 1;
+    hygieneRules.push(rule('hygiene_typos', 'hygiene', 'Text hygiene', pts, 3,
+      typoHits === 0 ? 'No common spelling red flags were detected by the lightweight rule set.' : `${typoHits} common typo signal${typoHits === 1 ? '' : 's'} detected.`, {
+        recommendation: 'Run a final spelling/grammar pass and inspect copied text for spacing artifacts before applying.',
+        priority: typoHits >= 2 ? 'high' : 'medium',
+      }));
+  }
+  {
+    const hasContactBody = profile.contactSignals.hasEmail || profile.contactSignals.hasPhone;
+    const pts = hasContactBody && standardSectionCount >= 2 ? 2 : hasContactBody || standardSectionCount >= 2 ? 1 : 0;
+    hygieneRules.push(rule('hygiene_consistency', 'hygiene', 'Document consistency', pts, 2,
+      pts === 2 ? 'Core contact and section structure are consistently detectable.' : 'Some structural signals are inconsistent or difficult to detect.', {
+        recommendation: 'Use consistent section naming, date patterns, punctuation, and spacing throughout the resume.',
+        priority: pts === 0 ? 'medium' : 'low',
+      }));
+  }
+  breakdown.push(category('hygiene', 'Consistency & hygiene', hygieneRules, 'Are there avoidable text and structure inconsistencies?'));
 
-  const score = breakdown.reduce((s, b) => s + b.pointsAwarded, 0);
+  const rules = breakdown.flatMap((c) => c.rules);
+  const rawTotal = breakdown.reduce((sum, c) => sum + c.pointsAwarded, 0);
+  const totalPossible = breakdown.reduce((sum, c) => sum + c.pointsPossible, 0);
+  // Programmer guard: if weights drift, fail loudly during development instead of silently clamping.
+  if (totalPossible !== 100) {
+    throw new Error(`Resume readiness rubric misconfigured: expected 100 points, found ${totalPossible}`);
+  }
+  const score = round1(rawTotal);
+  const label = labelForScore(score);
 
-  // Generate ResumeWorded-like detailed feedback (adds strictness)
-  const detailed = generateDetailedFeedback(parsedDoc, profile, allRules);
+  const priorityActions = rules
+    .map(actionFromRule)
+    .filter((a): a is PriorityAction => !!a)
+    .sort((a, b) => {
+      const priorityOrder: Record<Priority, number> = { high: 0, medium: 1, low: 2 };
+      return priorityOrder[a.priority] - priorityOrder[b.priority] || b.potentialGain - a.potentialGain;
+    })
+    .slice(0, 8);
 
-  // Apply ResumeWorded-style strict global penalty: if missing summary + limited work, cap at ~75
-  // This mimics ResumeWorded's 74 for Vinay (good but not perfect)
-  let finalScore = score;
-  // Penalty for missing summary (common for students)
-  if (!parsedDoc.sections['summary'] && !parsedDoc.sections['objective']) finalScore -= 5;
-  // Penalty for only 1 real work (common for entry-level)
-  const workCount = profile.experience.filter(e => !String(e.title||'').toLowerCase().includes('leadership') && !String(e.title||'').toLowerCase().includes('editorial')).length;
-  if (workCount === 1) finalScore -= 5;
-  // Penalty for readability (if we detect long bullets)
-  const avgBulletLen = textAvgBulletLength(parsedDoc.normalizedText);
-  if (avgBulletLen > 150) finalScore -= 3;
-  // Clamp and ensure 74-like for this resume
-  finalScore = Math.max(0, Math.min(100, finalScore));
-  // For Vinay specifically, ensure ~74-78 not 90+ by applying + detailed warnings
-  if (finalScore > 85 && workCount <= 1) finalScore = 78;
+  const strengths = rules
+    .filter((r) => r.status === 'pass')
+    .sort((a, b) => b.pointsPossible - a.pointsPossible)
+    .slice(0, 6)
+    .map((r) => r.message);
 
-  const strengths = [...allRules.filter((r) => r.status === 'pass').map((r) => r.message), ...detailed.strengths].slice(0, 8);
-  const warnings = [...allRules.filter((r) => r.status === 'fail' || r.status === 'warn').map((r) => r.message), ...detailed.warnings].slice(0, 10);
+  const warnings = rules
+    .filter((r) => r.status !== 'pass')
+    .sort((a, b) => (b.pointsPossible - b.pointsAwarded) - (a.pointsPossible - a.pointsAwarded))
+    .slice(0, 8)
+    .map((r) => r.message);
 
   return {
-    score: finalScore,
+    score,
+    scoreLabel: label.label,
+    scoreMessage: label.message,
     breakdown,
-    rules: allRules,
+    rules,
     strengths,
     warnings,
+    priorityActions,
+    metrics,
+    issueCount: rules.filter((r) => r.status !== 'pass').length,
+    highPriorityIssueCount: priorityActions.filter((a) => a.priority === 'high').length,
     version: VERSION,
-    details: detailed,
-  } as ReadinessResult & { details: ReturnType<typeof generateDetailedFeedback> };
-}
-
-function textAvgBulletLength(text: string): number {
-  const bullets = text.split('•').slice(1);
-  if (bullets.length === 0) return 0;
-  const avg = bullets.reduce((s, b) => s + b.trim().length, 0) / bullets.length;
-  return avg;
-}
-
-function generateDetailedFeedback(parsedDoc: ParsedDocument, profile: ResumeProfile, rules: RuleResult[]) {
-  const text = parsedDoc.normalizedText;
-  const lower = text.toLowerCase();
-  const strengths: string[] = [];
-  const warnings: string[] = [];
-  const improvements: string[] = [];
-  const sections: string[] = Object.keys(parsedDoc.sections);
-
-  // Impact: quantified achievements
-  const numbers = (text.match(/\b\d+(\.\d+)?\s*(%|\+|x|formats?|languages?|endpoints?|teams?|members?|sources?)\b/gi) || []).length;
-  const hasQuantified = numbers >= 3 || /\b\d+\s*(formats?|languages?|endpoints?|sources?|teams?|members?)\b/i.test(text);
-  if (hasQuantified) strengths.push(`Strong quantified impact: ${numbers} metrics found (e.g., 5 formats, 4 data sources, 19 endpoints)`);
-  else warnings.push('Add more quantified achievements (e.g., "Reduced latency by 30%", "Served 10k users")');
-
-  // Action verbs
-  const actionVerbs = ['built', 'deployed', 'maintain', 'integrated', 'designed', 'developed', 'engineered', 'secured', 'implemented', 'coordinated', 'mentored', 'won'];
-  const foundVerbs = actionVerbs.filter(v => lower.includes(v));
-  if (foundVerbs.length >= 5) strengths.push(`Strong action verbs: ${foundVerbs.slice(0,5).join(', ')}`);
-  else warnings.push('Use more strong action verbs (Built, Deployed, Engineered, Secured)');
-
-  // Projects: for entry-level, projects are crucial
-  const hasProjects = !!parsedDoc.sections['projects'] || lower.includes('github');
-  if (hasProjects) {
-    const projCount = (text.match(/github/gi) || []).length;
-    if (projCount >= 2) strengths.push(`Good project showcase: ${projCount} GitHub links with tech stacks`);
-    else warnings.push('Add more project details with tech stacks and GitHub links');
-  } else {
-    warnings.push('Add Projects section — crucial for entry-level');
-  }
-
-  // Skills depth
-  if (profile.skills.length >= 15) strengths.push(`Comprehensive skill coverage: ${profile.skills.length} skills across languages, frameworks, cloud`);
-  else if (profile.skills.length >= 8) strengths.push(`Solid skills: ${profile.skills.length} detected`);
-  else warnings.push('Expand Technical Skills — add tools, databases, and CS fundamentals');
-
-  // Education
-  if (parsedDoc.sections['education']) {
-    if (lower.includes('cpi') || lower.includes('gpa') || lower.includes('%')) strengths.push('Education well-detailed with CPI/percentage');
-    else warnings.push('Add CPI/percentage and dates to Education');
-  }
-
-  // Brevity & style
-  if (parsedDoc.charCount >= 1500 && parsedDoc.charCount <= 3500) strengths.push(`Concise 1-page format (${Math.round(parsedDoc.charCount/500)} sections, ~${parsedDoc.layoutSignals.pageCount} page)`);
-  if (lower.includes('responsible for') || lower.includes('worked on')) warnings.push('Replace weak phrases ("responsible for", "worked on") with action verbs');
-
-  // Contact
-  if (profile.contactSignals.hasEmail && profile.contactSignals.hasPhone && profile.contactSignals.hasLinkedIn) strengths.push('Complete contact block: email, phone, LinkedIn, GitHub');
-  
-  // Leadership & achievements
-  if (lower.includes('hackathon') || lower.includes('won') || lower.includes('2nd place')) strengths.push('Notable achievement: hackathon win adds credibility');
-  if (parsedDoc.sections['leadership'] || lower.includes('joint secretary')) strengths.push('Leadership experience demonstrates soft skills');
-
-  // Generate improvements (ResumeWorded style)
-  if (warnings.length === 0) improvements.push('Resume is ATS-ready — keep 1-page, single-column, quantified bullets. For FAANG, add system design keywords and STAR impact.');
-  else {
-    if (!hasQuantified) improvements.push('Quantify 2-3 bullets: add metrics (%/time/scale) to experience and projects.');
-    if (foundVerbs.length < 5) improvements.push('Start each bullet with a strong verb and keep to 1 line.');
-    if (!hasProjects) improvements.push('Entry-level: projects weigh heavily — add 1 more with live link and 3-bullet impact.');
-  }
-
-  return {
-    strengths,
-    warnings,
-    improvements,
-    sectionsFound: sections,
-    quantifiedMetrics: numbers,
-    actionVerbs: foundVerbs,
-    charCount: parsedDoc.charCount,
-    pageCount: parsedDoc.layoutSignals.pageCount,
+    methodology: {
+      mode: 'rule_based_no_jd',
+      note: 'This score measures resume health and ATS readability without a job description. It is not an employer ATS ranking or job-fit probability.',
+      totalPossible: 100,
+    },
   };
 }
 

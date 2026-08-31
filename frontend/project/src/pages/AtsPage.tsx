@@ -1,108 +1,166 @@
-// src/pages/AtsPage.tsx
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../lib/api';
-import { Upload, Loader2, FileText, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
+import {
+  ArrowRight,
+  Briefcase,
+  Check,
+  CheckCircle,
+  FileText,
+  Gauge,
+  Loader2,
+  Lock,
+  FileSearch,
+  ShieldCheck,
+  Sparkles,
+  UploadCloud,
+  X,
+} from 'lucide-react';
 
 type Mode = 'resume' | 'match';
+type TargetLevel = 'entry' | 'mid' | 'senior';
 
-interface CategoryScore {
-  name?: string;
-  score?: number;
-  max?: number;
-  reasons?: string[];
-}
-interface Rule {
-  id?: string;
-  label?: string;
-  status?: 'pass' | 'fail' | 'warn';
-  message?: string;
-}
-interface Readiness {
-  score?: number;
-  level?: string;
-  statusMessage?: string;
-  categories?: CategoryScore[];
-  rules?: Rule[];
-  strengths?: string[];
-  warnings?: string[];
-  insights?: string[];
-  recommendations?: string[];
-  extractedInfo?: unknown;
-  // compat with old analysis shape
-  status?: string;
+const modes = [
+  {
+    id: 'resume' as const,
+    eyebrow: 'No job description',
+    title: 'Resume Health',
+    description: 'A rule-based 100-point review of ATS readability, impact, bullet quality, skills evidence, completeness, and writing.',
+    icon: FileSearch,
+    accent: 'violet',
+    tags: ['No AI similarity', 'Detailed report', 'Priority fixes'],
+  },
+  {
+    id: 'match' as const,
+    eyebrow: 'For a specific role',
+    title: 'Tailored Match',
+    description: 'Keep your Resume Health score separate, then compare your evidence, required skills, responsibilities, and seniority to one JD.',
+    icon: Briefcase,
+    accent: 'cyan',
+    tags: ['JD-specific', 'Semantic evidence', 'Missing skills'],
+  },
+];
+
+function FileDropzone({
+  file,
+  loading,
+  onFile,
+}: {
+  file: File | null;
+  loading: boolean;
+  onFile: (file: File | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const validate = (next: File | null) => {
+    if (!next) return onFile(null);
+    if (next.type !== 'application/pdf' && !next.name.toLowerCase().endsWith('.pdf')) return;
+    onFile(next);
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    if (loading) return;
+    validate(event.dataTransfer.files?.[0] ?? null);
+  };
+
+  return (
+    <div
+      onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={onDrop}
+      className={`relative overflow-hidden rounded-2xl border border-dashed p-6 transition sm:p-8 ${dragging ? 'border-violet-300/60 bg-violet-500/[0.08]' : file ? 'border-emerald-400/25 bg-emerald-400/[0.035]' : 'border-white/[0.12] bg-black/10 hover:border-violet-400/35 hover:bg-violet-400/[0.025]'}`}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        disabled={loading}
+        onChange={(event: ChangeEvent<HTMLInputElement>) => validate(event.target.files?.[0] ?? null)}
+      />
+      <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-violet-500/10 blur-3xl" />
+      <div className="relative flex flex-col items-center text-center">
+        <span className={`grid h-14 w-14 place-items-center rounded-2xl border ${file ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300' : 'border-white/[0.08] bg-white/[0.04] text-violet-300'}`}>
+          {file ? <CheckCircle size={24} /> : <UploadCloud size={24} />}
+        </span>
+        <p className="mt-4 text-sm font-semibold text-white">{file ? file.name : 'Drop your resume here'}</p>
+        <p className="mt-1 max-w-md text-xs leading-5 text-slate-500">{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB • ready to analyze` : 'PDF only, up to 5 MB. Text-based PDFs give the most reliable structural analysis.'}</p>
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => inputRef.current?.click()}
+          className="pointer-events-auto mt-4 rounded-xl border border-white/[0.09] bg-white/[0.045] px-4 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/[0.075] hover:text-white"
+        >
+          {file ? 'Choose another file' : 'Browse PDF'}
+        </button>
+        {file && (
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => onFile(null)}
+            className="pointer-events-auto absolute right-0 top-0 rounded-lg p-1.5 text-slate-600 transition hover:bg-white/5 hover:text-slate-300"
+            aria-label="Remove selected file"
+          >
+            <X size={15} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function AtsPage() {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>('resume');
   const [file, setFile] = useState<File | null>(null);
-  const [targetLevel, setTargetLevel] = useState<'entry' | 'mid' | 'senior'>('entry');
+  const [targetLevel, setTargetLevel] = useState<TargetLevel>('entry');
   const [jobDescription, setJobDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<{ readiness?: Readiness; analysis?: Readiness; resume?: { id: number } } | null>(null);
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] ?? null;
-    if (f && f.type !== 'application/pdf') {
-      setError('Only PDF files are allowed');
+  const handleFile = (next: File | null) => {
+    if (next && next.size > 5 * 1024 * 1024) {
+      setError('That PDF is larger than 5 MB. Choose a smaller file.');
       setFile(null);
       return;
     }
     setError('');
-    setFile(f);
+    setFile(next);
   };
 
-  const handleSubmit = async () => {
-    if (!file) {
-      setError('Select a PDF first');
-      return;
-    }
-    if (mode === 'match' && !jobDescription.trim()) {
-      setError('Paste a job description for matching');
-      return;
-    }
+  const analyze = async () => {
+    if (!file) return setError('Choose a PDF resume first.');
+    if (mode === 'match' && jobDescription.trim().length < 20) return setError('Paste the job description you want to match against.');
 
     setLoading(true);
     setError('');
-    setResult(null);
-
     try {
       const form = new FormData();
       form.append('resume', file);
       form.append('targetLevel', targetLevel);
 
-      // V2: POST /resumes
-      const uploadRes = await api.post('/resumes', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const upload = await api.post('/resumes', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const resumeId = (upload.data as any)?.resume?.id ?? (upload.data as any)?.id;
+      if (!resumeId) throw new Error('Upload succeeded but no resume id was returned.');
+
+      const response = mode === 'resume'
+        ? await api.post('/analyses/readiness', { resumeId, targetLevel })
+        : await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel });
+
+      const data = response.data as any;
+      if (!data?.analysisId) throw new Error('Analysis completed but no report id was returned.');
+
+      navigate(`/app/analysis/${data.analysisId}`, {
+        state: {
+          initialAnalysis: data,
+          fileName: file.name,
+          mode,
+          createdAt: new Date().toISOString(),
+        },
       });
-      const resumeId = (uploadRes.data as { resume?: { id: string } })?.resume?.id ?? (uploadRes.data as { id?: string })?.id;
-      if (!resumeId) throw new Error('Upload failed: no resume id');
-
-      // V2: POST /analyses/readiness or /analyses/jd-match
-      let analysisRes;
-      if (mode === 'resume') {
-        analysisRes = await api.post('/analyses/readiness', { resumeId, targetLevel });
-      } else {
-        analysisRes = await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel });
-      }
-
-      const data = analysisRes.data as any;
-      const readiness = data.readiness ?? data.analysis ?? data.jdMatch ?? data;
-      // V2 returns { readiness: { score, breakdown, rules... }, jdMatch?: { score, breakdown, responsibilityCoverage } }
-      const normalized: any = {
-        readiness: data.readiness ?? data.analysis ?? data,
-        jdMatch: data.jdMatch,
-        analysis: data.readiness ?? data.analysis,
-        resume: { id: resumeId },
-        raw: data,
-      };
-      if (data.jdMatch) {
-        normalized.readiness = data.readiness;
-        normalized.jdMatch = data.jdMatch;
-      }
-      if (typeof data.score === 'number' && !normalized.readiness?.score) normalized.readiness = data;
-      setResult(normalized);
     } catch (err) {
       setError(getApiErrorMessage(err));
     } finally {
@@ -110,243 +168,137 @@ export default function AtsPage() {
     }
   };
 
-  const readiness: Readiness | undefined = result?.readiness ?? result?.analysis;
-
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">ATS Check</h1>
-        <p className="text-sm text-gray-400 mt-1">Check resume readiness or match it against a job description.</p>
-      </div>
-
-      <div className="inline-flex p-1 bg-white/[0.04] border border-white/5 rounded-xl">
-        <button
-          onClick={() => setMode('resume')}
-          className={`px-4 py-1.5 rounded-lg text-sm font-medium ${mode === 'resume' ? 'bg-red-500 text-white' : 'text-gray-400'}`}
-        >
-          Resume Check
-        </button>
-        <button
-          onClick={() => setMode('match')}
-          className={`px-4 py-1.5 rounded-lg text-sm font-medium ${mode === 'match' ? 'bg-red-500 text-white' : 'text-gray-400'}`}
-        >
-          Match to JD
-        </button>
-      </div>
-
-      <div className="grid lg:grid-cols-2 gap-6">
-        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5 space-y-4">
-          <div className="border-2 border-dashed border-white/10 rounded-xl p-8 text-center hover:border-red-500/40 transition-colors">
-            <input id="ats-file" type="file" accept="application/pdf" className="hidden" onChange={handleFile} disabled={loading} />
-            <label htmlFor="ats-file" className="cursor-pointer block">
-              <div className="w-12 h-12 mx-auto rounded-full bg-red-500/10 flex items-center justify-center mb-3">
-                {loading ? <Loader2 className="animate-spin text-red-400" size={20} /> : <Upload className="text-red-400" size={20} />}
-              </div>
-              <p className="text-sm font-medium">{file ? file.name : 'Click to select PDF'}</p>
-              <p className="text-xs text-gray-500 mt-1">Max 5MB • PDF only</p>
-            </label>
-          </div>
-
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-400">Target level</label>
-              <select
-                value={targetLevel}
-                onChange={(e) => setTargetLevel(e.target.value as typeof targetLevel)}
-                className="mt-1 w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm"
-              >
-                <option value="entry">Entry (0–2y)</option>
-                <option value="mid">Mid (2–5y)</option>
-                <option value="senior">Senior (5+y)</option>
-              </select>
-            </div>
-            <div className="flex items-end">
-              <button
-                onClick={handleSubmit}
-                disabled={loading || !file}
-                className="w-full bg-red-500 hover:bg-red-600 disabled:opacity-40 text-white py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2"
-              >
-                {loading && <Loader2 size={16} className="animate-spin" />}
-                {mode === 'match' ? 'Check Match' : 'Analyze Resume'}
-              </button>
-            </div>
-          </div>
-
-          {mode === 'match' && (
-            <div>
-              <label className="text-xs text-gray-400">Job description (paste)</label>
-              <textarea
-                value={jobDescription}
-                onChange={(e) => setJobDescription(e.target.value)}
-                rows={8}
-                placeholder="Paste JD here..."
-                className="mt-1 w-full bg-black/30 border border-white/10 rounded-lg p-3 text-sm"
-              />
-              <p className="text-[11px] text-gray-500 mt-1">We compare skills, evidence, and readiness side-by-side.</p>
-            </div>
-          )}
-
-          {error && <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</div>}
+    <div className="space-y-8 pb-10">
+      <section className="flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
+        <div>
+          <p className="jh-eyebrow"><Sparkles size={13} /> Resume intelligence</p>
+          <h1 className="jh-title mt-3">Know what is holding your resume back.</h1>
+          <p className="jh-subtitle mt-3">Start with document quality. Add a job description only when you want role-specific matching. We keep those two signals separate so the score stays interpretable.</p>
         </div>
+        <div className="flex max-w-xl gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 text-xs text-slate-500">
+          <ShieldCheck className="mt-0.5 shrink-0 text-emerald-300" size={17} />
+          <span>Your no-JD report is deterministic and rule-based. AWS embeddings are used only for tailored matching and job relevance, never to invent a generic resume score.</span>
+        </div>
+      </section>
 
-        <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
-          {!readiness ? (
-            <div className="py-12 text-center text-sm text-gray-500">
-              <FileText className="mx-auto mb-2 text-gray-600" />
-              Results will appear here after analysis.
-            </div>
-          ) : (
-            <div className="space-y-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs tracking-widest text-gray-500">READINESS</p>
-                  <p className={`text-3xl font-bold ${typeof readiness.score === 'number' && readiness.score >= 80 ? 'text-green-400' : typeof readiness.score === 'number' && readiness.score >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
-                    {typeof readiness.score === 'number' ? readiness.score : '—'}
-                    <span className="text-sm font-normal text-gray-500"> /100</span>
-                  </p>
-                  <p className="text-sm text-gray-300 mt-1">
-                    {typeof readiness.score === 'number' && readiness.score >= 90 ? 'Excellent — ATS-ready' : typeof readiness.score === 'number' && readiness.score >= 80 ? 'Strong — minor tweaks' : typeof readiness.score === 'number' && readiness.score >= 60 ? 'Good — some gaps' : readiness.statusMessage ?? readiness.level ?? readiness.status ?? ''}
-                  </p>
-                  {(readiness as any).details && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      {((readiness as any).details.sectionsFound ?? []).join(' • ')} • {(readiness as any).details.quantifiedMetrics ?? 0} quantified metrics
-                    </p>
-                  )}
-                </div>
-                {(result as any)?.analysisId && (
-                  <Link to={`/app/analysis/${(result as any).analysisId}`} className="text-xs bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-1.5 rounded-lg">
-                    View full report
-                  </Link>
-                )}
-              </div>
-
-              {/* V2 breakdown is `breakdown` with pointsAwarded/pointsPossible, fallback to categories */}
-              {((readiness as any).breakdown ?? readiness.categories) && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-300 mb-2">Category breakdown</p>
-                  <div className="space-y-2">
-                    {(((readiness as any).breakdown ?? readiness.categories) as any[]).map((c: any, i: number) => (
-                      <div key={i} className="bg-black/30 rounded-lg p-3 border border-white/5">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-300 capitalize">{c.category ?? c.name ?? `Category ${i + 1}`}</span>
-                          <span className={`font-medium ${c.pointsAwarded === c.pointsPossible ? 'text-green-400' : c.pointsAwarded === 0 ? 'text-red-400' : 'text-yellow-400'}`}>
-                            {c.pointsAwarded ?? c.score ?? '—'}/{c.pointsPossible ?? c.max ?? 100}
-                          </span>
-                        </div>
-                        {c.rules && <p className="text-xs text-gray-500 mt-1">{c.rules.slice(0,2).map((r: any) => r.message).join(' • ')}</p>}
-                        {c.reasons && c.reasons.length > 0 && <p className="text-xs text-gray-500 mt-1">{c.reasons.join(' • ')}</p>}
-                      </div>
-                    ))}
+      <section className="grid gap-4 lg:grid-cols-2">
+        {modes.map((item) => {
+          const active = mode === item.id;
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.id}
+              onClick={() => { setMode(item.id); setError(''); }}
+              className={`relative overflow-hidden rounded-2xl border p-5 text-left transition md:p-6 ${active ? item.accent === 'violet' ? 'border-violet-400/30 bg-violet-500/[0.07]' : 'border-cyan-300/25 bg-cyan-400/[0.055]' : 'border-white/[0.07] bg-white/[0.025] hover:border-white/[0.12] hover:bg-white/[0.04]'}`}
+            >
+              <div className={`absolute right-[-55px] top-[-55px] h-40 w-40 rounded-full blur-3xl ${item.accent === 'violet' ? 'bg-violet-500/10' : 'bg-cyan-400/10'}`} />
+              <div className="relative flex items-start gap-4">
+                <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border ${active ? item.accent === 'violet' ? 'border-violet-300/20 bg-violet-400/10 text-violet-300' : 'border-cyan-300/20 bg-cyan-300/10 text-cyan-200' : 'border-white/[0.07] bg-white/[0.035] text-slate-500'}`}>
+                  <Icon size={20} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">{item.eyebrow}</p>
+                      <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-white">{item.title}</h2>
+                    </div>
+                    <span className={`grid h-6 w-6 place-items-center rounded-full border ${active ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : 'border-white/[0.08] text-transparent'}`}><Check size={13} /></span>
+                  </div>
+                  <p className="mt-2 max-w-xl text-xs leading-5 text-slate-500">{item.description}</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {item.tags.map((tag) => <span key={tag} className="jh-chip">{tag}</span>)}
                   </div>
                 </div>
-              )}
-
-              {readiness.rules && readiness.rules.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-300 mb-2">Rules</p>
-                  <ul className="space-y-1.5">
-                    {readiness.rules.map((r, i) => (
-                      <li key={i} className="flex gap-2 text-sm">
-                        {r.status === 'pass' && <CheckCircle size={16} className="text-green-400 mt-0.5 shrink-0" />}
-                        {r.status === 'warn' && <AlertTriangle size={16} className="text-yellow-400 mt-0.5 shrink-0" />}
-                        {r.status === 'fail' && <XCircle size={16} className="text-red-400 mt-0.5 shrink-0" />}
-                        {!r.status && <span className="text-gray-500">•</span>}
-                        <span className="text-gray-300">
-                          <span className="font-medium">{r.label ?? r.id ?? ''}</span>
-                          {r.message ? ` — ${r.message}` : ''}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div className="bg-green-950/10 border border-green-900/20 rounded-lg p-3">
-                  <p className="text-xs font-semibold text-green-400 mb-2">Strengths</p>
-                  <ul className="text-xs text-gray-300 space-y-1">
-                    {(readiness.strengths ?? (readiness as any).details?.strengths ?? readiness.insights ?? []).slice(0, 6).map((s: string, i: number) => (
-                      <li key={i} className="flex gap-1.5">
-                        <span className="text-green-400">•</span>
-                        <span>{s}</span>
-                      </li>
-                    ))}
-                    {(readiness.strengths ?? (readiness as any).details?.strengths ?? readiness.insights ?? []).length === 0 && <li className="text-gray-500 italic">No strengths listed</li>}
-                  </ul>
-                </div>
-                <div className="bg-yellow-950/10 border border-yellow-900/20 rounded-lg p-3">
-                  <p className="text-xs font-semibold text-yellow-400 mb-2">Warnings</p>
-                  <ul className="text-xs text-gray-300 space-y-1">
-                    {(readiness.warnings ?? (readiness as any).details?.warnings ?? readiness.recommendations ?? []).slice(0, 6).map((w: string, i: number) => (
-                      <li key={i} className="flex gap-1.5">
-                        <span className="text-yellow-400">•</span>
-                        <span>{w}</span>
-                      </li>
-                    ))}
-                    {(readiness.warnings ?? (readiness as any).details?.warnings ?? readiness.recommendations ?? []).length === 0 && <li className="text-gray-500 italic">No warnings — excellent</li>}
-                  </ul>
-                </div>
               </div>
+            </button>
+          );
+        })}
+      </section>
 
-              {(readiness as any).details?.improvements && (readiness as any).details.improvements.length > 0 && (
-                <div className="bg-sky-950/10 border border-sky-900/20 rounded-lg p-3">
-                  <p className="text-xs font-semibold text-sky-400 mb-2">Next steps (ResumeWorded-style)</p>
-                  <ul className="text-xs text-gray-300 space-y-1">
-                    {(readiness as any).details.improvements.map((imp: string, i: number) => (
-                      <li key={i} className="flex gap-1.5">
-                        <span className="text-sky-400">→</span>
-                        <span>{imp}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {(result as any)?.jdMatch && (
-                <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 space-y-3">
-                  <p className="text-xs tracking-widest text-gray-500">JD MATCH</p>
-                  <p className="text-3xl font-bold text-emerald-400">
-                    {(result as any).jdMatch.score ?? '—'}
-                    <span className="text-sm font-normal text-gray-500"> /100</span>
-                    <span className="ml-2 text-xs font-normal text-gray-400">{(result as any).confidence ?? (result as any).jdMatch?.confidence ?? ''}</span>
-                  </p>
-                  {(result as any).jdMatch.breakdown && (
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      {Object.entries((result as any).jdMatch.breakdown).map(([k, v]) => (
-                        <span key={k} className="bg-black/30 border border-white/5 rounded-full px-2 py-1">
-                          {k}: {String(v)}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {(result as any).jdMatch.deterministic?.missingRequired?.length > 0 && (
-                    <p className="text-xs text-red-400">Missing: {(result as any).jdMatch.deterministic.missingRequired.join(', ')}</p>
-                  )}
-                  {(result as any).jdMatch.responsibilityCoverage && (
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-gray-400">Responsibility coverage</p>
-                      {(result as any).jdMatch.responsibilityCoverage.slice(0, 3).map((r: any, i: number) => (
-                        <p key={i} className="text-xs text-gray-500">
-                          • {r.responsibility?.slice(0, 80)} — <span className="text-gray-300">{Math.round(r.matchScore * 100)}%</span>
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="pt-2 flex gap-2">
-                <Link to="/app/jobs" className="text-xs bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-lg">
-                  See job matches →
-                </Link>
-                <Link to="/app/resumes" className="text-xs text-gray-400 hover:text-white px-3 py-1.5">
-                  Manage resumes
-                </Link>
-              </div>
+      <section className="grid gap-6 xl:grid-cols-[1.3fr_.7fr]">
+        <div className="jh-surface-strong p-5 md:p-6">
+          <div className="mb-5 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-white">Upload and analyze</p>
+              <p className="mt-1 text-xs text-slate-500">Your report opens as a dedicated diagnostic page after processing.</p>
             </div>
-          )}
+            <span className="hidden rounded-full border border-white/[0.07] bg-black/15 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-600 sm:inline-flex">Step 1 of 1</span>
+          </div>
+
+          <FileDropzone file={file} loading={loading} onFile={handleFile} />
+
+          <div className="mt-5 grid gap-4 md:grid-cols-[.65fr_1.35fr]">
+            <div>
+              <label className="text-[11px] font-medium text-slate-500">Career level</label>
+              <select value={targetLevel} onChange={(event) => setTargetLevel(event.target.value as TargetLevel)} className="jh-input mt-2">
+                <option value="entry" className="bg-[#0d1019]">Entry / early career</option>
+                <option value="mid" className="bg-[#0d1019]">Mid-level</option>
+                <option value="senior" className="bg-[#0d1019]">Senior</option>
+              </select>
+              <p className="mt-1.5 text-[10px] leading-4 text-slate-600">Used only to adapt reasonable depth/length expectations—not to award points for being senior.</p>
+            </div>
+
+            {mode === 'match' ? (
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-[11px] font-medium text-slate-500">Job description</label>
+                  <span className="text-[10px] text-slate-700">{jobDescription.length.toLocaleString()} chars</span>
+                </div>
+                <textarea
+                  value={jobDescription}
+                  onChange={(event) => setJobDescription(event.target.value)}
+                  rows={8}
+                  maxLength={20000}
+                  placeholder="Paste the complete job description here…"
+                  className="jh-input mt-2 min-h-[170px] resize-y leading-5"
+                />
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-white/[0.065] bg-black/10 p-4">
+                <p className="text-[11px] font-medium text-slate-400">What the report checks</p>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-500 sm:grid-cols-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-2">
+                  {['ATS parseability', 'Core completeness', 'Impact & metrics', 'Experience / projects', 'Skills evidence', 'Bullet writing', 'Concision', 'Consistency'].map((label) => (
+                    <span key={label} className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-violet-400/60" />{label}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {error && <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/[0.07] px-4 py-3 text-xs text-rose-200">{error}</div>}
+
+          <div className="mt-5 flex flex-col-reverse gap-3 border-t border-white/[0.06] pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <span className="flex items-center gap-2 text-[11px] text-slate-600"><Lock size={13} /> Private resume storage through your existing Supabase setup</span>
+            <button onClick={analyze} disabled={loading || !file} className="jh-button-accent min-w-[170px]">
+              {loading ? <><Loader2 size={16} className="animate-spin" /> Analyzing…</> : <>{mode === 'match' ? 'Analyze + match' : 'Build my report'} <ArrowRight size={15} /></>}
+            </button>
+          </div>
         </div>
-      </div>
+
+        <aside className="space-y-4">
+          <div className="jh-surface p-5">
+            <div className="flex items-center gap-3">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-400/[0.08] text-violet-300"><Gauge size={18} /></span>
+              <div><p className="text-sm font-semibold text-white">A score you can explain</p><p className="text-[11px] text-slate-600">Every point maps to a visible check.</p></div>
+            </div>
+            <div className="mt-5 space-y-3">
+              {[['20', 'Parseability & ATS structure'], ['20', 'Impact & measurable evidence'], ['15', 'Completeness'], ['15', 'Experience / project quality'], ['10', 'Skills clarity & evidence'], ['10', 'Writing & bullet quality'], ['5', 'Concision'], ['5', 'Consistency']].map(([points, label]) => (
+                <div key={label} className="flex items-center justify-between gap-4 border-b border-white/[0.045] pb-2.5 last:border-0 last:pb-0">
+                  <span className="text-xs text-slate-500">{label}</span>
+                  <span className="text-xs font-semibold text-slate-300">{points} pts</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-cyan-300/10 bg-gradient-to-br from-cyan-400/[0.055] to-violet-500/[0.035] p-5">
+            <FileText size={18} className="text-cyan-200" />
+            <p className="mt-3 text-sm font-semibold text-white">Why this is different</p>
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">A generic report should diagnose document quality, not guess whether your resume fits a job that was never provided. Tailored Match handles relevance separately.</p>
+          </div>
+        </aside>
+      </section>
     </div>
   );
 }
