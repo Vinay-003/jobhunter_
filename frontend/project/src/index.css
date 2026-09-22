@@ -151,3 +151,10 @@ body::after {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+@media print {
+  aside, nav, .no-print { display: none !important; }
+  body { background: #fff !important; color: #000 !important; }
+  body::after { display: none !important; }
+  a { text-decoration: none !important; color: #000 !important; }
+}

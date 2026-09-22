@@ -138,28 +138,32 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     jdChunks.push(...jd.requiredSkills.slice(0,10).map((s:string)=>s.slice(0,200)));
     if (!jdChunks.length) jdChunks.push(jobDescription.slice(0,1000));
 
-    // embedding cache + batch - for now use provider directly with mock, deduplicate by hash
+    // embedding — SageMaker/local when configured, mock ONLY on fallback
     const provider = getEmbeddingProvider();
+    const providerName = provider.constructor?.name ?? 'unknown';
     // deduplicate texts by content hash
     const allTexts = [...resumeChunks, ...jdChunks];
     const uniq = [...new Set(allTexts.map(t=>t.trim()).filter(Boolean))];
     let vectors: number[][] = [];
-    let modelId = 'mock';
+    let modelId = 'mock-384';
     let dimension = 384;
     let usedMock = true;
+    const embedStart = Date.now();
     try {
       const resp = await provider.embed({ texts: uniq, purpose:'jd' });
       vectors = resp.vectors;
       modelId = resp.modelId;
       dimension = resp.dimension;
       usedMock = modelId.includes('mock');
+      const ms = Date.now() - embedStart;
       if (usedMock) {
-        console.warn(`[jd-match] using mock embeddings model=${modelId} dim=${dimension} texts=${uniq.length} — check EMBEDDING_PROVIDER/AWS creds`);
+        console.warn(`[jd-match] mock fallback provider=${providerName} model=${modelId} dim=${dimension} texts=${uniq.length} ms=${ms} — check EMBEDDING_PROVIDER/AWS creds or local venv`);
       } else {
-        console.log(`[jd-match] SageMaker success model=${modelId} dim=${dimension} texts=${uniq.length} resumeChunks=${resumeChunks.length} jdChunks=${jdChunks.length}`);
+        console.log(`[jd-match] embedding success provider=${providerName} model=${modelId} dim=${dimension} texts=${uniq.length} resumeChunks=${resumeChunks.length} jdChunks=${jdChunks.length} ms=${ms}`);
       }
+      console.log(`[jd-match] skills jdRequired=${jd.requiredSkills.length} matched=${deterministic.matchedRequired?.length ?? 0} missing=${deterministic.missingRequired?.length ?? 0} partial=${deterministic.partialMatches?.length ?? 0} profileSkills=${profile.skills.length}`);
     } catch(e:any){
-      console.warn(`[jd-match] embed failed fallback degraded mock: ${(e as Error).message}`);
+      console.warn(`[jd-match] embed failed provider=${providerName} ms=${Date.now() - embedStart}: ${(e as Error).message}`);
       return res.json({ success:true, degraded:true, message:'Semantic matching temporarily unavailable. Resume readiness analysis is still available.', readiness, jd, deterministic, jdHash: crypto.createHash('sha256').update(jobDescription).digest('hex').slice(0,16) });
     }
     // build semantic responsibility coverage: for each jd responsibility find best cosine to resume chunks
@@ -216,7 +220,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
       }), targetLevel||null, jdHash.slice(0,32), SCORER_VERSION, PARSER_VERSION, modelId, JD_MATCHER_VERSION]);
     } catch{}
 
-    console.log(`[jd-match] done analysisId=${analysisId} model=${modelId}${usedMock ? ' (mock fallback)' : ''} score=${jdMatchScore} explicit=${explicitPts} semantic=${semanticScore} texts=${vectors.length}`);
+    console.log(`[jd-match] done analysisId=${analysisId} provider=${providerName} model=${modelId}${usedMock ? ' (mock fallback — NOT real embeddings)' : ' (real embeddings)'} score=${jdMatchScore} explicit=${explicitPts} semantic=${semanticScore} texts=${vectors.length} ms=${Date.now() - embedStart}`);
     res.json({ success:true, analysisId, resumeId: row.id, readiness, jdMatch:{ score: jdMatchScore, breakdown:{ explicitMustHave: explicitPts, responsibilitySemantic: semanticScore, roleAlignment: rolePts, domain: domainPts, education: eduPts, confidence }, responsibilityCoverage, deterministic, jd }, versions:{ scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION, matcherVersion: JD_MATCHER_VERSION, embeddingModelId: modelId, dimension, usedMock }, confidence });
   } catch(e:any){
     console.error('jd-match error', e);

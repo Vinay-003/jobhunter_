@@ -729,13 +729,13 @@ export function scoreReadiness(
     .filter((r) => r.status === 'pass')
     .sort((a, b) => b.pointsPossible - a.pointsPossible)
     .slice(0, 6)
-    .map((r) => r.message);
+    .map((r) => `${r.label}: ${r.message}${r.evidence ? ` [${r.evidence}]` : ''}`);
 
   const warnings = rules
     .filter((r) => r.status !== 'pass')
     .sort((a, b) => (b.pointsPossible - b.pointsAwarded) - (a.pointsPossible - a.pointsAwarded))
     .slice(0, 8)
-    .map((r) => r.message);
+    .map((r) => `${r.label}: ${r.message}${r.evidence ? ` [${r.evidence}]` : ''} → ${r.recommendation ?? 'See fix guidance'}`);
 
   return {
     score,

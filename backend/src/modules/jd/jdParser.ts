@@ -1,4 +1,4 @@
-import { normalizeSkill } from '../parsing/skillNormalizer.js';
+import { normalizeSkill, CANONICAL_SKILL_ALIASES } from '../parsing/skillNormalizer.js';
 
 export type ParsedJobDescription = {
   title: string | null;
@@ -123,8 +123,8 @@ function extractSkillsBySection(text: string): { requiredSkills: string[]; prefe
 function extractAllSkills(text: string): string[] {
   const lower = text.toLowerCase();
   const found: string[] = [];
-  // Use alias keys; test each
-  const { CANONICAL_SKILL_ALIASES } = requireSkillAliases();
+  // Use unified alias map from skillNormalizer — single source of truth.
+  // Covers bare forms: react, python, html, css, next, etc.
   const keys = Object.keys(CANONICAL_SKILL_ALIASES).sort((a, b) => b.length - a.length);
   for (const key of keys) {
     const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -135,26 +135,6 @@ function extractAllSkills(text: string): string[] {
     }
   }
   return found;
-}
-
-function requireSkillAliases(): { CANONICAL_SKILL_ALIASES: Record<string, string> } {
-  // Avoid circular import at top-level; lazy get
-  // Import map directly to avoid dynamic import overhead in sync function
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  try {
-    // Use static map baked to avoid require
-    return { CANONICAL_SKILL_ALIASES: {
-      js: 'JavaScript', javascript: 'JavaScript', 'node.js': 'Node.js', nodejs: 'Node.js', 'node js': 'Node.js',
-      'react.js': 'React', reactjs: 'React', 'vue.js': 'Vue.js', vuejs: 'Vue.js', ts: 'TypeScript', typescript: 'TypeScript',
-      py: 'Python', python3: 'Python', 'c#': 'C#', 'c++': 'C++', cpp: 'C++', golang: 'Go', k8s: 'Kubernetes', kubernetes: 'Kubernetes',
-      docker: 'Docker', postgres: 'PostgreSQL', postgresql: 'PostgreSQL', psql: 'PostgreSQL', mysql: 'MySQL', mongo: 'MongoDB', mongodb: 'MongoDB',
-      redis: 'Redis', aws: 'AWS', gcp: 'GCP', azure: 'Azure', 'express.js': 'Express', expressjs: 'Express', express: 'Express',
-      nextjs: 'Next.js', 'next.js': 'Next.js', tailwind: 'Tailwind CSS', 'tailwind css': 'Tailwind CSS', html5: 'HTML', css3: 'CSS',
-      sass: 'Sass', scss: 'Sass', graphql: 'GraphQL', rest: 'REST', 'rest api': 'REST', restful: 'REST',
-    } };
-  } catch {
-    return { CANONICAL_SKILL_ALIASES: {} };
-  }
 }
 
 function extractResponsibilities(text: string): string[] {

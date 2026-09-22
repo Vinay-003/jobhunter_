@@ -32,6 +32,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private pipe: any = null;
   private loading: Promise<any> | null = null;
   private failed = false;
+  private lastUsedMock = false;
 
   constructor(opts?: { modelId?: string }) {
     this.modelId = opts?.modelId ?? RESOLVED_MODEL;
@@ -40,10 +41,11 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   async embed(input: { texts: string[]; purpose: 'resume' | 'job' | 'jd' }): Promise<{ vectors: number[][]; modelId: string; dimension: number }> {
     if (this.failed) {
       const r = await this.mock.embed(input as any);
-      return { vectors: r.vectors, modelId: `${this.modelId} (mock-fallback)`, dimension: this.dimension };
+      return { vectors: r.vectors, modelId: r.modelId, dimension: r.dimension };
     }
     const texts = input.texts.map(t => t.length > 5000 ? t.slice(0, 5000) : t);
     if (texts.length === 0) return { vectors: [], modelId: this.modelId, dimension: this.dimension };
+    this.lastUsedMock = false;
     // batch 32
     if (texts.length > 32) {
       const out: number[][] = [];
@@ -51,9 +53,11 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
         const c = await this.embedChunk(texts.slice(i, i + 32));
         out.push(...c);
       }
+      if (this.lastUsedMock) return { vectors: out, modelId: 'mock-384', dimension: 384 };
       return { vectors: out, modelId: this.modelId, dimension: this.dimension };
     }
     const vectors = await this.embedChunk(texts);
+    if (this.lastUsedMock) return { vectors, modelId: 'mock-384', dimension: 384 };
     return { vectors, modelId: this.modelId, dimension: this.dimension };
   }
 
@@ -69,6 +73,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     }
     const pipe = await this.getPipe();
     if (!pipe) {
+      this.lastUsedMock = true;
       const r = await this.mock.embed({ texts, purpose: 'jd' as any });
       return r.vectors;
     }
@@ -94,6 +99,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     } catch (e: any) {
       console.warn(`[LocalEmbeddingProvider] inference failed, falling back to mock: ${e.message}`);
       this.failed = true;
+      this.lastUsedMock = true;
       const r = await this.mock.embed({ texts, purpose: 'jd' as any });
       return r.vectors;
     }
@@ -151,12 +157,18 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private async embedViaPython(texts: string[]): Promise<number[][] | null> {
     return new Promise((resolve) => {
       try {
-        const venvPy = path.resolve(process.cwd(), 'backend/python/venv/bin/python');
-        const altVenvPy = path.resolve(process.cwd(), 'python/venv/bin/python');
+        // Support both cwd=repo-root (backend/python/venv) and cwd=backend (python/venv),
+        // plus explicit PYTHON_PATH override.
+        const candidates = [
+          process.env.PYTHON_PATH,
+          path.resolve(process.cwd(), 'backend/python/venv/bin/python'),
+          path.resolve(process.cwd(), 'python/venv/bin/python'),
+          '/home/mylappy/Projects/jobhunter_/backend/python/venv/bin/python',
+        ].filter(Boolean) as string[];
         let pyPath = 'python3';
-        if (fs.existsSync(venvPy)) pyPath = venvPy;
-        else if (fs.existsSync(altVenvPy)) pyPath = altVenvPy;
-        else if (process.env.PYTHON_PATH && fs.existsSync(process.env.PYTHON_PATH)) pyPath = process.env.PYTHON_PATH;
+        for (const c of candidates) {
+          try { if (c && fs.existsSync(c)) { pyPath = c; break; } } catch { /* ignore */ }
+        }
         const py = spawn(pyPath, ['-c', `
 import sys, json
 try:
@@ -171,7 +183,8 @@ except Exception as e:
     sys.exit(1)
 `, this.modelId, JSON.stringify(texts)]);
         let out = '', err = '';
-        const t = setTimeout(() => { try { py.kill(); } catch {} resolve(null); }, 30000);
+        // Cold SentenceTransformer load can take 60-90s; allow 120s per batch.
+        const t = setTimeout(() => { try { py.kill(); } catch {} console.warn('[LocalEmbeddingProvider] Python embed timed out after 120s'); resolve(null); }, 120000);
         py.stdout.on('data', (d: Buffer) => out += d.toString());
         py.stderr.on('data', (d: Buffer) => err += d.toString());
         py.on('close', (code: number) => {

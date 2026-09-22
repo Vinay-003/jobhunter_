@@ -49,10 +49,10 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
 
   private async embedChunk(texts: string[], purpose: string): Promise<{ vectors: number[][]; modelId: string; dimension: number }> {
     if (!this.hasAwsCreds()) {
-      // Fallback to mock
+      // No creds — truthful mock fallback so callers can detect usedMock via modelId.
+      console.warn('[AwsSageMakerEmbeddingProvider] no AWS creds — using mock embeddings (fallback only)');
       const res = await this.mock.embed({ texts, purpose: purpose as 'resume' | 'job' | 'jd' });
-      // Return with this provider's modelId for consistency when mocking
-      return { vectors: res.vectors, modelId: this.modelId, dimension: this.mock.dimension };
+      return { vectors: res.vectors, modelId: res.modelId, dimension: res.dimension };
     }
 
     try {
@@ -105,7 +105,7 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
     } catch (err) {
       console.warn('[AwsSageMakerEmbeddingProvider] fallback to mock due to error:', (err as Error).message);
       const res = await this.mock.embed({ texts, purpose: purpose as 'resume' | 'job' | 'jd' });
-      return { vectors: res.vectors, modelId: this.modelId, dimension: res.dimension };
+      return { vectors: res.vectors, modelId: res.modelId, dimension: res.dimension };
     }
   }
 }
