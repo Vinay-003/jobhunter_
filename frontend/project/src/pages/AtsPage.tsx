@@ -146,9 +146,12 @@ export default function AtsPage() {
       const resumeId = (upload.data as any)?.resume?.id ?? (upload.data as any)?.id;
       if (!resumeId) throw new Error('Upload succeeded but no resume id was returned.');
 
+      // Cold local model load (venv SentenceTransformer) can take 60-120s on first
+      // request; SageMaker cold starts can also exceed the 60s default. Give these
+      // calls their own longer timeout instead of raising the global one.
       const response = mode === 'resume'
-        ? await api.post('/analyses/readiness', { resumeId, targetLevel })
-        : await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel });
+        ? await api.post('/analyses/readiness', { resumeId, targetLevel }, { timeout: 120000 })
+        : await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel }, { timeout: 180000 });
 
       const data = response.data as any;
       if (!data?.analysisId) throw new Error('Analysis completed but no report id was returned.');

@@ -112,7 +112,25 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`💾 Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
+  console.log(`🧠 Embedding provider: ${process.env.EMBEDDING_PROVIDER || 'auto'} (model=${process.env.LOCAL_EMBEDDING_MODEL || process.env.EMBEDDING_MODEL_ID || 'anass1209/resume-job-matcher-all-MiniLM-L6-v2'})`);
+  if (process.env.AWS_SAGEMAKER_ENDPOINT_NAME) console.log(`☁️  SageMaker endpoint: ${process.env.AWS_SAGEMAKER_ENDPOINT_NAME} (${process.env.AWS_REGION})`);
+  else console.log('☁️  SageMaker: not configured — no AWS calls will be made');
   console.log('='.repeat(50));
+  // Warm up local model in background so the first user request doesn't pay the
+  // ~60-90s cold SentenceTransformer load (frontend jd-match timeout is 180s).
+  if ((process.env.EMBEDDING_PROVIDER || 'auto').toLowerCase() === 'local') {
+    console.log('[embeddings] warming up local model in background...');
+    import('./providers/embeddings/LocalEmbeddingProvider.js').then(async ({ LocalEmbeddingProvider }) => {
+      try {
+        const t0 = Date.now();
+        const p = new LocalEmbeddingProvider({});
+        const r = await p.embed({ texts: ['warmup'], purpose: 'jd' });
+        console.log(`[embeddings] local warmup done model=${r.modelId} dim=${r.dimension} ms=${Date.now() - t0}`);
+      } catch (e: any) {
+        console.warn('[embeddings] local warmup failed, will load on first request:', e?.message || e);
+      }
+    }).catch((e: any) => console.warn('[embeddings] warmup import failed:', e?.message || e));
+  }
   console.log('\nAvailable endpoints:');
   console.log('  GET  /health - Health check');
   console.log('  POST /api/auth/signup - Create account');
