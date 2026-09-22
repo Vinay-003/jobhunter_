@@ -4,6 +4,7 @@ import resumes from './resumes.js';
 import analyses from './analyses.js';
 import profile from './profile.js';
 import recommendations from './recommendations.js';
+import keepalive from '../keepalive.js';
 
 const router = Router();
 
@@ -14,6 +15,7 @@ router.use('/profile', profile);
 router.use('/job-preferences', profile); // alias
 router.use('/recommendation-runs', recommendations);
 router.use('/recommendations', recommendations);
+router.use('/keepalive', keepalive);
 
 router.get('/health', (req,res)=> res.json({ success:true, status:'ok', timestamp: new Date().toISOString(), version:'v1' }));
 

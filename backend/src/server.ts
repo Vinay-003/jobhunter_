@@ -9,6 +9,8 @@ import authRoutes from './routes/auth.js';
 import uploadRoutes from './routes/upload.js';
 import analysisRoutes from './routes/analysis.js';
 import jobRoutes from './routes/jobs.js';
+import keepaliveRoutes from './routes/keepalive.js';
+import v1Router from './routes/v1/index.js';
 import fs from 'fs';
 import path from 'path';
 import './config/env.js';
@@ -42,14 +44,18 @@ const tempDir = path.join(uploadsDir, 'temp');
   }
 });
 
+// Keepalive — public, no auth, touches DB to prevent Supabase pause after 7 days
+// Mount BEFORE other routers so it is always reachable from cron (any path)
+app.use('/keepalive', keepaliveRoutes);
+app.use('/api/keepalive', keepaliveRoutes);
+
 // Routes - legacy (keep for backward compat, will be deprecated)
 app.use('/api/auth', authRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api', analysisRoutes);
 app.use('/api', jobRoutes);
 
-// V1 API (spec-compliant)
-import v1Router from './routes/v1/index.js';
+// V1 API (spec-compliant) — also exposes /api/v1/keepalive via v1Router
 app.use('/api/v1', v1Router);
 
 // Health check endpoint - keep log quiet (Render hits every 5s)
