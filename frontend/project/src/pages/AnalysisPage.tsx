@@ -429,13 +429,13 @@ export default function AnalysisPage() {
         <div className="pointer-events-none absolute -right-16 top-0 h-64 w-64 rounded-full bg-stone-700/10 blur-3xl" />
         <div className="relative grid gap-7 xl:grid-cols-[1fr_auto] xl:items-center">
           <div>
-            <p className="jh-eyebrow"><Sparkles size={13} /> Resume health report</p>
+            <p className="jh-eyebrow"><Sparkles size={13} /> {view.jdMatch ? 'Resume + tailored match report' : 'Resume health report'}</p>
             <h1 className="mt-3 text-2xl font-semibold tracking-[-0.035em] text-white md:text-3xl">{view.fileName || 'Your resume diagnostic'}</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{readiness.scoreMessage || meta.text}</p>
             <div className="mt-5 flex flex-wrap gap-2">
               <span className="jh-chip"><ListChecks size={12} className="mr-1" /> {passed}/{totalChecks || '—'} checks passed</span>
               <span className="jh-chip"><AlertCircle size={12} className="mr-1" /> {readiness.issueCount ?? totalChecks - passed} issues</span>
-              <span className="jh-chip" title="Resume Health never uses a JD or embeddings"><FileSearch size={12} className="mr-1" /> Resume Health • rule-based, no JD</span>
+              <span className="jh-chip" title="Resume Health scores document quality only — it never uses the JD or embeddings"><FileSearch size={12} className="mr-1" /> Resume Health • document-only</span>
               {view.jdMatch
                 ? <span className="jh-chip border-amber-400/20 text-amber-200" title={`Embedding model: ${view.versions?.embeddingModelId || 'unknown'}`}><Target size={12} className="mr-1" /> Tailored Match • {shortModel(view.versions?.embeddingModelId)}{view.versions?.usedMock ? ' • mock' : ' • real'}</span>
                 : <span className="jh-chip opacity-70" title="Re-run with a JD to get Tailored Match"><Target size={12} className="mr-1" /> Tailored Match • not run</span>}
