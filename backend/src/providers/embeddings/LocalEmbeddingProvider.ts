@@ -183,8 +183,9 @@ except Exception as e:
     sys.exit(1)
 `, this.modelId, JSON.stringify(texts)]);
         let out = '', err = '';
-        // Cold SentenceTransformer load can take 60-90s; allow 120s per batch.
-        const t = setTimeout(() => { try { py.kill(); } catch {} console.warn('[LocalEmbeddingProvider] Python embed timed out after 120s'); resolve(null); }, 120000);
+        // Cold SentenceTransformer load takes ~90s (measured 93612ms for 26 texts);
+        // allow 260s per batch to match the SageMaker serverless timeout.
+        const t = setTimeout(() => { try { py.kill(); } catch {} console.warn('[LocalEmbeddingProvider] Python embed timed out after 260s'); resolve(null); }, 260000);
         py.stdout.on('data', (d: Buffer) => out += d.toString());
         py.stderr.on('data', (d: Buffer) => err += d.toString());
         py.on('close', (code: number) => {

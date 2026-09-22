@@ -151,7 +151,7 @@ export default function AtsPage() {
       // calls their own longer timeout instead of raising the global one.
       const response = mode === 'resume'
         ? await api.post('/analyses/readiness', { resumeId, targetLevel }, { timeout: 120000 })
-        : await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel }, { timeout: 180000 });
+        : await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel }, { timeout: 260000 });
 
       const data = response.data as any;
       if (!data?.analysisId) throw new Error('Analysis completed but no report id was returned.');

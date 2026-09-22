@@ -282,7 +282,8 @@ export default function JobsPage() {
         ...(prefs.location.trim() ? { locations: [prefs.location.trim()] } : {}),
         workModes: prefs.workMode.split(',').map((value) => value.trim()).filter(Boolean),
       };
-      const response = await api.post('/recommendation-runs', payload);
+      // Local model loads ~90s cold; SageMaker cold starts can also exceed 60s.
+      const response = await api.post('/recommendation-runs', payload, { timeout: 260000 });
       const raw = (response.data as any)?.recommendations ?? (response.data as any)?.results ?? [];
       const mapped = raw.map(mapRecommendation).sort((a: Job, b: Job) => scoreOf(b) - scoreOf(a));
       setJobs(mapped);
