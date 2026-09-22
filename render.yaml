@@ -4,7 +4,8 @@
 # Secrets are NOT committed here. Set them in Render Dashboard → Environment.
 # Required secrets (set manually): PG_DATABASE_STRING (or DATABASE_URL), JWT_SECRET,
 #   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JOOBLE_API_KEY,
-#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SAGEMAKER_ENDPOINT_NAME
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SAGEMAKER_ENDPOINT_NAME,
+#   ADZUNA_APP_ID, ADZUNA_APP_KEY, JOBSPIPE_API_KEY
 
 services:
   # ---------------------------------------------------------------------------
@@ -51,6 +52,30 @@ services:
         value: 4
       - key: JOOBLE_CALL_BUDGET
         value: 450
+      - key: JOB_PROVIDERS
+        value: jooble,jobspipe,adzuna,remotive,arbeitnow
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false
+      - key: ADZUNA_COUNTRY
+        value: in
+      - key: ADZUNA_RESULTS_PER_PAGE
+        value: 15
+      - key: ADZUNA_CALL_BUDGET
+        value: 100
+      - key: JOBSPIPE_API_KEY
+        sync: false
+      - key: JOBSPIPE_COUNTRY
+        value: IN
+      - key: JOBSPIPE_LIMIT
+        value: 15
+      - key: JOBSPIPE_MONTHLY_BUDGET
+        value: 1000
+      - key: REMOTIVE_DAILY_BUDGET
+        value: 4
+      - key: ARBEITNOW_CACHE_HOURS
+        value: 12
       - key: CORS_ALLOWED_ORIGINS
         sync: false
       - key: FRONTEND_URL
