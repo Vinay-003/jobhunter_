@@ -1,0 +1,14 @@
+{
+  "name": "jobhunter-supabase-keepalive",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker cron to keep Supabase active via keepalive_pings",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.60.0"
+  }
+}

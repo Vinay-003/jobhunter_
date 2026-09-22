@@ -1,0 +1,20 @@
+name = "jobhunter-supabase-keepalive"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Cron: every 12 hours (00:00 and 12:00 UTC) — enough to prevent 7-day Supabase pause
+# Supabase free pauses after 7 days inactivity; pinging every 12h is very safe.
+# Cloudflare supports up to 3 cron triggers — add more if you want more frequent.
+[triggers]
+crons = ["0 */12 * * *"]
+
+# Variables — set KEEPALIVE_URL to your backend keepalive endpoint
+# Example: https://jobhunter-r773.onrender.com/api/keepalive
+# or:      https://jobhunter-r773.onrender.com/keepalive
+# or:      https://jobhunter-r773.onrender.com/api/v1/keepalive
+[vars]
+KEEPALIVE_URL = "https://your-backend.onrender.com/api/keepalive"
+
+# Optional secret — if your backend sets KEEPALIVE_TOKEN env, set the same here
+# Use: wrangler secret put KEEPALIVE_TOKEN
+# Then worker will send x-keepalive-token header
