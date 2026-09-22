@@ -108,19 +108,23 @@ router.post('/', authenticateAny, validate({ body: createRunSchema }), async (re
       deduped.push(j);
     }
 
-    // ranking - map deduped to ranking
+    // ranking - map deduped to ranking (uses SageMaker when EMBEDDING_PROVIDER=aws, mock only on fallback)
     const rankedRaw = await Promise.all(deduped.map(async (j:any)=>{
       const norm = { id: j.id, source: j.source||'jooble', externalId: j.externalId||j.id, title: j.title||'', company: j.company, location: j.location, description: j.description||j.snippet||'', descriptionQuality: (j.descriptionQuality||'snippet') as any, url: j.url||j.link||'', fetchedAt: new Date() } as any;
-      const r = await rankJob(profile, norm, { preferences: { locations: preferences.locations as any } });
+      const r = await rankJob(profile, norm, { preferences: { locations: preferences.locations as any } }) as any;
       const conf = r.fitScore>=70 ? 'High' : r.fitScore>=40 ? 'Medium' : 'Low';
-      return { ...norm, fitScore: r.fitScore, breakdown: r.breakdown, evidence: r.evidence, confidence: conf };
+      return { ...norm, fitScore: r.fitScore, breakdown: r.breakdown, evidence: r.evidence, confidence: conf, embeddingModelId: r.embeddingModelId, usedMock: r.usedMock };
     }));
     const ranked = rankedRaw.sort((a,b)=> b.fitScore - a.fitScore);
+    // derive embedding model for run — real model if any job used real, else mock
+    const runEmbeddingModelId = ranked.find((r:any)=> !r.usedMock)?.embeddingModelId || ranked[0]?.embeddingModelId || 'mock';
+    const runUsedMock = ranked.every((r:any)=> r.usedMock) && ranked.length>0;
 
     const runId = crypto.randomUUID();
     const rankerVersion = '2.0.0';
+    console.log(`[recommendations] runId=${runId} fetched=${allJobs.length} deduped=${deduped.length} ranked=${ranked.length} model=${runEmbeddingModelId}${runUsedMock ? ' (mock fallback)' : ''} cacheHits=${limited.length - allJobs.length}`);
     try {
-      await pool.query('INSERT INTO recommendation_runs (id, user_id, resume_id, preferences_snapshot_json, ranker_version, embedding_model_id, status, created_at, completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now(),now())', [runId, userId, resumeId, JSON.stringify(preferences), rankerVersion, 'mock', 'completed']);
+      await pool.query('INSERT INTO recommendation_runs (id, user_id, resume_id, preferences_snapshot_json, ranker_version, embedding_model_id, status, created_at, completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now(),now())', [runId, userId, resumeId, JSON.stringify(preferences), rankerVersion, runEmbeddingModelId, 'completed']);
       for (let i=0;i<ranked.slice(0,20).length;i++){
         const job = ranked[i];
         // ensure job exists in jobs table - upsert
@@ -135,7 +139,7 @@ router.post('/', authenticateAny, validate({ body: createRunSchema }), async (re
       }
     } catch(e){ console.warn('run persist warning', e); }
 
-    res.json({ success:true, runId, totalFetched: allJobs.length, deduped: deduped.length, recommendations: ranked.slice(0,20) });
+    res.json({ success:true, runId, totalFetched: allJobs.length, deduped: deduped.length, recommendations: ranked.slice(0,20), versions:{ rankerVersion, embeddingModelId: runEmbeddingModelId, usedMock: runUsedMock } });
   } catch(e:any){
     console.error('recommendation run error', e);
     res.status(500).json({ success:false, message:e.message });

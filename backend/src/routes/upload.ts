@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { ResumeModel } from '../models/Resume.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { authenticateSession } from '../modules/auth/session.js';
 
 const router = express.Router();
 const resumeModel = new ResumeModel();
@@ -147,8 +148,8 @@ router.post('/upload-resume', authenticateToken, (req: express.Request, res: exp
   }
 });
 
-// Get user's latest resume
-router.get('/latest-resume', authenticateToken, async (req: express.Request, res: express.Response) => {
+// Get user's latest resume — supports both opaque session cookie and legacy JWT
+router.get('/latest-resume', authenticateSession as any, async (req: express.Request, res: express.Response) => {
   try {
     if (!req.user?.id) {
       return res.status(401).json({
@@ -221,8 +222,8 @@ router.get('/resume/:id', authenticateToken, async (req: express.Request, res: e
   }
 });
 
-// Get latest resume content endpoint
-router.get('/latest-resume-content', authenticateToken, async (req: express.Request, res: express.Response) => {
+// Get latest resume content endpoint — supports both opaque session cookie and legacy JWT
+router.get('/latest-resume-content', authenticateSession as any, async (req: express.Request, res: express.Response) => {
   try {
     if (!req.user?.id) {
       return res.status(401).json({

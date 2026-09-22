@@ -2,13 +2,27 @@ import type { ResumeProfile } from '../parsing/resumeProfile.js';
 import type { NormalizedJob } from '../../providers/jobs/JobProvider.js';
 import { normalizeSkill } from '../parsing/skillNormalizer.js';
 import { MockEmbeddingProvider } from '../../providers/embeddings/MockEmbeddingProvider.js';
+import { AwsSageMakerEmbeddingProvider } from '../../providers/embeddings/AwsSageMakerEmbeddingProvider.js';
+import { LocalEmbeddingProvider } from '../../providers/embeddings/LocalEmbeddingProvider.js';
+import { env } from '../../config/env.js';
 
 export const VERSION = '2.0.0';
 
 /**
  * Ranking — compose fit score: Required skill 30 + Responsibility semantic 25 + Role/title 15 + Seniority 15 + Domain/education 10 + Location 5 =100
- * Without ATS/salary/freshness. Use MockEmbeddingProvider for semantic fallback (cosine).
+ * Without ATS/salary/freshness.
+ * Embedding: SageMaker (aws) or Local when EMBEDDING_PROVIDER set; Mock ONLY as fallback — never default.
  */
+
+function getRankingEmbeddingProvider(): { embed: (input: { texts: string[]; purpose: 'resume'|'job'|'jd' }) => Promise<{ vectors: number[][]; modelId: string; dimension: number }> } {
+  const p = (env.EMBEDDING_PROVIDER || 'auto').toLowerCase();
+  if (p === 'local' || process.env.USE_LOCAL_EMBEDDINGS === 'true') return new LocalEmbeddingProvider({ modelId: process.env.LOCAL_EMBEDDING_MODEL });
+  if (p === 'aws' || (process.env.AWS_SAGEMAKER_ENDPOINT_NAME && process.env.AWS_ACCESS_KEY_ID)) return new AwsSageMakerEmbeddingProvider();
+  // Do NOT default to mock silently — let Aws provider handle hasAwsCreds check and fallback with proper warning.
+  // If no AWS creds, Aws provider will fallback to mock internally and log once, instead of ranking silently mocking.
+  if (p === 'mock') return new MockEmbeddingProvider();
+  return new AwsSageMakerEmbeddingProvider();
+}
 
 export type RankBreakdown = {
   requiredSkill: number; // 0-30
@@ -25,8 +39,6 @@ export type RankResult = {
   evidence: string[];
 };
 
-const mockEmbed = new MockEmbeddingProvider();
-
 function normalizeSkillSet(skills: string[]): Set<string> {
   return new Set(skills.map((s) => normalizeSkill(s).toLowerCase()));
 }
@@ -35,12 +47,14 @@ function cosine(a: number[], b: number[]): number {
   return MockEmbeddingProvider.cosine(a, b);
 }
 
-async function semanticSimilarity(a: string, b: string): Promise<number> {
-  if (!a.trim() || !b.trim()) return 0;
-  const res = await mockEmbed.embed({ texts: [a, b], purpose: 'job' });
+async function semanticSimilarity(a: string, b: string): Promise<{ score: number; modelId: string; usedMock: boolean }> {
+  if (!a.trim() || !b.trim()) return { score: 0, modelId: 'none', usedMock: true };
+  const provider = getRankingEmbeddingProvider();
+  const res = await provider.embed({ texts: [a, b], purpose: 'job' });
+  const isMock = res.modelId.includes('mock');
   const c = cosine(res.vectors[0], res.vectors[1]);
   // map from [-1,1] to [0,1]
-  return (c + 1) / 2;
+  return { score: (c + 1) / 2, modelId: res.modelId, usedMock: isMock };
 }
 
 export async function rankJob(
@@ -79,12 +93,16 @@ export async function rankJob(
 
   // 2) Responsibility semantic 25
   let responsibilitySemantic = 0;
+  let rankingEmbeddingModelId = env.EMBEDDING_MODEL_ID;
+  let rankingUsedMock = false;
   {
     const resumeText = profile.summary ?? profile.skills.join(' ') ?? '';
     const jobDesc = job.description ?? job.title;
-    const sim = await semanticSimilarity(resumeText.slice(0, 1000), jobDesc.slice(0, 1000));
+    const { score: sim, modelId, usedMock } = await semanticSimilarity(resumeText.slice(0, 1000), jobDesc.slice(0, 1000));
+    rankingEmbeddingModelId = modelId;
+    rankingUsedMock = usedMock;
     responsibilitySemantic = Math.round(sim * 25);
-    evidence.push(`Semantic similarity ${sim.toFixed(2)}`);
+    evidence.push(`Semantic similarity ${sim.toFixed(2)} via ${modelId}${usedMock ? ' (mock fallback)' : ''}`);
   }
 
   // 3) Role/title 15
@@ -104,8 +122,12 @@ export async function rankJob(
     // Also semantic fallback if low
     let score = coverage;
     if (score < 0.3) {
-      const sim = await semanticSimilarity(combined.slice(0, 500), job.title);
+      const { score: sim, modelId: simModel } = await semanticSimilarity(combined.slice(0, 500), job.title);
       score = Math.max(score, sim * 0.8);
+      if (sim > coverage) {
+        rankingEmbeddingModelId = simModel;
+        evidence.push(`Title semantic ${sim.toFixed(2)} via ${simModel}`);
+      }
     }
     roleTitle = Math.round(score * 15);
     evidence.push(`Title overlap ${overlap}/${titleWords.length}`);
@@ -182,7 +204,13 @@ export async function rankJob(
 
   const fitScore = Object.values(breakdown).reduce((s, v) => s + v, 0);
 
-  return { fitScore: Math.max(0, Math.min(100, fitScore)), breakdown, evidence };
+  return { 
+    fitScore: Math.max(0, Math.min(100, fitScore)), 
+    breakdown, 
+    evidence,
+    embeddingModelId: rankingEmbeddingModelId,
+    usedMock: rankingUsedMock,
+  } as RankResult & { embeddingModelId: string; usedMock: boolean };
 }
 
 async function getAliases(): Promise<{ CANONICAL_SKILL_ALIASES: Record<string, string> }> {

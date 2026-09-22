@@ -45,6 +45,7 @@ export class JoobleProvider implements JobProvider {
         page: query.page ?? 1,
       };
 
+      console.log(`[JoobleProvider] searching Jooble keywords="${query.keywords}" location="${query.location ?? ''}" page=${query.page ?? 1}`);
       const resp = await axios.post<{ jobs?: JoobleJob[] }>(url, body, {
         timeout: TIMEOUT_MS,
         headers: { 'Content-Type': 'application/json' },
@@ -52,13 +53,15 @@ export class JoobleProvider implements JobProvider {
 
       const jobs = resp.data?.jobs ?? [];
       const normalized = jobs.map((j) => this.normalize(j)).filter((j): j is NormalizedJob => j !== null);
+      console.log(`[JoobleProvider] Jooble returned ${normalized.length} jobs (raw ${jobs.length}) for "${query.keywords}"`);
 
       // Store to jobs table (best-effort, ignore errors in dev when DB not reachable)
       await this.storeToDb(normalized).catch(() => {});
 
       if (normalized.length === 0) {
-        // fallback to DB if Jooble returned empty
+        console.warn(`[JoobleProvider] Jooble empty for "${query.keywords}" — fallback to DB cache`);
         const fallback = await this.fallbackFromDb(query).catch(() => [] as NormalizedJob[]);
+        console.log(`[JoobleProvider] DB fallback returned ${fallback.length} jobs for "${query.keywords}"`);
         return fallback.length ? fallback : normalized;
       }
 
@@ -66,6 +69,7 @@ export class JoobleProvider implements JobProvider {
     } catch (err) {
       console.warn('[JoobleProvider] Jooble request failed, falling back to DB:', (err as Error).message);
       const fallback = await this.fallbackFromDb(query).catch(() => [] as NormalizedJob[]);
+      console.log(`[JoobleProvider] DB fallback after error returned ${fallback.length} jobs for "${query.keywords}"`);
       return fallback;
     }
   }

@@ -313,8 +313,8 @@ export default function JobsPage() {
           <p className="jh-eyebrow"><Sparkles size={13} /> Role discovery</p>
           <h1 className="jh-title mt-3">Job Matches</h1>
           <p className="jh-subtitle mt-3">A dedicated workspace for opportunities ranked by evidence in your resume—not by generic health.</p>
-          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-amber-400/20 bg-amber-400/10 px-2.5 py-1 text-xs text-amber-200">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" /> Mock embeddings (local) — no AWS cost on Render
+          <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-stone-700 bg-stone-900/60 px-2.5 py-1 text-[11px] text-stone-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> SageMaker embeddings when EMBEDDING_PROVIDER=aws — mock only on fallback
           </div>
         </div>
         <div className="flex flex-wrap gap-2">

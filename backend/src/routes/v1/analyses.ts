@@ -32,15 +32,13 @@ const PARSER_VERSION='3.0.0';
 const JD_MATCHER_VERSION='2.0.0';
 
 function getEmbeddingProvider(){
-  const provider = (process.env.EMBEDDING_PROVIDER || 'auto').toLowerCase();
-  if (provider === 'local' || process.env.USE_LOCAL_EMBEDDINGS === 'true') {
+  const p = (process.env.EMBEDDING_PROVIDER || 'auto').toLowerCase();
+  if (p === 'local' || process.env.USE_LOCAL_EMBEDDINGS === 'true') {
     return new LocalEmbeddingProvider({ modelId: process.env.LOCAL_EMBEDDING_MODEL });
   }
-  if (provider === 'mock') return new MockEmbeddingProvider();
-  if (provider === 'aws' || (process.env.AWS_SAGEMAKER_ENDPOINT_NAME && process.env.AWS_ACCESS_KEY_ID)) {
-    return new AwsSageMakerEmbeddingProvider();
-  }
-  return new MockEmbeddingProvider();
+  if (p === 'mock') return new MockEmbeddingProvider();
+  // auto and aws both go through SageMaker provider — it will fallback to mock ONLY via hasAwsCreds check with warning
+  return new AwsSageMakerEmbeddingProvider();
 }
 
 // helper to load resume buffer
@@ -148,12 +146,20 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     let vectors: number[][] = [];
     let modelId = 'mock';
     let dimension = 384;
+    let usedMock = true;
     try {
       const resp = await provider.embed({ texts: uniq, purpose:'jd' });
       vectors = resp.vectors;
       modelId = resp.modelId;
       dimension = resp.dimension;
+      usedMock = modelId.includes('mock');
+      if (usedMock) {
+        console.warn(`[jd-match] using mock embeddings model=${modelId} dim=${dimension} texts=${uniq.length} — check EMBEDDING_PROVIDER/AWS creds`);
+      } else {
+        console.log(`[jd-match] SageMaker success model=${modelId} dim=${dimension} texts=${uniq.length} resumeChunks=${resumeChunks.length} jdChunks=${jdChunks.length}`);
+      }
     } catch(e:any){
+      console.warn(`[jd-match] embed failed fallback degraded mock: ${(e as Error).message}`);
       return res.json({ success:true, degraded:true, message:'Semantic matching temporarily unavailable. Resume readiness analysis is still available.', readiness, jd, deterministic, jdHash: crypto.createHash('sha256').update(jobDescription).digest('hex').slice(0,16) });
     }
     // build semantic responsibility coverage: for each jd responsibility find best cosine to resume chunks
@@ -210,7 +216,8 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
       }), targetLevel||null, jdHash.slice(0,32), SCORER_VERSION, PARSER_VERSION, modelId, JD_MATCHER_VERSION]);
     } catch{}
 
-    res.json({ success:true, analysisId, resumeId: row.id, readiness, jdMatch:{ score: jdMatchScore, breakdown:{ explicitMustHave: explicitPts, responsibilitySemantic: semanticScore, roleAlignment: rolePts, domain: domainPts, education: eduPts, confidence }, responsibilityCoverage, deterministic, jd }, versions:{ scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION, matcherVersion: JD_MATCHER_VERSION, embeddingModelId: modelId, dimension }, confidence });
+    console.log(`[jd-match] done analysisId=${analysisId} model=${modelId}${usedMock ? ' (mock fallback)' : ''} score=${jdMatchScore} explicit=${explicitPts} semantic=${semanticScore} texts=${vectors.length}`);
+    res.json({ success:true, analysisId, resumeId: row.id, readiness, jdMatch:{ score: jdMatchScore, breakdown:{ explicitMustHave: explicitPts, responsibilitySemantic: semanticScore, roleAlignment: rolePts, domain: domainPts, education: eduPts, confidence }, responsibilityCoverage, deterministic, jd }, versions:{ scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION, matcherVersion: JD_MATCHER_VERSION, embeddingModelId: modelId, dimension, usedMock }, confidence });
   } catch(e:any){
     console.error('jd-match error', e);
     res.status(500).json({ success:false, message:e.message || 'JD match failed'});
