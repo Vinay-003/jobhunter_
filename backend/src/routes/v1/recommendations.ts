@@ -115,7 +115,7 @@ router.post('/', authenticateAny, validate({ body: createRunSchema }), async (re
     const rankedRaw = norms.map((norm:any, i:number)=>{
       const r = batchResults[i] as any;
       const conf = r.fitScore>=70 ? 'High' : r.fitScore>=40 ? 'Medium' : 'Low';
-      return { ...norm, fitScore: r.fitScore, breakdown: r.breakdown, evidence: r.evidence, confidence: conf, embeddingModelId: r.embeddingModelId, usedMock: r.usedMock };
+      return { ...norm, fitScore: r.fitScore, breakdown: r.breakdown, evidence: r.evidence, confidence: conf, embeddingModelId: r.embeddingModelId, usedMock: r.usedMock, matchedSkills: r.matchedSkills ?? [], missingSkills: r.missingSkills ?? [] };
     });
     const ranked = rankedRaw.sort((a,b)=> b.fitScore - a.fitScore);
     // derive embedding model for run — real model if any job used real, else mock

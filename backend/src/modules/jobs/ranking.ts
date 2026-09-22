@@ -47,14 +47,39 @@ function cosine(a: number[], b: number[]): number {
   return MockEmbeddingProvider.cosine(a, b);
 }
 
+/**
+ * Map raw cosine ([-1,1]) to [0,1] with discrimination.
+ * Normalized sentence embeddings cluster ~0.4-0.8 even for unrelated texts,
+ * so the naive (c+1)/2 maps everything to 0.7-0.9 and all jobs score alike.
+ * This stretches the realistic band [0.35, 0.95] to [0,1].
+ */
+function to01(rawCosine: number): number {
+  return Math.max(0, Math.min(1, (rawCosine - 0.35) / 0.6));
+}
+
+/**
+ * Detect job seniority from title + snippet.
+ * Handles: senior/junior words, Sr./Jr. abbreviations, roman numerals
+ * (Software Engineer II = mid, III/IV = senior), L3-L6 levels, and
+ * "N+ years" requirements as a fallback signal.
+ */
+export function detectJobSeniority(title: string, description?: string | null): string | null {
+  const text = `${title} ${description ?? ''}`;
+  const lower = text.toLowerCase();
+  if (/(principal|staff(\s+engineer)?|lead(\s+engineer|\s+dev)?|\bl[56]\b|iv\b|architect|manager)/.test(lower)) return 'lead';
+  if (/\bsenior\b|\bsr\.?\b|iii\b|5\s*\+?\s*years?|6\s*\+?\s*years?|[7-9]\s*\+?\s*years?|10\s*\+?\s*years?/.test(lower)) return 'senior';
+  if (/\bjunior\b|\bjr\.?\b|entry[\s-]?level|fresher|0\s*[-–]\s*1\s*years?|0\s*[-–]\s*2\s*years?|intern(ship)?\b/.test(lower)) return 'junior';
+  if (/\bmid(\s+level)?\b|\bii\b|2\s*\+?\s*years?|3\s*\+?\s*years?|4\s*\+?\s*years?|\bl[34]\b/.test(lower)) return 'mid';
+  return null;
+}
+
 async function semanticSimilarity(a: string, b: string): Promise<{ score: number; modelId: string; usedMock: boolean }> {
   if (!a.trim() || !b.trim()) return { score: 0, modelId: 'none', usedMock: true };
   const provider = getRankingEmbeddingProvider();
   const res = await provider.embed({ texts: [a, b], purpose: 'job' });
   const isMock = res.modelId.includes('mock');
   const c = cosine(res.vectors[0], res.vectors[1]);
-  // map from [-1,1] to [0,1]
-  return { score: (c + 1) / 2, modelId: res.modelId, usedMock: isMock };
+  return { score: to01(c), modelId: res.modelId, usedMock: isMock };
 }
 
 export async function rankJob(
@@ -83,6 +108,12 @@ export async function rankJob(
     if (jobSkills.length === 0) {
       requiredSkillScore = 15; // neutral when no skills detected
       evidence.push('No skills detected in job — neutral skill score');
+    } else if (jobSkills.length <= 2) {
+      // Thin Jooble snippets: 1-2 detected skills is noise, not signal.
+      // A 1/1 "match" must not award full 30 points.
+      requiredSkillScore = 15;
+      const matchedThin = jobSkills.filter((s) => profileSet.has(s)).length;
+      evidence.push(`Only ${jobSkills.length} skill signal${jobSkills.length === 1 ? '' : 's'} in snippet (${matchedThin} matched) — neutral, too thin to judge`);
     } else {
       const matched = jobSkills.filter((s) => profileSet.has(s)).length;
       const coverage = matched / jobSkills.length;
@@ -135,15 +166,11 @@ export async function rankJob(
 
   // 4) Seniority / Level 15 - with explicit penalties (ResumeWorded strict)
   let seniority = 0;
+  let jobSen: string | null = null;
   {
     const seniorityOrder = ['junior', 'mid', 'senior', 'lead'];
     const profileSen = profile.seniority;
-    const jobLower = `${job.title} ${job.description ?? ''}`.toLowerCase();
-    let jobSen: string | null = null;
-    if (/(principal|staff|lead)\b/.test(jobLower)) jobSen = 'lead';
-    else if (/senior\b/.test(jobLower)) jobSen = 'senior';
-    else if (/(junior|entry)/.test(jobLower)) jobSen = 'junior';
-    else if (/mid/.test(jobLower)) jobSen = 'mid';
+    jobSen = detectJobSeniority(job.title, job.description);
 
     if (!profileSen || !jobSen) {
       seniority = 8; // partial when unknown
@@ -153,8 +180,9 @@ export async function rankJob(
       evidence.push(`Level match: ${profileSen} = ${jobSen} (no penalty)`);
     } else {
       const diff = Math.abs(seniorityOrder.indexOf(profileSen) - seniorityOrder.indexOf(jobSen));
-      // Explicit penalties: adjacent -5, far -10 to -15
-      seniority = diff === 1 ? 10 : diff === 2 ? 5 : 0;
+      // Steeper penalties: adjacent -7, far -12 to -15. Senior roles must not
+      // top the list for entry-level candidates.
+      seniority = diff === 1 ? 8 : diff === 2 ? 3 : 0;
       const penalty = 15 - seniority;
       evidence.push(`Level penalty: ${penalty} pts — your ${profileSen} vs job ${jobSen} (diff ${diff})`);
     }
@@ -202,11 +230,20 @@ export async function rankJob(
     location,
   };
 
-  const fitScore = Object.values(breakdown).reduce((s, v) => s + v, 0);
+  let fitScore = Object.values(breakdown).reduce((s, v) => s + v, 0);
+  fitScore = Math.max(0, Math.min(100, fitScore));
+  // Hard cap: senior/lead postings can never top the list for junior profiles,
+  // no matter how well the keywords overlap.
+  if (profile.seniority === 'junior' && (jobSen === 'senior' || jobSen === 'lead')) {
+    if (fitScore > 65) {
+      evidence.push(`Capped at 65: ${jobSen}-level role is out of reach for a junior profile`);
+      fitScore = 65;
+    }
+  }
 
-  return { 
-    fitScore: Math.max(0, Math.min(100, fitScore)), 
-    breakdown, 
+  return {
+    fitScore,
+    breakdown,
     evidence,
     embeddingModelId: rankingEmbeddingModelId,
     usedMock: rankingUsedMock,
@@ -238,7 +275,16 @@ export async function rankJobsBatch(
   jobs: NormalizedJob[],
   opts?: { preferences?: { locations?: string[] | null } },
 ): Promise<(RankResult & { embeddingModelId: string; usedMock: boolean })[]> {
-  const resumeText = (profile.summary ?? profile.skills.join(' ') ?? '').slice(0, 1000);
+  // Resume side mirrors jd-match: skills line + experience chunks, best-match wins.
+  // A single short summary vector is too noisy (ranks "Java SWE II" above a
+  // matching junior JD); max-over-chunks discriminates correctly.
+  const resumeChunks: string[] = [];
+  if (profile.skills.length) resumeChunks.push(('Skills: ' + profile.skills.join(', ')).slice(0, 500));
+  for (const exp of profile.experience.slice(0, 5)) {
+    if (exp.title) resumeChunks.push(exp.title.slice(0, 200));
+    if ((exp as any).description) resumeChunks.push(String((exp as any).description).slice(0, 500));
+  }
+  if (!resumeChunks.length) resumeChunks.push((profile.summary ?? '').slice(0, 1000));
   const resumeExpTitles = profile.experience.map((e) => (e.title ?? '').toLowerCase()).join(' ');
   const combinedBase = `${resumeExpTitles} ${(profile.summary ?? '').toLowerCase()}`.slice(0, 500);
 
@@ -249,7 +295,7 @@ export async function rankJobsBatch(
   }));
 
   // Unique texts for a single embed call
-  const uniq = [...new Set([resumeText, ...perJobTexts.flatMap((t) => [t.jobDesc, t.combined, t.title])].map((t) => t.trim()).filter(Boolean))];
+  const uniq = [...new Set([...resumeChunks, ...perJobTexts.flatMap((t) => [t.jobDesc, t.combined, t.title])].map((t) => t.trim()).filter(Boolean))];
 
   const provider = getRankingEmbeddingProvider();
   const providerName = (provider as object).constructor?.name ?? 'unknown';
@@ -274,16 +320,17 @@ export async function rankJobsBatch(
     const va = vec.get(a.trim());
     const vb = vec.get(b.trim());
     if (!va || !vb) return 0;
-    const c = cosine(va, vb);
-    return (c + 1) / 2;
+    return to01(cosine(va, vb));
   };
 
   return jobs.map((job, idx) => {
     const evidence: string[] = [];
     const { jobDesc, combined, title } = perJobTexts[idx];
 
-    // 1) Required skill 30 (same as rankJob)
+    // 1) Required skill 30 (same as rankJob) + matched/missing lists for UI
     let requiredSkillScore = 0;
+    let matchedSkills: string[] = [];
+    let missingSkills: string[] = [];
     {
       const jobText = `${job.title} ${job.description ?? ''}`.toLowerCase();
       const profileSet = normalizeSkillSet(profile.skills);
@@ -295,22 +342,39 @@ export async function rankJobsBatch(
           if (!jobSkills.includes(norm)) jobSkills.push(norm);
         }
       }
+      const display = (s: string) => normalizeSkill(s);
       if (jobSkills.length === 0) {
         requiredSkillScore = 15;
         evidence.push('No skills detected in job — neutral skill score');
+      } else if (jobSkills.length <= 2) {
+        // Thin Jooble snippets: 1-2 detected skills is noise, not signal.
+        const matchedThin = jobSkills.filter((s) => profileSet.has(s));
+        matchedSkills = matchedThin.map(display);
+        missingSkills = jobSkills.filter((s) => !profileSet.has(s)).map(display);
+        requiredSkillScore = 15;
+        evidence.push(`Only ${jobSkills.length} skill signal${jobSkills.length === 1 ? '' : 's'} in snippet (${matchedThin.length} matched) — neutral, too thin to judge`);
       } else {
-        const matched = jobSkills.filter((s) => profileSet.has(s)).length;
-        requiredSkillScore = Math.round((matched / jobSkills.length) * 30);
-        evidence.push(`Skill coverage ${matched}/${jobSkills.length}`);
+        const matched = jobSkills.filter((s) => profileSet.has(s));
+        const missing = jobSkills.filter((s) => !profileSet.has(s));
+        matchedSkills = matched.map(display);
+        missingSkills = missing.map(display);
+        requiredSkillScore = Math.round((matched.length / jobSkills.length) * 30);
+        evidence.push(`Skill coverage ${matched.length}/${jobSkills.length}`);
       }
     }
 
-    // 2) Responsibility semantic 25 (from batch vectors)
+    // 2) Responsibility semantic 25 (best resume chunk vs job, from batch vectors)
     let responsibilitySemantic = 0;
     {
-      const sim = resumeText.trim() && jobDesc.trim() ? pairScore(resumeText, jobDesc) : 0;
-      responsibilitySemantic = Math.round(sim * 25);
-      evidence.push(`Semantic similarity ${sim.toFixed(2)} via ${modelId}${usedMock ? ' (mock fallback)' : ''}`);
+      let best = 0;
+      let bestChunk = '';
+      for (const rc of resumeChunks) {
+        if (!rc.trim() || !jobDesc.trim()) continue;
+        const s = pairScore(rc, jobDesc);
+        if (s > best) { best = s; bestChunk = rc.slice(0, 80); }
+      }
+      responsibilitySemantic = Math.round(best * 25);
+      evidence.push(`Semantic similarity ${best.toFixed(2)} via ${modelId}${usedMock ? ' (mock fallback)' : ''}${bestChunk ? ` (best: "${bestChunk}")` : ''}`);
     }
 
     // 3) Role/title 15
@@ -339,15 +403,10 @@ export async function rankJobsBatch(
 
     // 4) Seniority 15
     let seniority = 0;
+    const jobSen: string | null = detectJobSeniority(job.title, job.description);
     {
       const seniorityOrder = ['junior', 'mid', 'senior', 'lead'];
       const profileSen = profile.seniority;
-      const jobLower = `${job.title} ${job.description ?? ''}`.toLowerCase();
-      let jobSen: string | null = null;
-      if (/(principal|staff|lead)\b/.test(jobLower)) jobSen = 'lead';
-      else if (/senior\b/.test(jobLower)) jobSen = 'senior';
-      else if (/(junior|entry)/.test(jobLower)) jobSen = 'junior';
-      else if (/mid/.test(jobLower)) jobSen = 'mid';
       if (!profileSen || !jobSen) {
         seniority = 8;
         evidence.push('Level: unknown — partial (no penalty)');
@@ -356,7 +415,7 @@ export async function rankJobsBatch(
         evidence.push(`Level match: ${profileSen} = ${jobSen} (no penalty)`);
       } else {
         const diff = Math.abs(seniorityOrder.indexOf(profileSen) - seniorityOrder.indexOf(jobSen));
-        seniority = diff === 1 ? 10 : diff === 2 ? 5 : 0;
+        seniority = diff === 1 ? 8 : diff === 2 ? 3 : 0;
         evidence.push(`Level penalty: ${15 - seniority} pts — your ${profileSen} vs job ${jobSen} (diff ${diff})`);
       }
     }
@@ -397,14 +456,24 @@ export async function rankJobsBatch(
       domainEducation,
       location,
     };
-    const fitScore = Object.values(breakdown).reduce((s, v) => s + v, 0);
+    let fitScore = Object.values(breakdown).reduce((s, v) => s + v, 0);
+    fitScore = Math.max(0, Math.min(100, fitScore));
+    // Hard cap: senior/lead postings can never top the list for junior profiles.
+    if (profile.seniority === 'junior' && (jobSen === 'senior' || jobSen === 'lead')) {
+      if (fitScore > 65) {
+        evidence.push(`Capped at 65: ${jobSen}-level role is out of reach for a junior profile`);
+        fitScore = 65;
+      }
+    }
     void titleModel;
     return {
-      fitScore: Math.max(0, Math.min(100, fitScore)),
+      fitScore,
       breakdown,
       evidence,
       embeddingModelId: modelId,
       usedMock,
+      matchedSkills,
+      missingSkills,
     };
   });
 }
