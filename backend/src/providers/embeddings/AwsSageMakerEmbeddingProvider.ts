@@ -12,7 +12,7 @@ import { env } from '../../config/env.js';
 
 const MAX_TEXTS = 32;
 const MAX_CHARS = 5000;
-const TIMEOUT_MS = 15000;
+const TIMEOUT_MS = 260000;
 
 export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
   readonly modelId: string;
