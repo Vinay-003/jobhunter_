@@ -7,7 +7,7 @@ import * as Session from '../../modules/auth/session.js';
 import jwt from 'jsonwebtoken';
 import { JoobleProvider } from '../../providers/jobs/JoobleProvider.js';
 import { JobQueryPlanner } from '../../modules/jobs/queryPlanner.js';
-import { rankJob } from '../../modules/jobs/ranking.js';
+import { rankJobsBatch } from '../../modules/jobs/ranking.js';
 import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
 import { buildResumeProfile } from '../../modules/parsing/resumeProfile.js';
 import { downloadFile } from '../../modules/storage/supabaseStorage.js';
@@ -108,13 +108,15 @@ router.post('/', authenticateAny, validate({ body: createRunSchema }), async (re
       deduped.push(j);
     }
 
-    // ranking - map deduped to ranking (uses SageMaker when EMBEDDING_PROVIDER=aws, mock only on fallback)
-    const rankedRaw = await Promise.all(deduped.map(async (j:any)=>{
-      const norm = { id: j.id, source: j.source||'jooble', externalId: j.externalId||j.id, title: j.title||'', company: j.company, location: j.location, description: j.description||j.snippet||'', descriptionQuality: (j.descriptionQuality||'snippet') as any, url: j.url||j.link||'', fetchedAt: new Date() } as any;
-      const r = await rankJob(profile, norm, { preferences: { locations: preferences.locations as any } }) as any;
+    // ranking — single batched embed call for all jobs (NOT one InvokeEndpoint per
+    // job: ~100 concurrent invokes throttle a Serverless MaxConcurrency=1 endpoint).
+    const norms = deduped.map((j:any)=> ({ id: j.id, source: j.source||'jooble', externalId: j.externalId||j.id, title: j.title||'', company: j.company, location: j.location, description: j.description||j.snippet||'', descriptionQuality: (j.descriptionQuality||'snippet') as any, url: j.url||j.link||'', fetchedAt: new Date() } as any));
+    const batchResults = await rankJobsBatch(profile, norms, { preferences: { locations: preferences.locations as any } });
+    const rankedRaw = norms.map((norm:any, i:number)=>{
+      const r = batchResults[i] as any;
       const conf = r.fitScore>=70 ? 'High' : r.fitScore>=40 ? 'Medium' : 'Low';
       return { ...norm, fitScore: r.fitScore, breakdown: r.breakdown, evidence: r.evidence, confidence: conf, embeddingModelId: r.embeddingModelId, usedMock: r.usedMock };
-    }));
+    });
     const ranked = rankedRaw.sort((a,b)=> b.fitScore - a.fitScore);
     // derive embedding model for run — real model if any job used real, else mock
     const runEmbeddingModelId = ranked.find((r:any)=> !r.usedMock)?.embeddingModelId || ranked[0]?.embeddingModelId || 'mock';
@@ -122,7 +124,7 @@ router.post('/', authenticateAny, validate({ body: createRunSchema }), async (re
 
     const runId = crypto.randomUUID();
     const rankerVersion = '2.0.0';
-    console.log(`[recommendations] runId=${runId} fetched=${allJobs.length} deduped=${deduped.length} ranked=${ranked.length} model=${runEmbeddingModelId}${runUsedMock ? ' (mock fallback)' : ''} cacheHits=${limited.length - allJobs.length}`);
+    console.log(`[recommendations] runId=${runId} queries=${limited.length} fetched=${allJobs.length} deduped=${deduped.length} ranked=${ranked.length} model=${runEmbeddingModelId}${runUsedMock ? ' (mock fallback)' : ''}`);
     try {
       await pool.query('INSERT INTO recommendation_runs (id, user_id, resume_id, preferences_snapshot_json, ranker_version, embedding_model_id, status, created_at, completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now(),now())', [runId, userId, resumeId, JSON.stringify(preferences), rankerVersion, runEmbeddingModelId, 'completed']);
       for (let i=0;i<ranked.slice(0,20).length;i++){

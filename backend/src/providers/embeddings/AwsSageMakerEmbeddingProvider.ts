@@ -102,8 +102,9 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
 
       const dim = vectors[0]?.length ?? this.dimension;
       return { vectors, modelId: this.modelId, dimension: dim };
-    } catch (err) {
-      console.warn('[AwsSageMakerEmbeddingProvider] fallback to mock due to error:', (err as Error).message);
+    } catch (err: any) {
+      // Log name + message: SDK throttling/validation errors otherwise surface as bare "UnknownError".
+      console.warn(`[AwsSageMakerEmbeddingProvider] fallback to mock due to error: ${err?.name || 'Error'}: ${err?.message || err} (texts=${texts.length})`);
       const res = await this.mock.embed({ texts, purpose: purpose as 'resume' | 'job' | 'jd' });
       return { vectors: res.vectors, modelId: res.modelId, dimension: res.dimension };
     }
