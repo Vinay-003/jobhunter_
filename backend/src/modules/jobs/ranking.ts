@@ -55,8 +55,9 @@ const INDIAN_PLACES = [
   'uttar pradesh', 'madhya pradesh', 'west bengal', 'bihar',
 ];
 
-function locationScore(prefLocs: string[], jobLocation: string | null): { points: number; note: string } {
+function locationScore(prefLocs: string[], jobLocation: string | null, workMode?: string | null): { points: number; note: string } {
   if (!prefLocs.length || !jobLocation) return { points: 3, note: '' };
+  if (workMode && workMode.toLowerCase() === 'remote') return { points: 5, note: 'Remote role — matches anywhere' };
   const jl = jobLocation.toLowerCase();
   if (/\bremote\b/.test(jl)) return { points: 5, note: 'Remote — matches anywhere' };
   const direct = prefLocs.some((pl) => jl.includes(pl) || pl.includes(jl));
@@ -93,6 +94,8 @@ export function detectJobSeniority(title: string, description?: string | null): 
   const lower = text.toLowerCase();
   if (/(principal|staff(\s+engineer)?|lead(\s+engineer|\s+dev)?|\bl[56]\b|iv\b|architect|manager)/.test(lower)) return 'lead';
   if (/\bsenior\b|\bsr\.?\b|iii\b|5\s*\+?\s*years?|6\s*\+?\s*years?|[7-9]\s*\+?\s*years?|10\s*\+?\s*years?/.test(lower)) return 'senior';
+  // Indian-IT/US "Associate Software Engineer" (without "senior") is entry-level.
+  if (/\bassociate\b/.test(lower) && /(engineer|developer)/.test(lower)) return 'junior';
   if (/\bjunior\b|\bjr\.?\b|entry[\s-]?level|fresher|1\s*\+\s*years?|0\s*[-–]\s*1\s*years?|0\s*[-–]\s*2\s*years?|intern(ship)?\b|engineer\s*[-–/]?\s*(1|i)\b|\bswe\s*[-–/]?\s*1\b/.test(lower)) return 'junior';
   if (/\bmid(\s+level)?\b|\bii\b|2\s*\+?\s*years?|3\s*\+?\s*years?|4\s*\+?\s*years?|\bl[34]\b/.test(lower)) return 'mid';
   return null;
@@ -239,7 +242,7 @@ export async function rankJob(
     if (!prefLocs.length || !job.location) {
       location = 3; // neutral
     } else {
-      const { points, note } = locationScore(prefLocs, job.location);
+      const { points, note } = locationScore(prefLocs, job.location, job.workMode);
       location = points;
       if (note) evidence.push(note);
     }
@@ -465,7 +468,7 @@ export async function rankJobsBatch(
       const prefLocs = opts?.preferences?.locations?.map((s) => s.toLowerCase()) ?? [];
       if (!prefLocs.length || !job.location) location = 3;
       else {
-        const { points, note } = locationScore(prefLocs, job.location);
+        const { points, note } = locationScore(prefLocs, job.location, job.workMode);
         location = points;
         if (note) evidence.push(note);
       }
