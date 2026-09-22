@@ -45,32 +45,48 @@ export class JobQueryPlanner {
     const filteredRoles = baseRoles.filter((r) => !excluded.has(r.toLowerCase()));
     const roles = filteredRoles.length ? filteredRoles : baseRoles.slice(0, 1);
 
-    // Build skill-augmented queries without concatenating all skills
-    // Pick 1-2 skills per query, rotate
-    const skillPool = emphasized.length ? emphasized : profileSkills;
+    // Build skill-augmented queries without concatenating all skills.
+    // Academic/list-only skills ("Data Structures and Algorithms", "DBMS",
+    // "OOP", single letters) are useless as search terms — Jooble ignores them
+    // and returns generic senior-heavy results. Prefer tool skills.
+    const SEARCH_STOPWORDS = new Set([
+      'data structures and algorithms', 'dsa', 'dbms', 'oops', 'oop',
+      'object-oriented programming', 'operating systems', 'computer networks',
+      'computer science', 'c', 'sql',
+    ]);
+    const searchable = (list: string[]) =>
+      list.filter((s) => !SEARCH_STOPWORDS.has(s.toLowerCase()) && s.length > 1);
+    const rawPool = emphasized.length ? emphasized : profileSkills;
+    const skillPool = searchable(rawPool).length ? searchable(rawPool) : rawPool;
     const skillA = skillPool[0];
     const skillB = skillPool[1];
     const skillC = skillPool[2];
 
+    const isJunior = profile?.seniority === 'junior';
     const queries: PlannedQuery[] = [];
 
-    // Query 1: primary role alone
+    // Query 1: primary role alone (broad recall)
     if (roles[0]) queries.push({ keywords: roles[0] });
-    // Query 2: second role or primary + skillA
-    if (roles[1]) {
+    // Query 2: junior-qualified role so the pool isn't all seniors.
+    // Without this, "Software Engineer" returns Mastercard Senior/Staff rows.
+    if (isJunior && roles[0]) {
+      queries.push({ keywords: `Junior ${roles[0]}` });
+    } else if (roles[1]) {
       queries.push({ keywords: skillA ? `${roles[1]} ${skillA}` : roles[1] });
     } else if (skillA) {
       queries.push({ keywords: `${roles[0]} ${skillA}` });
     }
-    // Query 3: fallback role + skillB or skillA
+    // Query 3: role + top tool skill
     if (queries.length < 3) {
       const role = roles[0] ?? 'Software Engineer';
       const skill = skillB ?? skillA;
       if (skill) queries.push({ keywords: `${role} ${skill}` });
       else queries.push({ keywords: `${role} Developer` });
     }
-    // Query 4: another skill combo
-    if (queries.length < 4 && skillC) {
+    // Query 4: fresher/entry variant for juniors, skill combo otherwise
+    if (queries.length < 4 && isJunior && (skillB ?? skillA)) {
+      queries.push({ keywords: `Fresher ${skillB ?? skillA} Developer` });
+    } else if (queries.length < 4 && skillC) {
       const role = roles.length > 1 ? roles[1] : roles[0] ?? 'Software Engineer';
       queries.push({ keywords: `${role} ${skillC}` });
     } else if (queries.length < 4 && skillA && skillB) {

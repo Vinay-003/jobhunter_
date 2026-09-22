@@ -15,6 +15,8 @@ export type JobSearchQuery = {
   keywords: string;
   location?: string;
   page?: number;
+  /** Candidate level ('junior' | 'mid' | ...) — providers with a seniority filter use it. */
+  seniorityHint?: string | null;
 };
 
 export interface JobProvider {

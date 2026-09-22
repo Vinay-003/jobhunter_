@@ -43,6 +43,31 @@ function normalizeSkillSet(skills: string[]): Set<string> {
   return new Set(skills.map((s) => normalizeSkill(s).toLowerCase()));
 }
 
+// Major Indian metros/states — Jooble returns city names ("Delhi") while users
+// filter by country ("India"). Without this, Delhi-vs-India scores 0.
+const INDIAN_PLACES = [
+  'delhi', 'new delhi', 'mumbai', 'bombay', 'bengaluru', 'bangalore', 'hyderabad',
+  'chennai', 'madras', 'kolkata', 'calcutta', 'pune', 'ahmedabad', 'jaipur',
+  'noida', 'gurgaon', 'gurugram', 'kochi', 'cochin', 'coimbatore', 'chandigarh',
+  'lucknow', 'kanpur', 'nagpur', 'indore', 'bhopal', 'patna', 'surat', 'vadodara',
+  'mysore', 'mysuru', 'thiruvananthapuram', 'karnataka', 'maharashtra',
+  'tamil nadu', 'telangana', 'kerala', 'gujarat', 'rajasthan', 'punjab', 'haryana',
+  'uttar pradesh', 'madhya pradesh', 'west bengal', 'bihar',
+];
+
+function locationScore(prefLocs: string[], jobLocation: string | null): { points: number; note: string } {
+  if (!prefLocs.length || !jobLocation) return { points: 3, note: '' };
+  const jl = jobLocation.toLowerCase();
+  if (/\bremote\b/.test(jl)) return { points: 5, note: 'Remote — matches anywhere' };
+  const direct = prefLocs.some((pl) => jl.includes(pl) || pl.includes(jl));
+  if (direct) return { points: 5, note: `Location match ${jobLocation}` };
+  // Country containment: pref "india" + job in an Indian city
+  if (prefLocs.includes('india') && INDIAN_PLACES.some((p) => jl.includes(p))) {
+    return { points: 5, note: `Location match ${jobLocation} (India)` };
+  }
+  return { points: 0, note: `Location mismatch ${jobLocation}` };
+}
+
 function cosine(a: number[], b: number[]): number {
   return MockEmbeddingProvider.cosine(a, b);
 }
@@ -68,7 +93,7 @@ export function detectJobSeniority(title: string, description?: string | null): 
   const lower = text.toLowerCase();
   if (/(principal|staff(\s+engineer)?|lead(\s+engineer|\s+dev)?|\bl[56]\b|iv\b|architect|manager)/.test(lower)) return 'lead';
   if (/\bsenior\b|\bsr\.?\b|iii\b|5\s*\+?\s*years?|6\s*\+?\s*years?|[7-9]\s*\+?\s*years?|10\s*\+?\s*years?/.test(lower)) return 'senior';
-  if (/\bjunior\b|\bjr\.?\b|entry[\s-]?level|fresher|0\s*[-–]\s*1\s*years?|0\s*[-–]\s*2\s*years?|intern(ship)?\b/.test(lower)) return 'junior';
+  if (/\bjunior\b|\bjr\.?\b|entry[\s-]?level|fresher|1\s*\+\s*years?|0\s*[-–]\s*1\s*years?|0\s*[-–]\s*2\s*years?|intern(ship)?\b|engineer\s*[-–/]?\s*(1|i)\b|\bswe\s*[-–/]?\s*1\b/.test(lower)) return 'junior';
   if (/\bmid(\s+level)?\b|\bii\b|2\s*\+?\s*years?|3\s*\+?\s*years?|4\s*\+?\s*years?|\bl[34]\b/.test(lower)) return 'mid';
   return null;
 }
@@ -214,10 +239,9 @@ export async function rankJob(
     if (!prefLocs.length || !job.location) {
       location = 3; // neutral
     } else {
-      const jl = job.location.toLowerCase();
-      const match = prefLocs.some((pl) => jl.includes(pl) || pl.includes(jl));
-      location = match ? 5 : 0;
-      evidence.push(match ? `Location match ${job.location}` : `Location mismatch ${job.location}`);
+      const { points, note } = locationScore(prefLocs, job.location);
+      location = points;
+      if (note) evidence.push(note);
     }
   }
 
@@ -441,10 +465,9 @@ export async function rankJobsBatch(
       const prefLocs = opts?.preferences?.locations?.map((s) => s.toLowerCase()) ?? [];
       if (!prefLocs.length || !job.location) location = 3;
       else {
-        const jl = job.location.toLowerCase();
-        const match = prefLocs.some((pl) => jl.includes(pl) || pl.includes(jl));
-        location = match ? 5 : 0;
-        evidence.push(match ? `Location match ${job.location}` : `Location mismatch ${job.location}`);
+        const { points, note } = locationScore(prefLocs, job.location);
+        location = points;
+        if (note) evidence.push(note);
       }
     }
 

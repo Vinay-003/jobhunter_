@@ -67,6 +67,12 @@ export class JobsPipeProvider implements JobProvider {
       };
       if (this.country) body.job_country_code_or = [this.country.toUpperCase()];
       if (words.length > 3) body.description_or = words.slice(3, 6);
+      // Junior candidates drown in senior postings — bias toward entry/mid.
+      // include_unknown keeps the ~90% of postings with no seniority label.
+      if (query.seniorityHint === 'junior') {
+        body.job_seniority_or = ['entry_level', 'mid_level'];
+        body.include_unknown = ['seniority'];
+      }
       console.log(`[JobsPipeProvider] searching title="${body.job_title_or}" country=${this.country} limit=${this.limit}`);
       const resp = await axios.post<{ data?: JobsPipeJob[]; metadata?: { credits_charged?: number } }>(
         'https://api.jobspipe.dev/v1/jobs/search',

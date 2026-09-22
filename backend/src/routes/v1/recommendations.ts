@@ -121,17 +121,18 @@ router.post('/', authenticateAny, validate({ body: createRunSchema }), async (re
     }
 
     // Other providers: single call each on the primary query.
-    const extraProviders: Array<[string, { search: (q: { keywords: string; location: string }) => Promise<any[]> }, number]> = [];
+    const extraProviders: Array<[string, { search: (q: import('../../providers/jobs/JobProvider.js').JobSearchQuery) => Promise<any[]> }, number]> = [];
     if (enabled.includes('jobspipe')) extraProviders.push(['jobspipe', new JobsPipeProvider(), 60 * 60 * 1000]);
     if (enabled.includes('adzuna')) extraProviders.push(['adzuna', new AdzunaProvider(), 60 * 60 * 1000]);
     if (enabled.includes('remotive')) extraProviders.push(['remotive', new RemotiveProvider(), 60 * 60 * 1000]);
     if (enabled.includes('arbeitnow')) extraProviders.push(['arbeitnow', new ArbeitnowProvider(), arbeitnowCacheHours() * 60 * 60 * 1000]);
     for (const [name, provider, ttlMs] of extraProviders) {
-      const key = `${name}:${primaryQuery}|${loc}`;
+      const hint = name === 'jobspipe' ? `|${(profile as any)?.seniority ?? ''}` : '';
+      const key = `${name}:${primaryQuery}|${loc}${hint}`;
       const cached = await cacheGet(key, ttlMs);
       if (cached) { allJobs.push(...cached); sourceCounts[name] = (sourceCounts[name] ?? 0) + cached.length; continue; }
       try {
-        const jobs = await provider.search({ keywords: primaryQuery, location: loc });
+        const jobs = await provider.search({ keywords: primaryQuery, location: loc, seniorityHint: (profile as any)?.seniority ?? null });
         allJobs.push(...jobs);
         sourceCounts[name] = (sourceCounts[name] ?? 0) + jobs.length;
         await cacheSet(key, jobs);

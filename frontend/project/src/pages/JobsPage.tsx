@@ -78,6 +78,17 @@ function scoreOf(job: Job): number {
   return Math.max(0, Math.min(100, Math.round(raw)));
 }
 
+// Backend category point ceilings (ranking.ts breakdown). Used to render
+// value/max bars instead of mistaking small point values for fractions.
+const BREAKDOWN_MAX: Record<string, number> = {
+  requiredSkill: 30,
+  responsibilitySemantic: 25,
+  roleTitle: 15,
+  seniority: 15,
+  domainEducation: 10,
+  location: 5,
+};
+
 function mapRecommendation(raw: any): Job {
   const breakdown = raw?.breakdown && !Array.isArray(raw.breakdown)
     ? Object.entries(raw.breakdown).filter(([, value]) => typeof value === 'number').map(([label, value]) => ({ label, value: value as number }))
@@ -184,11 +195,16 @@ function JobDetail({ job }: { job: Job }) {
           <div className="mb-3 flex items-center justify-between"><p className="text-xs font-semibold text-slate-300">Why it scored this way</p><span className="text-[10px] text-slate-600">transparent breakdown</span></div>
           <div className="grid gap-2 sm:grid-cols-2">
             {breakdown.slice(0, 8).map((item, index) => {
-              const shown = item.value <= 1 ? Math.round(item.value * 100) : Math.round(item.value);
+              // Backend sends raw points per category (skill 30 / semantic 25 /
+              // role 15 / seniority 15 / domain 10 / location 5). Never treat
+              // small point values as 0-1 fractions (roleTitle=1 showed as 100).
+              const max = BREAKDOWN_MAX[item.label] ?? 100;
+              const shown = Math.round(item.value);
+              const pct = max > 0 ? Math.max(4, Math.min(100, (shown / max) * 100)) : 4;
               return (
                 <div key={`${item.label}-${index}`} className="rounded-xl border border-white/[0.055] bg-black/10 p-3">
-                  <div className="flex items-center justify-between gap-3"><span className="truncate text-[10px] capitalize text-slate-500">{item.label.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ')}</span><span className="text-[11px] font-semibold text-slate-300">{shown}</span></div>
-                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.055]"><div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.max(4, Math.min(100, shown))}%` }} /></div>
+                  <div className="flex items-center justify-between gap-3"><span className="truncate text-[10px] capitalize text-slate-500">{item.label.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ')}</span><span className="text-[11px] font-semibold text-slate-300">{shown}<span className="text-slate-600">/{max}</span></span></div>
+                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.055]"><div className="h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} /></div>
                 </div>
               );
             })}
