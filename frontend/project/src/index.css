@@ -153,7 +153,8 @@ body::after {
 }
 
 @media print {
-  aside, nav, .no-print { display: none !important; }
+  nav, button, .no-print { display: none !important; }
+  aside { position: static !important; max-height: none !important; overflow: visible !important; }
   body { background: #fff !important; color: #000 !important; }
   body::after { display: none !important; }
   a { text-decoration: none !important; color: #000 !important; }

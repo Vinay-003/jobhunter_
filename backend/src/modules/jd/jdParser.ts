@@ -33,22 +33,30 @@ export function parseJd(jdText: string): ParsedJobDescription {
   const text = jdText.trim();
   const lower = text.toLowerCase();
 
-  // Title: first line or "Title: ..." or before first newline if short
+  // Title: first line or "Title: ..." or before first newline if short.
+  // Strip markdown heading markers (e.g. "# Full Stack Developer").
+  const cleanTitle = (s: string) => s.replace(/^#+\s*/, '').trim().slice(0, 120);
   let title: string | null = null;
   const titleMatch = text.match(/^(?:job\s*title|title|role)\s*[:\-]\s*(.+)$/im);
   if (titleMatch) {
-    title = titleMatch[1].split('\n')[0].trim().slice(0, 120);
+    title = cleanTitle(titleMatch[1].split('\n')[0]);
   } else {
     const firstLine = text.split('\n')[0].trim();
     if (firstLine.length < 80 && firstLine.length > 3 && !firstLine.includes('. ')) {
-      title = firstLine;
+      title = cleanTitle(firstLine);
     }
   }
 
-  // Seniority
+  // Seniority — ignore "Reporting To: ... Lead/CTO" lines which describe the
+  // manager, not the candidate level (false 'lead' positive).
+  const seniorityText = text
+    .split('\n')
+    .filter((line) => !/reporting\s*to/i.test(line))
+    .join('\n')
+    .toLowerCase();
   let seniority: ParsedJobDescription['seniority'] = null;
   for (const [kw, level] of Object.entries(SENIORITY_KEYWORDS)) {
-    if (lower.includes(kw)) {
+    if (seniorityText.includes(kw)) {
       seniority = level;
       // prefer senior/lead over junior if multiple
       if (level === 'lead' || level === 'senior') break;
@@ -145,11 +153,18 @@ function extractResponsibilities(text: string): string[] {
   const nextSection = chunk.slice(500).search(/\n\s*(requirements|qualifications|skills|benefits|about us|preferred)\b/i);
   if (nextSection !== -1) chunk = chunk.slice(0, 500 + nextSection);
 
-  // Split by bullets or lines
+  // Split by bullets or lines; drop markdown section headings
+  // ("## Key Responsibilities", "### Frontend Development") which are not
+  // real responsibilities and pollute semantic coverage with low scores.
   const lines = chunk
     .split(/\n|•|·|—|–/)
-    .map((s) => s.replace(/^[\-\*\d\.\)\s]+/, '').trim())
-    .filter((s) => s.length > 10 && s.length < 300)
+    .map((s) => s.replace(/^#+\s*/, '').replace(/^[\-\*\d\.\)\s]+/, '').trim())
+    .filter((s) => {
+      if (s.length <= 10 || s.length >= 300) return false;
+      if (/^(key responsibilities|responsibilities|frontend development|backend development|database development|requirements?|qualifications?|preferred.+|bonus skills?)$/i.test(s)) return false;
+      if (/^(reporting to\b|experience\s*:|employment details\s*:|employment type\s*:|position\s*:|department\s*:|location\s*:)/i.test(s)) return false;
+      return true;
+    })
     .slice(0, 15);
 
   // Filter out likely non-responsibility lines (e.g., skill lists)

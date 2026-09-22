@@ -123,7 +123,11 @@ export function matchJd(profile: ResumeProfile, jd: ParsedJobDescription): JdMat
   const warnings: string[] = [];
 
   if (requiredCoverage === 1 && jd.requiredSkills.length > 0) strengths.push('All required skills matched');
-  else if (matchedRequired.length > 0) strengths.push(`Matched ${matchedRequired.length}/${jd.requiredSkills.length} required skills: ${matchedRequired.slice(0, 8).join(', ')}`);
+  else if (matchedRequired.length > 0) {
+    const shown = matchedRequired.slice(0, 12).join(', ');
+    const rest = matchedRequired.length > 12 ? ` (+${matchedRequired.length - 12} more: ${matchedRequired.slice(12).join(', ')})` : '';
+    strengths.push(`Matched ${matchedRequired.length}/${jd.requiredSkills.length} required skills: ${shown}${rest}`);
+  }
   if (preferredCoverage >= 0.5 && jd.preferredSkills.length > 0) strengths.push('Strong preferred skills coverage');
   if (partialMatches.length > 0) strengths.push(`Transferable: ${partialMatches.slice(0, 4).map((p) => `${p.resumeSkill} → ${p.jdSkill} (${p.family})`).join('; ')}`);
   if (missingRequired.length > 0) warnings.push(`Missing required: ${missingRequired.join(', ')}`);

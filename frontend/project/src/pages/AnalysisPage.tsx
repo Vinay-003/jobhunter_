@@ -471,6 +471,8 @@ export default function AnalysisPage() {
         </div>
       </section>
 
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
+        <div className="space-y-7 min-w-0">
       {view.jdMatch && (
         <section id="section-tailored" className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-5 md:p-6 scroll-mt-24">
           <div className="grid gap-5 lg:grid-cols-[auto_1fr_auto] lg:items-center">
@@ -534,12 +536,7 @@ export default function AnalysisPage() {
         ))}
       </section>
 
-      <nav className="flex flex-wrap gap-2 text-[11px]" aria-label="Report sections">
-        {[['#section-overview', 'Overview'], ['#section-tailored', 'Tailored Match'], ['#section-metrics', 'Metrics'], ['#section-actions', 'Priority actions'], ['#section-breakdown', 'Score breakdown']].map(([href, label]) => (
-          <a key={href} href={href} className="jh-chip hover:border-amber-400/30 hover:text-amber-200">{label}</a>
-        ))}
-      </nav>
-
+      {/* Priority actions — main column summary; full rubric lives in the right rail */}
       {/* Priority actions — full-width, editorial, not side-by-side */}
       <section id="section-actions" className="space-y-5 scroll-mt-24">
         <div className="border-b border-stone-800 pb-4">
@@ -577,18 +574,6 @@ export default function AnalysisPage() {
         )}
       </section>
 
-      {/* Score breakdown — own section, not cramped beside actions */}
-      <section id="section-breakdown" className="space-y-5 scroll-mt-24">
-        <div className="border-b border-stone-800 pb-4">
-          <p className="jh-eyebrow">100-point rubric</p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>Score breakdown</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-500">Each category is independent. Hard refresh loads the same breakdown from <code className="text-stone-300">/api/v1/analyses/:id</code>.</p>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
-          {(readiness.breakdown ?? []).map((category) => <CategoryPanel key={category.category || category.label} category={category} />)}
-        </div>
-      </section>
-
       <section className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center rounded-2xl border border-amber-400/15 bg-amber-400/[0.06] p-5">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold text-amber-200"><Briefcase size={15} className="text-amber-300" /> Ready to test market fit?</div>
@@ -596,6 +581,36 @@ export default function AnalysisPage() {
         </div>
         <Link to="/app/jobs" className="jh-button-primary">Open Job Matches <ArrowRight size={14} /></Link>
       </section>
+        </div>
+        <aside className="space-y-5 xl:sticky xl:top-8 xl:self-start xl:max-h-[calc(100vh-4rem)] xl:overflow-y-auto jh-scrollbar">
+          <div className="rounded-2xl border border-stone-800 bg-stone-900/60 p-4">
+            <p className="jh-eyebrow">Details</p>
+            <h3 className="mt-1 text-sm font-semibold text-white">Inspect each check</h3>
+            <p className="mt-1 text-[11px] leading-5 text-slate-500">Main column is the summary. Open any category here to see the exact rule, evidence, and fix.</p>
+            <nav className="mt-3 flex flex-wrap gap-1.5 text-[11px]" aria-label="Report sections">
+              {[['#section-overview', 'Overview'], ['#section-tailored', 'Tailored Match'], ['#section-metrics', 'Metrics'], ['#section-actions', 'Priority actions'], ['#section-breakdown', 'Score breakdown']].map(([href, label]) => (
+                <a key={href} href={href} className="jh-chip hover:border-amber-400/30 hover:text-amber-200">{label}</a>
+              ))}
+            </nav>
+          </div>
+          <div className="rounded-2xl border border-stone-800 bg-stone-900/60 p-4">
+            <p className="text-[11px] font-semibold text-slate-300">Scoring provenance</p>
+            <div className="mt-2 space-y-1 text-[11px] leading-5 text-slate-500">
+              <p>Resume Health: <span className="text-slate-300">rule-based, no JD</span> (never embeddings)</p>
+              <p>Tailored Match: <span className="text-slate-300">{shortModel(view.versions?.embeddingModelId)}</span>{view.versions?.usedMock ? ' • mock fallback' : ' • real embeddings'}</p>
+              {readiness.version && <p>Scorer v{readiness.version}</p>}
+            </div>
+          </div>
+          <div id="section-breakdown" className="space-y-3 scroll-mt-24">
+            <div>
+              <p className="jh-eyebrow">100-point rubric</p>
+              <h3 className="mt-1 text-base font-semibold text-stone-100">Score breakdown</h3>
+              <p className="mt-1 text-[11px] leading-5 text-slate-600">Each category is independent. Hard refresh loads the same breakdown from <code className="text-stone-300">/api/v1/analyses/:id</code>.</p>
+            </div>
+            {(readiness.breakdown ?? []).map((category) => <CategoryPanel key={category.category || category.label} category={category} />)}
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }
