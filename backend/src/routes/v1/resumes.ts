@@ -119,7 +119,7 @@ router.post('/', authenticateAny, upload.single('resume'), async (req:any,res)=>
       await pool.query('INSERT INTO resume_profiles (resume_id, profile_json, profile_version) VALUES ($1,$2,$3) ON CONFLICT (resume_id) DO UPDATE SET profile_json=$2, profile_version=$3, updated_at=now()', [row.id, JSON.stringify(profile), '2.0.0']).catch(()=>{});
     } catch{}
 
-    res.json({ success:true, resume:{ id: row.id, fileName: row.original_filename || row.file_name, uploadDate: row.created_at || row.upload_date, status: row.processing_status || row.status, sha256, pageCount }});
+    res.json({ success:true, resume:{ id: row.id, fileName: row.original_filename || row.file_name, uploadDate: row.created_at || row.upload_date, status: row.processing_status || row.status, sha256, pageCount, storageBucket: storage.bucket }});
   } catch(e:any){
     console.error('upload error', e);
     res.status(500).json({ success:false, message: e.message || 'Upload failed'});
@@ -137,7 +137,7 @@ router.get('/', authenticateAny, async (req:any,res)=>{
       const r = await pool.query('SELECT * FROM resumes WHERE user_id=$1 ORDER BY created_at DESC', [userId]);
       rows = r.rows;
     }
-    res.json({ success:true, resumes: rows.map((r:any)=>({ id:r.id, fileName:r.file_name, uploadDate:r.upload_date, status:r.status, pageCount:r.page_count, sha256:r.sha256, isLatest:r.is_latest }))});
+    res.json({ success:true, resumes: rows.map((r:any)=>({ id:r.id, fileName:r.file_name || r.original_filename, uploadDate:r.upload_date || r.created_at, status:r.status, pageCount:r.page_count, sha256:r.sha256, isLatest:r.is_latest, storageBucket:r.storage_bucket }))});
   } catch(e:any){ res.status(500).json({ success:false, message:e.message}); }
 });
 

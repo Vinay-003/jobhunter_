@@ -5,6 +5,7 @@ import analyses from './analyses.js';
 import profile from './profile.js';
 import recommendations from './recommendations.js';
 import keepalive from '../keepalive.js';
+import { probeStorage } from '../../modules/storage/supabaseStorage.js';
 
 const router = Router();
 
@@ -17,6 +18,13 @@ router.use('/recommendation-runs', recommendations);
 router.use('/recommendations', recommendations);
 router.use('/keepalive', keepalive);
 
-router.get('/health', (req,res)=> res.json({ success:true, status:'ok', timestamp: new Date().toISOString(), version:'v1' }));
+// ?deep=1 also probes Supabase Storage (Issue 1 fix 5): storage: ok | error <code> | not-configured
+router.get('/health', async (req, res) => {
+  const body: Record<string, unknown> = { success: true, status: 'ok', timestamp: new Date().toISOString(), version: 'v1' };
+  if (String(req.query.deep ?? '') === '1') {
+    body.storage = await probeStorage();
+  }
+  res.json(body);
+});
 
 export default router;

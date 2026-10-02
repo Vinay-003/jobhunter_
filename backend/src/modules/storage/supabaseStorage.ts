@@ -25,12 +25,20 @@ function hasSupabase(): boolean {
 }
 
 async function getSupabaseClient(): Promise<unknown> {
+  let mod: unknown;
   try {
     // @ts-ignore - optional peer dep
-    const mod: unknown = await import('@supabase/supabase-js');
+    mod = await import('@supabase/supabase-js');
+  } catch (err) {
+    // Issue 1 fix 1.2: never swallow silently — one greppable token explains the fallback.
+    console.error('[supabaseStorage] FALLBACK reason=import — @supabase/supabase-js unavailable:', (err as Error)?.message ?? err);
+    return null;
+  }
+  try {
     const { createClient } = mod as { createClient: (url: string, key: string) => unknown };
     return createClient(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!);
-  } catch {
+  } catch (err) {
+    console.error('[supabaseStorage] FALLBACK reason=create-client — SUPABASE_URL rejected:', (err as Error)?.message ?? err, `url=${JSON.stringify(env.SUPABASE_URL)}`);
     return null;
   }
 }
@@ -59,6 +67,9 @@ export async function uploadFile(
   const bucket = getBucket();
   const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'resume.pdf';
   const objectPath = `${userId}/${resumeId}/${safeFilename}`;
+  // Issue 1 fix 1.2: production must never pretend success while writing to the
+  // ephemeral disk (that's how all 14 rows became bucket='local' with lost bytes).
+  const isProd = process.env.NODE_ENV === 'production';
 
   if (hasSupabase()) {
     const client = (await getSupabaseClient()) as {
@@ -69,23 +80,44 @@ export async function uploadFile(
         contentType: 'application/pdf',
         upsert: true,
       });
-      if (error) {
-        console.warn('[supabaseStorage] Supabase upload failed, falling back to local:', (error as { message?: string }).message ?? error);
-      } else {
+      if (!error) {
         return { bucket, path: objectPath, sha256 };
       }
+      const msg = (error as { message?: string }).message ?? String(error);
+      console.error(`[supabaseStorage] FALLBACK reason=upload-error path=${objectPath}: ${msg}`);
+      if (isProd) throw new Error(`Supabase upload failed: ${msg}`);
+    } else {
+      // reason already logged by getSupabaseClient (reason=import|create-client)
+      if (isProd) throw new Error('Supabase client unavailable (see [supabaseStorage] FALLBACK log)');
+      console.warn('[supabaseStorage] FALLBACK reason=client-null (dev only — writing local)');
     }
+  } else {
+    if (isProd) throw new Error('Supabase not configured in production (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing)');
+    console.warn('[supabaseStorage] FALLBACK reason=env — Supabase not configured, writing local (dev only)');
   }
 
-  // Local fallback
-  if (!hasSupabase()) {
-    console.warn('[supabaseStorage] Supabase not configured — writing to local uploads folder (dev only)');
-  }
+  // Local fallback (development only — production paths throw above)
   const base = localUploadsDir();
   const fullPath = path.join(base, objectPath);
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, buffer);
   return { bucket: 'local', path: objectPath, sha256 };
+}
+
+/** Non-secret storage probe for GET /health?deep=1 (Issue 1 fix 5). */
+export async function probeStorage(): Promise<string> {
+  if (!hasSupabase()) return 'not-configured';
+  try {
+    const client = (await getSupabaseClient()) as {
+      storage: { from: (b: string) => { list: (p: string, opts: unknown) => Promise<{ error: unknown }> } };
+    } | null;
+    if (!client) return 'error client-unavailable';
+    const { error } = await client.storage.from(getBucket()).list('', { limit: 1 });
+    if (error) return `error ${(error as { code?: string }).code ?? (error as { message?: string }).message ?? 'unknown'}`;
+    return 'ok';
+  } catch (e) {
+    return `error ${((e as Error)?.message ?? 'unknown').slice(0, 80)}`;
+  }
 }
 
 export async function downloadFile(ref: StorageRef): Promise<Buffer> {
