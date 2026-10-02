@@ -1,5 +1,5 @@
-import { useRef, useState, type ChangeEvent, type DragEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../lib/api';
 import {
   ArrowRight,
@@ -114,12 +114,44 @@ function FileDropzone({
 
 export default function AtsPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const existingResumeId = searchParams.get('resumeId');
   const [mode, setMode] = useState<Mode>('resume');
   const [file, setFile] = useState<File | null>(null);
+  // Set when arriving via /app/ats?resumeId=<id> (e.g. "Analyze this resume" from
+  // the resume view): analysis runs against the STORED file, no re-upload.
+  const [existing, setExisting] = useState<{ id: string; fileName?: string } | null>(null);
   const [targetLevel, setTargetLevel] = useState<TargetLevel>('entry');
   const [jobDescription, setJobDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!existingResumeId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get(`/resumes/${existingResumeId}`);
+        if (cancelled) return;
+        const r = (res.data as any)?.resume;
+        if (r) setExisting({ id: String(r.id ?? existingResumeId), fileName: r.fileName });
+        else setError('That resume no longer exists — upload a PDF instead.');
+      } catch (err) {
+        if (cancelled) return;
+        const status = (err as { status?: number })?.status;
+        setError(status === 404
+          ? 'That resume no longer exists — upload a PDF instead.'
+          : getApiErrorMessage(err));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [existingResumeId]);
+
+  const clearExisting = () => {
+    setExisting(null);
+    setError('');
+    navigate('/app/ats', { replace: true });
+  };
 
   const handleFile = (next: File | null) => {
     if (next && next.size > 5 * 1024 * 1024) {
@@ -129,22 +161,31 @@ export default function AtsPage() {
     }
     setError('');
     setFile(next);
+    // a freshly chosen file replaces the stored-resume flow
+    if (next) setExisting(null);
   };
 
   const analyze = async () => {
-    if (!file) return setError('Choose a PDF resume first.');
+    if (!existing && !file) return setError('Choose a PDF resume first.');
     if (mode === 'match' && jobDescription.trim().length < 20) return setError('Paste the job description you want to match against.');
 
     setLoading(true);
     setError('');
     try {
-      const form = new FormData();
-      form.append('resume', file);
-      form.append('targetLevel', targetLevel);
-
-      const upload = await api.post('/resumes', form, { headers: { 'Content-Type': 'multipart/form-data' } });
-      const resumeId = (upload.data as any)?.resume?.id ?? (upload.data as any)?.id;
-      if (!resumeId) throw new Error('Upload succeeded but no resume id was returned.');
+      let resumeId: string;
+      let fileName: string;
+      if (existing) {
+        resumeId = existing.id;
+        fileName = existing.fileName || 'resume.pdf';
+      } else {
+        const form = new FormData();
+        form.append('resume', file!);
+        form.append('targetLevel', targetLevel);
+        const upload = await api.post('/resumes', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+        resumeId = (upload.data as any)?.resume?.id ?? (upload.data as any)?.id;
+        if (!resumeId) throw new Error('Upload succeeded but no resume id was returned.');
+        fileName = file!.name;
+      }
 
       // Cold local model load (venv SentenceTransformer) can take 60-120s on first
       // request; SageMaker cold starts can also exceed the 60s default. Give these
@@ -159,7 +200,7 @@ export default function AtsPage() {
       navigate(`/app/analysis/${data.analysisId}`, {
         state: {
           initialAnalysis: data,
-          fileName: file.name,
+          fileName,
           mode,
           createdAt: new Date().toISOString(),
         },
@@ -229,7 +270,28 @@ export default function AtsPage() {
             <span className="hidden rounded-full border border-stone-800 bg-stone-950 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-stone-600 sm:inline-flex">Step 1 of 1</span>
           </div>
 
-          <FileDropzone file={file} loading={loading} onFile={handleFile} />
+          {existing ? (
+            <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/[0.035] p-5 md:p-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300"><CheckCircle size={20} /></span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-stone-100 truncate">{existing.fileName || 'Saved resume'}</p>
+                    <p className="mt-0.5 text-xs text-stone-500">Using your stored PDF — no re-upload needed.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearExisting}
+                  className="rounded-xl border border-stone-700 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-300 transition hover:bg-stone-700 hover:text-stone-100"
+                >
+                  Upload a different file
+                </button>
+              </div>
+            </div>
+          ) : (
+            <FileDropzone file={file} loading={loading} onFile={handleFile} />
+          )}
 
           <div className="mt-5 grid gap-4 md:grid-cols-[.65fr_1.35fr]">
             <div>
@@ -273,7 +335,7 @@ export default function AtsPage() {
 
           <div className="mt-5 flex flex-col-reverse gap-3 border-t border-stone-800 pt-5 sm:flex-row sm:items-center sm:justify-between">
             <span className="flex items-center gap-2 text-[11px] text-stone-500"><Lock size={13} /> Private resume storage through your existing Supabase setup</span>
-            <button onClick={analyze} disabled={loading || !file} className="jh-button-primary min-w-[170px]">
+            <button onClick={analyze} disabled={loading || (!file && !existing)} className="jh-button-primary min-w-[170px]">
               {loading ? <><Loader2 size={16} className="animate-spin" /> Analyzing…</> : <>{mode === 'match' ? 'Analyze + match' : 'Build my report'} <ArrowRight size={15} /></>}
             </button>
           </div>

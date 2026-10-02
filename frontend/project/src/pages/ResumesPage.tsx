@@ -5,7 +5,7 @@ import api, { getApiErrorMessage } from '../lib/api';
 import { Loader2, FileText, Trash2 } from 'lucide-react';
 
 interface Resume {
-  id: number;
+  id: string;
   fileName?: string;
   file_name?: string;
   uploadDate?: string;
@@ -18,7 +18,7 @@ export default function ResumesPage() {
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [deleting, setDeleting] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -43,7 +43,7 @@ export default function ResumesPage() {
     load();
   }, []);
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (!confirm('Delete this resume?')) return;
     setDeleting(id);
     try {
@@ -57,9 +57,30 @@ export default function ResumesPage() {
   };
 
   if (loading) {
+    // §0 rule 7: structural skeleton, never a bare spinner/blank screen
     return (
-      <div className="flex items-center justify-center py-12 gap-2 text-sm text-stone-500">
-        <Loader2 className="animate-spin" size={18} /> Loading resumes…
+      <div className="space-y-6" aria-busy="true" aria-label="Loading resumes">
+        <div className="flex items-center justify-between gap-4 animate-pulse">
+          <div>
+            <div className="h-7 w-32 rounded-lg bg-stone-800/70" />
+            <div className="mt-2 h-3.5 w-56 rounded bg-stone-800/50" />
+          </div>
+          <div className="h-9 w-28 rounded-lg bg-stone-800/70" />
+        </div>
+        <div className="grid gap-3">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center justify-between gap-4 rounded-xl border border-stone-800 bg-stone-900/60 p-4 animate-pulse">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-lg bg-stone-800/70 shrink-0" />
+                <div className="min-w-0">
+                  <div className="h-3.5 w-44 max-w-[50vw] rounded bg-stone-800/70" />
+                  <div className="mt-2 h-3 w-28 rounded bg-stone-800/50" />
+                </div>
+              </div>
+              <div className="h-7 w-28 rounded-lg bg-stone-800/60 shrink-0" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -69,7 +90,7 @@ export default function ResumesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-[-0.02em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>Resumes</h1>
-          <p className="text-sm text-stone-500">Your uploaded PDFs. Select one to re-analyze.</p>
+          <p className="text-sm text-stone-500">Your uploaded PDFs. Open one to view its report or re-run an analysis.</p>
         </div>
         <Link to="/app/ats" className="text-sm bg-amber-400 hover:bg-amber-300 text-stone-900 font-semibold px-4 py-1.5 rounded-lg transition">
           Upload new
@@ -99,7 +120,7 @@ export default function ResumesPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Link to={`/app/analysis/${r.id}`} className="text-xs border border-stone-800 bg-stone-900 rounded-lg px-3 py-1.5 text-stone-300 hover:bg-stone-800 hover:text-stone-100 transition">
+                  <Link to={`/app/resumes/${r.id}`} className="text-xs border border-stone-800 bg-stone-900 rounded-lg px-3 py-1.5 text-stone-300 hover:bg-stone-800 hover:text-stone-100 transition">
                     View
                   </Link>
                   <button

@@ -156,6 +156,45 @@ function actionsFromRules(rules: Rule[]): Action[] {
     .slice(0, 8);
 }
 
+// Maps a raw `analyses` table row (SELECT * from GET /analyses[/:id]) into the
+// report ViewModel. Shared by AnalysisPage's own fetch and ResumeViewPage.
+export function viewModelFromAnalysisRow(row: any, fileName?: string): ViewModel {
+  const breakdownRaw = parseJson<any>(row.score_breakdown_json);
+  const evidence = parseJson<any>(row.evidence_json) ?? {};
+  const readinessBreakdown: Category[] = Array.isArray(breakdownRaw) ? breakdownRaw : (breakdownRaw?.readiness ?? []);
+  const rules: Rule[] = evidence.rules ?? readinessBreakdown.flatMap((category: Category) => category.rules ?? []);
+  const readiness: Readiness = {
+    score: row.readiness_score ?? row.score,
+    breakdown: readinessBreakdown,
+    rules,
+    strengths: evidence.strengths ?? [],
+    warnings: evidence.warnings ?? [],
+    priorityActions: evidence.priorityActions ?? actionsFromRules(rules),
+    metrics: evidence.metrics,
+    scoreLabel: evidence.scoreLabel,
+    scoreMessage: evidence.scoreMessage,
+    methodology: evidence.methodology,
+    issueCount: evidence.issueCount ?? rules.filter((rule) => rule.status !== 'pass').length,
+    highPriorityIssueCount: evidence.highPriorityIssueCount,
+    version: row.scorer_version,
+  };
+  const jdMatch = row.jd_match_score !== null && row.jd_match_score !== undefined ? {
+    score: row.jd_match_score,
+    breakdown: breakdownRaw?.jdMatch,
+    responsibilityCoverage: evidence.responsibilityCoverage,
+    deterministic: evidence.deterministic ?? breakdownRaw?.deterministic,
+  } as JdMatch : undefined;
+  const versions: Versions = {
+    scorerVersion: row.scorer_version,
+    parserVersion: row.parser_version,
+    matcherVersion: row.matching_version,
+    embeddingModelId: row.embedding_model_id,
+    dimension: undefined,
+    usedMock: typeof row.embedding_model_id === 'string' ? row.embedding_model_id.includes('mock') : undefined,
+  };
+  return { readiness, jdMatch, fileName, createdAt: row.created_at, resumeId: row.resume_id, versions };
+}
+
 function scoreMeta(score = 0) {
   if (score >= 90) return { label: 'Excellent', text: 'Your resume is structurally strong and evidence-rich.', accent: '#34d399' };
   if (score >= 80) return { label: 'Strong', text: 'You are close. Fix the highest-impact issues before applying.', accent: '#22d3ee' };
@@ -309,12 +348,14 @@ function CategoryPanel({ category }: { category: Category }) {
   );
 }
 
-export default function AnalysisPage() {
+// `initialView` lets a parent (ResumeViewPage) hand over a fully-formed report so
+// the report renders under the resume's own URL instead of an analysis URL.
+export default function AnalysisPage({ initialView }: { initialView?: ViewModel } = {}) {
   const { id } = useParams();
   const location = useLocation();
-  const initial = (location.state as any)?.initialAnalysis as any | undefined;
-  const initialName = (location.state as any)?.fileName as string | undefined;
-  const initialCreatedAt = (location.state as any)?.createdAt as string | undefined;
+  const initial = initialView ?? (location.state as any)?.initialAnalysis;
+  const initialName = initialView?.fileName ?? (location.state as any)?.fileName;
+  const initialCreatedAt = initialView?.createdAt ?? (location.state as any)?.createdAt;
   const [loading, setLoading] = useState(!initial);
   const [error, setError] = useState('');
   const [view, setView] = useState<ViewModel | null>(() => {
@@ -338,34 +379,6 @@ export default function AnalysisPage() {
       try {
         const response = await api.get(`/analyses/${id}`);
         const row = (response.data as any)?.analysis ?? response.data;
-        const breakdownRaw = parseJson<any>(row.score_breakdown_json);
-        const evidence = parseJson<any>(row.evidence_json) ?? {};
-        const readinessBreakdown: Category[] = Array.isArray(breakdownRaw) ? breakdownRaw : (breakdownRaw?.readiness ?? []);
-        const rules: Rule[] = evidence.rules ?? readinessBreakdown.flatMap((category: Category) => category.rules ?? []);
-        const readiness: Readiness = {
-          score: row.readiness_score ?? row.score,
-          breakdown: readinessBreakdown,
-          rules,
-          strengths: evidence.strengths ?? [],
-          warnings: evidence.warnings ?? [],
-          priorityActions: evidence.priorityActions ?? actionsFromRules(rules),
-          metrics: evidence.metrics,
-          scoreLabel: evidence.scoreLabel,
-          scoreMessage: evidence.scoreMessage,
-          methodology: evidence.methodology,
-          issueCount: evidence.issueCount ?? rules.filter((rule) => rule.status !== 'pass').length,
-          highPriorityIssueCount: evidence.highPriorityIssueCount,
-          version: row.scorer_version,
-        };
-
-        const jdEvidence = parseJson<any>(row.evidence_json) ?? {};
-        const jdMatch = row.jd_match_score !== null && row.jd_match_score !== undefined ? {
-          score: row.jd_match_score,
-          breakdown: breakdownRaw?.jdMatch,
-          responsibilityCoverage: jdEvidence.responsibilityCoverage,
-          deterministic: jdEvidence.deterministic ?? breakdownRaw?.deterministic,
-        } as JdMatch : undefined;
-
         let fileName: string | undefined;
         if (row.resume_id) {
           try {
@@ -373,18 +386,16 @@ export default function AnalysisPage() {
             fileName = (resumeResponse.data as any)?.resume?.fileName ?? (resumeResponse.data as any)?.resume?.file_name;
           } catch { /* report is still usable without the filename */ }
         }
-
-        const versions: Versions = {
-          scorerVersion: row.scorer_version,
-          parserVersion: row.parser_version,
-          matcherVersion: row.matching_version,
-          embeddingModelId: row.embedding_model_id,
-          dimension: undefined,
-          usedMock: typeof row.embedding_model_id === 'string' ? row.embedding_model_id.includes('mock') : undefined,
-        };
-        if (!cancelled) setView({ readiness, jdMatch, fileName, createdAt: row.created_at, resumeId: row.resume_id, versions });
+        if (!cancelled) setView(viewModelFromAnalysisRow(row, fileName));
       } catch (err) {
-        if (!cancelled) setError(getApiErrorMessage(err));
+        if (!cancelled) {
+          const status = (err as { status?: number })?.status;
+          // A missing row and a failing query are different problems — 404 gets
+          // actionable copy, everything else shows the API's message.
+          setError(status === 404
+            ? 'This report could not be found — it may have been deleted. Run the analysis again to create a fresh one.'
+            : getApiErrorMessage(err));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -406,7 +417,10 @@ export default function AnalysisPage() {
   if (error || !view || !readiness) {
     return (
       <div className="mx-auto max-w-2xl py-12">
-        <Link to="/app/ats" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white"><ArrowLeft size={15} /> Resume Health</Link>
+        <div className="flex flex-wrap items-center gap-4">
+          <Link to="/app/ats" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white"><ArrowLeft size={15} /> Resume Health</Link>
+          <Link to="/app/resumes" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white">Back to resumes</Link>
+        </div>
         <div className="mt-5 rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] p-4 text-sm text-rose-200">{error || 'This analysis could not be loaded.'}</div>
       </div>
     );

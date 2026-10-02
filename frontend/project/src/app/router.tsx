@@ -10,6 +10,7 @@ import AtsPage from '../pages/AtsPage';
 import AnalysisPage from '../pages/AnalysisPage';
 import JobsPage from '../pages/JobsPage';
 import ResumesPage from '../pages/ResumesPage';
+import ResumeViewPage from '../pages/ResumeViewPage';
 import ProfilePage from '../pages/ProfilePage';
 
 function PrivacyPage() {
@@ -124,6 +125,7 @@ export const router = createBrowserRouter([
       { path: 'analysis/:id', element: <AnalysisPage /> },
       { path: 'jobs', element: <JobsPage /> },
       { path: 'resumes', element: <ResumesPage /> },
+      { path: 'resumes/:id', element: <ResumeViewPage /> },
       { path: 'profile', element: <ProfilePage /> },
     ],
   },
