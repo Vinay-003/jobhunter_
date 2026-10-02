@@ -6,28 +6,40 @@ Portfolio app: upload a PDF resume, get a **deterministic ATS readiness score**,
 
 **Desired local shape:** embeddings model on this machine (`EMBEDDING_PROVIDER=local`), Postgres + private file storage on **Supabase**. Render is an optional hosted frontend + API pointing at the **same** Supabase project.
 
-System design, data flows, and scoring contracts live in [ARCHITECTURE.md](./ARCHITECTURE.md).
+Deeper architecture lives in [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md) (verified against code 2026-10-02).
 Local setup + Render usage + health checklist: [LOCAL_SETUP.md](./LOCAL_SETUP.md).
-Older notes: [DEPLOYMENT.md](./DEPLOYMENT.md), [SECURITY.md](./SECURITY.md), [KEEPALIVE.md](./KEEPALIVE.md).
+Older notes: [ARCHITECTURE.md](./ARCHITECTURE.md) (pointer only), [DEPLOYMENT.md](./DEPLOYMENT.md), [SECURITY.md](./SECURITY.md), [KEEPALIVE.md](./KEEPALIVE.md).
 
 ---
 
-## Verified status (2026-10-01)
+## Verified status (2026-10-02 — supersedes the 2026-10-01 outage notes below)
 
-This was checked against **running processes, DNS, HTTP, and source** in this repo — not only previous docs.
+Full sweep today: local backend + Render backend, same Supabase, same resume+JD.
+Test users/rows were created and **deleted afterwards** (0 orphans).
 
 | Piece | Status | Evidence |
 |---|---|---|
-| Frontend local (`http://127.0.0.1:5173`) | **Up** | Vite `200` on `/`, `/login`, `/signup`, `/app/ats`. `.env` points at `http://localhost:3001/api/v1`. |
-| Backend local (`http://127.0.0.1:3001`) | **Down** | Process listens, then **exits** on boot: `tenant/user postgres.vaflmkhzyvqmglstmadg not found`. Cause: `backend/src/config/database.ts` calls `process.exit(1)` if `pg` connect fails. |
-| Supabase API host `vaflmkhzyvqmglstmadg.supabase.co` | **Unreachable** | DNS lookup empty (including `@8.8.8.8`). Typical of a **paused, deleted, or renamed** project. |
-| Supabase pooler `aws-0-ap-southeast-1.pooler.supabase.com:6543` | Host resolves; **tenant rejected** | Same `ENOTFOUND tenant/user … not found`. Local `.env` has `PG_DATABASE_STRING` **without** `?pgbouncer=true`. |
-| Local embeddings | **Configured, not exercised** | `EMBEDDING_PROVIDER=local`, venv at `backend/python/venv` with `sentence-transformers` + `torch`. Server never stays up long enough to finish warmup. Flask `backend/python/app.py` is **legacy** — V2 does **not** need `:5000`. |
-| Supabase Storage from Node | **Was broken, package added** | Code imports `@supabase/supabase-js`, but it was **not** in `backend/package.json`. Installed `^2.117.2` this session. Uploads still fall back to `backend/uploads/` if the client is missing or Storage errors. |
-| Render frontend `https://jobhunter-r773.onrender.com` | **Up** | HTTP `200`, SPA rewrite for `/app/ats` works. Built JS uses `https://jobhunter-backend-lkkf.onrender.com/api/v1`. |
-| Render backend `https://jobhunter-backend-lkkf.onrender.com` | **Not waking** | `503`, header `x-render-routing: hibernate-wake-error`. Fast fail (~0.4s), not a slow cold start. Burst curls then hit Cloudflare `429` “Just a moment…”. Same DB boot crash would prevent wake. |
+| Supabase Postgres + Storage (`vaflmkhzyvqmglstmadg`) | **Up** | pooler connects; `resumes` bucket lists objects; the 10-01 outage (paused project) is over |
+| Backend local (`:3001`, `EMBEDDING_PROVIDER=local`) | **Up** | `/health` ok; warmup `local warmup done … dim=384`; **zero AWS calls** |
+| Local model (venv `anass1209`, `~/.cache/huggingface`, 88 MB) | **Real, not mock** | same-text cosine 1.0; `usedMock: false` on every call |
+| Supabase Storage via local backend | **Up** | upload → bucket object exists → download byte-identical (`cmp`) |
+| Frontend local (`:5173`) | **Up** (unchanged) | Vite `200`; `.env` → `http://localhost:3001/api/v1` |
+| Render frontend | **Up** | HTTP `200` |
+| Render backend (+ SageMaker) | **Up** | `/health` ok; readiness **58** = local **58**; jd-match **60**/Medium, real embeddings; 5-provider run, top = intern/entry roles |
+| `@supabase/supabase-js` packaging | **Fixed, pending deploy** | committed to `package.json`+lock; until Render redeploys, Render uploads land on ephemeral disk (bucket listing proved it) — re-verify post-deploy |
 
-**Bottom line: the repo is wired for “local model + Supabase storage”, but it is not fully set up until the Supabase project is live again (or replaced) and the Render service can boot against that DB.**
+<details>
+<summary>2026-10-01 outage notes (historical — Supabase project was paused)</summary>
+
+Backend exited on boot (`tenant/user … not found`, `database.ts` calls
+`process.exit(1)`); Supabase host did not resolve; Render backend 503
+`hibernate-wake-error`. All resolved when the project unpaused. Lesson kept
+in §6 footguns.
+</details>
+
+**Bottom line: the project IS set up — local model + shared Supabase + both
+deployments green. One deploy left: Render backend must redeploy to pick up
+`@supabase/supabase-js`, after which Render uploads reach Supabase too.**
 
 ---
 
@@ -57,9 +69,10 @@ You cannot point the Render frontend at your laptop API from a normal browser (m
 - Python **3.12** + venv (local SentenceTransformer).
 - A **live** Supabase project: Postgres pooler URI **and** Storage.
 
-### 2.1 Restore or create Supabase (required)
+### 2.1 Supabase (already live — verify, don't recreate)
 
-The checked-in docs assume project ref `vaflmkhzyvqmglstmadg`. That host **does not resolve** as of 2026-10-01. Create a new project or unpause the old one, then:
+Project ref `vaflmkhzyvqmglstmadg` is up (pooler `:6543`, private bucket
+`resumes`). If it ever goes dark again (pause/delete), create or unpause it, then:
 
 1. **Settings → Database → Connection string → URI (pooler, port 6543).**  
    User should look like `postgres.<project-ref>`. Append `?pgbouncer=true` (and `sslmode=require` if not already implied):
@@ -196,13 +209,16 @@ Mounted in `backend/src/routes/v1/index.ts`:
 
 `POST /api/upload-resume`, `GET /api/latest-resume`, `GET /api/resume/:id`, `GET /api/latest-resume-content`, `POST /api/analyze`, `POST /api/analyze/:id`, `POST /api/jobs/search`, `GET /api/jobs`, `POST /api/jobs/refresh`, `GET /api/jobs/recommendations`, `GET /api/jobs/recommendations/stored`.
 
-### 3.5 Results from this session
+### 3.5 Results (2026-10-02 sweep — full authed flow, both deployments)
 
-**Local API:** every path above **failed to connect** (`:3001` not listening after DB fatal).
-
-**Render API:** `/` and `/health` → **503** `hibernate-wake-error`. Follow-up paths → **429** Cloudflare challenge HTML (not application JSON). Do not treat 429 HTML as “endpoint missing”.
-
-**Frontends:** local Vite **200**; Render static **200**.
+Same resume + JD on both. Local: signup → upload → readiness **58** →
+jd-match **60**/Medium (`usedMock: false`, venv model) → 5-provider run
+(`jooble 108 + jobspipe 5 + adzuna 15 + remotive 17 + arbeitnow 15 = 170
+fetched, 105 deduped`, top = intern/entry roles) → download byte-identical.
+Render: identical flow, readiness **58**, jd-match **60** (SageMaker, real
+embeddings), run top = intern/entry roles. All temp rows deleted (0 orphans).
+Only gap found: Render uploads miss Supabase until the redeploy carrying
+`@supabase/supabase-js` lands (see table above).
 
 ---
 
