@@ -13,7 +13,7 @@ import keepaliveRoutes from './routes/keepalive.js';
 import v1Router from './routes/v1/index.js';
 import fs from 'fs';
 import path from 'path';
-import './config/env.js';
+import { getDatabaseUrl } from './config/env.js';
 
 dotenv.config();
 
@@ -111,7 +111,19 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('='.repeat(50));
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`💾 Database: ${process.env.DATABASE_URL ? 'Connected' : 'Not configured'}`);
+  // S8: banner used to check only DATABASE_URL while the app connects via
+  // getDatabaseUrl() (PG_DATABASE_STRING first) — it printed "Not configured"
+  // right above "Successfully connected". Print the source name, never the DSN.
+  let dbStatus = 'Not configured';
+  try {
+    if (getDatabaseUrl()) {
+      const src = process.env.PG_DATABASE_STRING ? 'PG_DATABASE_STRING'
+        : process.env.DATABASE_URL ? 'DATABASE_URL'
+        : process.env.SUPABASE_DB_URL ? 'SUPABASE_DB_URL' : 'env';
+      dbStatus = `configured via ${src}`;
+    }
+  } catch { /* leave Not configured */ }
+  console.log(`💾 Database: ${dbStatus}`);
   console.log(`🧠 Embedding provider: ${process.env.EMBEDDING_PROVIDER || 'auto'} (model=${process.env.LOCAL_EMBEDDING_MODEL || process.env.EMBEDDING_MODEL_ID || 'anass1209/resume-job-matcher-all-MiniLM-L6-v2'})`);
   if (process.env.AWS_SAGEMAKER_ENDPOINT_NAME) console.log(`☁️  SageMaker endpoint: ${process.env.AWS_SAGEMAKER_ENDPOINT_NAME} (${process.env.AWS_REGION})`);
   else console.log('☁️  SageMaker: not configured — no AWS calls will be made');
