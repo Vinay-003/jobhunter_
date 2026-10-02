@@ -1,165 +1,214 @@
-# Architecture — JobHunter V2
+# JobHunter — System Architecture & Data Flow
 
-## 1. Overview
+Branch: `dev` · Last verified: 2026-10-02 (code-read + live local/Render sweep).
+Companion docs: `README.md` (reference), `LOCAL_SETUP.md` (run it),
+`SECURITY.md`, `DEPLOYMENT.md`, `KEEPALIVE.md`.
 
-JobHunter V2 is a resume-driven job recommendation platform. A user uploads a PDF resume → backend extracts text, builds a normalized skill/role profile, stores the file in Supabase Storage, embeds the profile (AWS SageMaker serverless or local fallback), queries Jooble for candidate jobs, ranks/sorts with deterministic scoring, and returns ATS-style analysis plus ranked recommendations. Frontend is a Vite + React SPA served as a static site; backend is an Express + TypeScript API with Postgres (Supabase) persistence.
+> One-line model: **deterministic document scoring + strict skill matching run
+> free on Render; the single ML primitive (`texts[] → vectors[]`) runs on
+> SageMaker Serverless in prod and a local venv on dev machines; jobs come
+> from 5 external APIs, get cached/deduped in Postgres, and are re-ranked by
+> the same rubric + embeddings.**
 
-**Stack:** React 18 + Vite 5 + Tailwind, Express 4 + TypeScript 5, `pg` + Supabase Postgres, Supabase Storage, AWS SageMaker Serverless (embeddings), Jooble API, JWT + httpOnly session cookie, `zod` validation, `helmet`/`cors`/`express-rate-limit`.
+---
 
-## 2. System Components
-
-| Component | Path | Responsibility |
-|---|---|---|
-| Frontend SPA | `frontend/project` | Auth, resume upload, ATS dashboard, job browsing, preferences |
-| API server | `backend/src/server.ts` | Express app, middleware chain, route mounting, health checks |
-| Config & env | `backend/src/config/env.ts` | Zod-validated env, `getDatabaseUrl()`, `getCorsOrigins()` |
-| DB pool | `backend/src/config/database.ts` | `pg.Pool` with Supabase SSL |
-| Routes — legacy | `backend/src/routes/{auth,upload,analysis,jobs}.ts` | Backward-compat `/api/*` |
-| Routes — V1 | `backend/src/routes/v1/*` | Spec-compliant `/api/v1/*`: `auth`, `resumes`, `analyses`, `profile`, `recommendations` |
-| Middleware | `backend/src/middleware/{auth,csrf,validate}.ts` | JWT auth, CSRF double-submit + Origin check, Zod body validation |
-| Modules — auth | `backend/src/modules/auth/session.ts` | Session create/verify/revoke, token_hash, expiry |
-| Modules — parsing | `backend/src/modules/parsing/{pdfParser,resumeProfile,skillNormalizer}.ts` | PDF → text → normalized profile |
-| Modules — storage | `backend/src/modules/storage/supabaseStorage.ts` | `uploadFile`/`downloadFile`/`deleteFile` (Supabase private bucket or local fallback) |
-| Modules — JD | `backend/src/modules/jd/{jdParser,matcher}.ts` | JD parse + keyword/semantic matcher |
-| Modules — jobs | `backend/src/modules/jobs/{queryPlanner,ranking}.ts` | Query planning + deterministic ranking |
-| Modules — ATS | `backend/src/modules/ats/readinessScorer.ts` | ATS readiness score |
-| Providers — jobs | `backend/src/providers/jobs/{JobProvider,JoobleProvider}.ts` | `JobProvider` interface + Jooble (+ DB fallback + `storeToDb`) |
-| Providers — embeddings | `backend/src/providers/embeddings/*` | `EmbeddingProvider` interface; `AwsSageMakerEmbeddingProvider` (with `MockEmbeddingProvider` fallback), `MockEmbeddingProvider` |
-| Services | `backend/src/services/{analysisService,jobRecommendationService,joobleService}.ts` | Orchestration (analysis pipeline, recommendation run persistence) |
-| Migrations | `backend/migrations/*.sql` | `001_initial_v2`, `002_add_fts`, `003_storage_metadata` (idempotent) |
-| Python shim | `backend/python/*` | Local `pdf_text_extract.py` / `resume_analyzer_ml.py` shim when SageMaker not configured |
-
-## 3. High-Level Diagram
+## 1. System context
 
 ```mermaid
 flowchart TB
-  U[User Browser] --> FE[Vite React SPA<br/>frontend/project]
-  FE -->|HTTPS + JWT/Cookie + CSRF header| API[Express API<br/>backend/src/server.ts]
-  API --> MW[Middleware<br/>helmet / cors / rateLimit / csrf / validate / auth]
-  MW --> R[Routers<br/>/api/* legacy + /api/v1/*]
-  R --> SVC[Services<br/>analysisService / jobRecommendationService]
-  SVC --> MOD[Modules<br/>parsing / storage / ats / jd / jobs]
-  MOD --> PROV[Providers<br/>JoobleProvider / EmbeddingProvider]
-  PROV --> EXT1[(Jooble API)]
-  PROV --> EXT2[(SageMaker Serverless<br/>InvokeEndpoint)]
-  SVC --> DB[(Supabase Postgres<br/>pg Pool)]
-  MOD --> STO[(Supabase Storage<br/>bucket=resumes<br/>or local uploads/ fallback)]
-  DB -.-> FTS[(GIN search_vector<br/>002_add_fts.sql)]
+  subgraph Browser
+    U[User]
+  end
+  subgraph Render["Render — branch dev"]
+    FE["Frontend SPA — jobhunter (static)\nReact 18 + Vite 5 + TS\nNo secrets. Only VITE_API_BASE_URL."]
+    API["Backend API — jobhunter-backend (Node)\nExpress 4 + TS, :10000\nAll secrets. All orchestration."]
+  end
+  subgraph Supabase["Supabase vaflmkhzyvqmglstmadg (shared)"]
+    DB[("Postgres (pooler :6543)\nusers · sessions · resumes ·\nresume_profiles · analyses · jobs ·\njob_search_cache · recommendation_runs ·\nrecommendations · external_api_usage ·\nkeepalive_pings + FTS GIN index")]
+    STO[("Storage — private bucket resumes\nresumes/<userId>/<resumeId>/<file>\nservice_role key, server-side only")]
+  end
+  subgraph ML["Embeddings (one interface, 3 backends)"]
+    SM[("AWS SageMaker Serverless\nanass1209/resume-job-matcher-all-MiniLM-L6-v2\n384-dim, InvokeEndpoint, prod only")]
+    LV[("Local venv\nsame model via sentence-transformers\ntorch CPU, dev machines only")]
+    MK[("Mock (deterministic hash vectors)\ntests/CI + every fallback path")]
+  end
+  subgraph Jobs["External job APIs (untrusted upstream)"]
+    J1[(Jooble — key, ~500/day)]
+    J2[(Adzuna — app_id+key, trial)]
+    J3[(JobsPipe — key, 1 credit/job)]
+    J4[(Remotive — public, ~4/day ToS)]
+    J5[(Arbeitnow — public dump)]
+  end
+  subgraph CF["Cloudflare"]
+    KW["Keepalive Worker — cron 12h\nPOST /api/keepalive"]
+  end
+
+  U -->|"HTTPS, session cookie/Bearer + CSRF"| FE
+  FE -->|"HTTPS + credentials:include"| API
+  API -->|"pg.Pool SSL, parameterized, owner-scoped"| DB
+  API -->|"upload/download/delete"| STO
+  API -->|"embed batch ≤32, 5k chars/text, 260s"| SM
+  API -.->|"EMBEDDING_PROVIDER=local"| LV
+  API -.->|"no creds / error / tests"| MK
+  API -->|"1 call/query (Jooble)\n1 call/run (others)"| J1
+  API --> J2 & J3 & J4 & J5
+  KW -->|"public INSERT keepalive_pings"| API
 ```
 
-## 4. Request Lifecycle
+**Trust boundaries.** The browser never touches Supabase, AWS, or job APIs —
+every external call is server-side so secrets stay secret. Supabase is the
+system of record (relational data + private PDFs). SageMaker is a pure
+function with no storage. Job APIs are untrusted input: normalized, cached,
+deduped, re-ranked before display. PII (email/phone/PDF bytes) never leaves
+for AWS — only redacted professional chunks (skills line, title/description
+slices).
 
-```mermaid
-sequenceDiagram
-  participant FE as SPA
-  participant API as Express
-  participant Auth as auth/session middleware
-  participant Val as validate (zod)
-  participant Svc as Service
-  participant DB as Postgres
-  participant Prov as Provider
+---
 
-  FE->>API: POST /api/v1/resumes (multipart, JWT, X-CSRF-Token)
-  API->>Auth: authenticateToken / session check
-  Auth->>DB: verify token_hash / expiry
-  API->>Val: zod schema check
-  Val-->>API: ok
-  API->>Svc: handle upload
-  Svc->>Prov: storage.uploadFile (Supabase or local)
-  Svc->>DB: INSERT resumes (storage_bucket/path, sha256, status)
-  Svc-->>FE: 201 { resumeId, status: pending }
-```
+## 2. Component map (exact paths)
 
-## 5. Data Flows
+| Layer | Path | Responsibility |
+|---|---|---|
+| Entrypoint | `backend/src/server.ts` | helmet/cors/cookies/rate-limits, mounts `/keepalive`, `/api/*` legacy, `/api/v1/*`, `/health` |
+| Env | `backend/src/config/env.ts` | zod validation (fails closed in prod), `getDatabaseUrl()`, `getCorsOrigins()` |
+| DB pool | `backend/src/config/database.ts` | `pg.Pool`, Supabase SSL |
+| V1 routes | `backend/src/routes/v1/{auth,resumes,analyses,profile,recommendations,index}.ts` | Live `/api/v1/*` API |
+| Legacy routes | `backend/src/routes/{auth,upload,analysis,jobs}.ts` | Deprecated `/api/*` compat |
+| Keepalive | `backend/src/routes/keepalive.ts` | Public ping endpoints, `keepalive_pings` insert + prune |
+| Middleware | `backend/src/middleware/{auth,csrf,validate}.ts` | Opaque-session-first auth (+JWT fallback), Origin + double-submit CSRF, zod validation |
+| Auth | `backend/src/modules/auth/session.ts` | Sessions: `token_hash = sha256(token)`, 7-day TTL, `revoked_at` |
+| Parsing | `backend/src/modules/parsing/{pdfParser,resumeProfile,skillNormalizer}.ts` | PDF → text → profile; `CANONICAL_SKILL_ALIASES` is the single skill vocabulary shared by resume, JD, and ranking |
+| Storage | `backend/src/modules/storage/supabaseStorage.ts` | Private-bucket upload/download/delete; local `uploads/` fallback in dev only |
+| ATS | `backend/src/modules/ats/readinessScorer.ts` (v3.0.0) | 100-pt deterministic rubric, zero network |
+| JD | `backend/src/modules/jd/{jdParser,matcher}.ts` | JD structure + strict set-equality skill match (`Java != JavaScript`) + display-only family hints |
+| Jobs | `backend/src/modules/jobs/{queryPlanner,ranking}.ts` | 3–4 focused queries; `rankJobsBatch` (v2.0.0) |
+| Job providers | `backend/src/providers/jobs/{JobProvider,Jooble,Adzuna,JobsPipe,Remotive,Arbeitnow,jobStore,providerBudgets}.ts` | One interface, 5 sources, shared upsert, quota guards |
+| Embedding providers | `backend/src/providers/embeddings/{EmbeddingProvider,AwsSageMaker,Local,Mock}.ts` | One interface; truthful `modelId` (`mock-*` on fallback) so logs/DB never lie |
+| Migrations | `backend/migrations/001–005.sql` | Idempotent schema (`npm run migrate`) |
 
-### 5.1 Resume Upload & Storage
+Gate chain on every state-changing request: **CORS allowlist → helmet → auth
+→ CSRF → rate limit (auth 20/15 min, upload 10/min) → zod → owner check
+(`user_id`, 403 on mismatch)**. Handlers orchestrate; math lives in pure
+modules (unit-testable without DB/network).
 
-1. Client sends `multipart/form-data` with `Authorization: Bearer <JWT>` and (if `SameSite=None`) `X-CSRF-Token` matching `csrf_token` cookie.
-2. `multer` (memory) validates `application/pdf`, size limits.
-3. `supabaseStorage.uploadFile(userId, resumeId, buffer, filename)`:
-   - Computes `sha256`; sanitizes filename; builds `objectPath = userId/resumeId/safeName`.
-   - If `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` present → `@supabase/supabase-js` `storage.from(bucket).upload(path, buffer, {contentType:'application/pdf', upsert:true})`.
-   - On error or missing creds → local fallback `uploads/userId/resumeId/file` (dev only, with warning). Returns `{bucket, path, sha256}`.
-4. DB row `resumes` stores `storage_bucket`, `storage_object_path`, `sha256`, `file_size_bytes`, `page_count`, `parser_version`, `processing_status`, `is_latest`.
-5. Temp files under `uploads/temp/` are ephemeral and not used as primary storage.
+---
 
-### 5.2 PDF Parsing & Profile Extraction
+## 3. Data flows
 
-`pdfParser.ts` → text extraction → `resumeProfile.ts` + `skillNormalizer.ts` produce `resume_profile` (skills, roles, seniority) persisted alongside the resume. Failures set `processing_status='failed'`.
-
-### 5.3 ATS & JD Matching
-
-`readinessScorer.ts` computes ATS score; `jdParser.ts` + `matcher.ts` handle JD input and keyword/semantic overlap. Results stored in `analyses` table.
-
-### 5.4 Job Retrieval & Ranking
-
-```mermaid
-flowchart LR
-  Prefs[user_job_preferences<br/>+ resume_profile] --> QP[queryPlanner<br/>keywords + workMode + location]
-  QP --> JP[JoobleProvider.search]
-  JP -->|Jooble API 200 + normalized| DB2[(jobs upsert<br/>ON CONFLICT source,external_id<br/>content_hash)]
-  JP -->|no key / error / empty| FB[fallbackFromDb<br/>ILIKE fallback]
-  DB2 --> RK[ranking.ts<br/>deterministic score]
-  FB --> RK
-  RK --> Run[recommendation_runs<br/>+ ranked items]
-```
-
-- `JoobleProvider` POSTs to `https://jooble.org/api/<key>` with `{keywords, location, page}`, timeout 10s; `normalize()` maps Jooble shape → `NormalizedJob`; `storeToDb()` upserts with `content_hash`.
-- Budget caps: `JOOBLE_MAX_QUERIES_PER_REFRESH` (default 4), `JOOBLE_CALL_BUDGET` (default 450) enforced in service layer.
-
-### 5.5 Embeddings — ML Invocation
-
-`AwsSageMakerEmbeddingProvider` implements `EmbeddingProvider`:
-
-- `embed({texts, purpose})`: truncates to 5000 chars, batches >32 texts, calls `MockEmbeddingProvider` if `AWS_*` creds absent.
-- With creds: lazy-imports `@aws-sdk/client-sagemaker-runtime`, invokes `InvokeEndpoint` with `EndpointName`, `ContentType: application/json`, `Body: {inputs: texts, purpose}`, 15s timeout; expects `{embeddings|vectors: number[][]}`.
-- Any SDK error / bad shape / timeout → warn + fallback to mock (deterministic hash-based vectors, dim 384). `modelId = EMBEDDING_MODEL_ID`.
-
-Caching: embeddings for resume/job texts may be memoized per analysis run; vector storage is not required for MVP (ranking is keyword-first, embeddings are an augmentation).
-
-## 6. Trust Boundaries
-
-| Boundary | Controls |
-|---|---|
-| Browser ↔ API | CORS allowlist (`CORS_ALLOWED_ORIGINS` / `FRONTEND_URL`), `helmet`, `credentials:true`, `express-rate-limit` on `/api/auth` (20/15m) and uploads (10/min) |
-| Auth | JWT Bearer + `sessions.token_hash`; ownership checks on every resource (IDOR guard) |
-| Upload | `multer` mime/size filter, `sha256`, filename sanitization, Supabase private bucket (service-role only) |
-| External calls | Jooble key server-side only; SageMaker creds server-side only; timeouts + fallbacks |
-| DB | `pg` parameterized queries, RLS-ready schema, SSL required for Supabase |
-
-## 7. Storage Flow (Supabase)
+### 3.1 Upload & store — `POST /api/v1/resumes`
 
 ```
-Client → API (validated) → supabaseStorage.uploadFile() → Supabase Storage (private bucket `resumes`) → DB `resumes.storage_*` ref
-Read:  API (owner check) → supabaseStorage.downloadFile(ref) → Supabase download (Blob → Buffer)
-Delete: API (owner check) → supabaseStorage.deleteFile(ref) → Supabase remove() + DB flag
+Browser --multipart resume.pdf + targetLevel--> multer (memory, PDF-only, 5 MB)
+  --> parsePdfBuffer (%PDF magic, pdfjs positional → pdf-parse → raw fallback,
+      >8 pages guarded, extractionConfidence, SCANNED_PDF 400 on image PDFs)
+  --> supabaseStorage.uploadFile → resumes/<userId>/<resumeId>/<safeName>
+  --> resumes row (bucket, path, sha256, size, pages, parser 3.0.0, is_latest)
+  --> 201 {resumeId}
 ```
 
-Bucket is **private**; no public URLs are issued. Signed URLs, if added later, must be short-lived and owner-checked.
+### 3.2 Readiness (no JD, zero ML) — `POST /api/v1/analyses/readiness`
 
-## 8. Authentication & Session
+```
+profile (resume_profiles, else re-parse) --> scoreReadiness() --> 8 categories = 100
+  20 parseability · 15 completeness · 20 impact/evidence · 15 experience/project ·
+  10 skills clarity · 10 writing · 5 concision · 5 hygiene
+  + strictness (-4 no summary, -5 single job, -10 none, -3 unquantified, cap 75 if thin)
+--> analyses row (type=readiness) --> {score, breakdown, rules, strengths,
+    warnings, priorityActions, metrics}
+```
 
-- `POST /api/v1/auth/signup|login` returns JWT; JWT stored client-side (and/or httpOnly cookie `jobhunter_session`).
-- `sessions` table stores `token_hash` (sha256 of token), `expires_at`, `last_used_at`, `revoked_at`.
-- `authenticateToken` reads `Authorization: Bearer <token>`, verifies with `JWT_SECRET`, attaches `req.user`.
-- Session TTL default 7 days (`SESSION_TTL_DAYS`), configurable.
+### 3.3 JD match (JD + ML) — `POST /api/v1/analyses/jd-match`
 
-## 9. Caching & Versioning
+```
+profile + parseJd(title [Reporting-To ignored], seniority, required/preferred
+  split at preferred-vs-required headings, ≤10 responsibilities [headings and
+  Reporting-To:/Experience:/Location: lines filtered], years, domain)
+  + matchJd (required×70 + preferred×30, family hints display-only)
+  + redacted chunks (resume: skills line + ≤5 exp slices ≤500 chars;
+                     JD: title + ≤10 resps ≤400 chars + ≤10 skills)
+  --> ONE provider.embed({uniqTexts, purpose:'jd'})   <-- the only AWS call
+  --> cosine per responsibility vs BEST resume chunk --> semantic = round(avg×30)
+  --> jdScore = min(100, requiredCoverage×35 + semantic + role 15/5 + domain 5 + edu 10/8/2)
+  --> confidence (High: JD>1000 chars & ≥3 skills; Low: <300; else Medium)
+  --> analyses row (type=jd_match, jd_hash, embedding_model_id)
+```
 
-- No shared cache yet (Redis optional future).
-- Per-provider in-process memo for embeddings within a request.
-- `parser_version` column on `resumes`; `modelId` on embedding responses — both persisted to allow re-computation tracking.
-- `/health` and `/api/v1/health` expose `{status, timestamp, uptime}` / `{success, status, version}`.
+Embed failure never 500s — returns degraded JSON with readiness intact.
 
-## 10. Privacy
+### 3.4 Recommendations (jobs + ML) — `POST /api/v1/recommendation-runs`
 
-- PII limited to `users.email`, `display_name`, resume PDF + extracted profile. No resume content is sent to third parties except Jooble (keywords only, no PII) and SageMaker (embedding inputs — resume/job text slices).
-- `sha256` enables dedup without retaining duplicate bytes.
-- Deletion: `DELETE /api/v1/resumes/:id` removes Storage object + DB row (owner-checked); user deletion cascades via FKs.
+```
+profile + preferences(targetRoles/locations/workModes)
+  --> queryPlanner.plan() → 3–4 queries, never skills.join(' '):
+      role alone · Junior <role> (juniors) · role+toolSkill · Fresher <skill>
+      (academic noise like DSA/DBMS excluded as search terms)
+  --> Jooble: 1 call per query (≤4) ─┐
+  --> JobsPipe/Adzuna/Remotive/Arbeitnow: 1 call each on primary query
+      (JobsPipe adds seniority filter for juniors; Arbeitnow filtered locally) ├─ merge
+  --> job_search_cache (sha256 key, 1 h TTL, 12 h Arbeitnow, shared users)
+  --> jobs upsert ON CONFLICT (source, external_id)
+  --> dedupe: url|source|id, then title|company collapse across providers
+  --> rankJobsBatch: ONE provider instance, ONE embed of all unique texts
+      (ceil(n/32) sequential invokes — the old per-job fan-out throttled the
+      MaxConcurrency=1 endpoint into all-mock)
+  --> per job: skill 30 (≤2 signals → neutral 15) + semantic 25 (best-chunk,
+      to01-stretched cosine) + title 15 + seniority 15 (roman numerals, Sr/Jr,
+      L-bands, N+ years; junior-vs-senior/lead HARD-CAPPED at 65) +
+      domain/edu 10 + location 5 (India-city containment, remote-anywhere)
+  --> sort desc, top 20 --> recommendation_runs + recommendations rows
+  --> {runId, totalFetched, deduped, sources{per-provider counts},
+       recommendations[20 with matchedSkills/missingSkills], versions}
+```
 
-## 11. Versioning & Migrations
+Quota guards (`providerBudgets.ts` over `external_api_usage`): Adzuna
+100/day, Remotive 4/day (their ToS), JobsPipe 1000 credits/month, Jooble
+450/day legacy counter. Exhaustion → silent DB-cache fallback, never an error.
 
-- Migrations are idempotent, versioned SQL under `backend/migrations/` applied via `npm run migrate` (`src/db/migrations/run_migration.ts`).
-- `001_initial_v2` — core tables (`users`, `sessions`, `user_job_preferences`, `resumes`, `jobs`, `analyses`, `recommendation_runs`, etc.) with `pgcrypto` UUIDs.
-- `002_add_fts` — weighted `search_vector` + GIN index + `is_latest` partial unique index.
-- `003_storage_metadata` — Supabase `storage_bucket/path`, `sha256`, `file_size_bytes`, `page_count`, `parser_version` backfills.
+---
+
+## 4. Scoring contracts (exact, code-is-truth)
+
+- **Readiness:** `readinessScorer.ts`, weights sum exactly 100 (constructor
+  throws otherwise); rule status pass ≥85% / warn ≥45%; labels ≥90 Excellent ·
+  ≥80 Strong · ≥70 Competitive · ≥55 Needs work · else High risk.
+- **JD match:** `explicitPts = round(requiredCoverage×35)`; semantic from
+  best-chunk cosine; role 15 if a profile skill appears in the JD title else 5;
+  domain 5 flat; edu 10/8/2.
+- **Ranking:** `30+25+15+15+10+5 = 100`; cosine stretched
+  `to01 = clamp((c−0.35)/0.6)` because raw embedding cosines cluster 0.4–0.8;
+  semantic uses max-over-chunks (a single summary vector ranks noise);
+  `detectJobSeniority` understands II/III/IV, Sr./Jr., L3–L6, `N+ years`,
+  `1+ years`→junior, bare `Associate Engineer`→junior.
+- **Confidence:** recommendation runs High ≥70 / Medium ≥40; frontend shows
+  top-20 with min-fit filter (default 40%).
+
+---
+
+## 5. Deployment topology & failure modes
+
+| Piece | Prod | Local | If it fails |
+|---|---|---|---|
+| SPA | Render static `jobhunter` | `vite dev :5173` | — |
+| API | Render Node `jobhunter-backend` (`NODE_VERSION 20.11.0`, `:10000`, free-tier sleep) | `node dist/server.js :3001` | cold start 30–60 s; health `/health` |
+| DB/Storage | Supabase (shared by both) | same Supabase | keepalive worker pings 12 h; local `uploads/` fallback if no creds |
+| Embeddings | SageMaker Serverless, 260 s timeout | venv, 260 s spawn timeout | truthful `mock-*` fallback + warn log; app never 500s |
+| Jobs | 5 live APIs + cache + budgets | same | DB-cache fallback; empty pool → `Medium/Low` confidence, still renders |
+
+Known limits: Jooble India skews senior (ranker demotes, JobsPipe/Adzuna
+counterweight); thin snippets score neutral by design; title-overlap is weak
+for interns (15 pts mostly dormant); no OCR (scanned PDFs rejected with
+guidance); free tiers sleep/pause (keepalive mitigates Supabase only).
+
+---
+
+## 6. Verification (how this doc was checked)
+
+Every behavioral claim above was verified 2026-10-02 by code-reading
+(`backend/src/**`, `frontend/project/src/**`, migrations, `render.yaml`,
+`ci.yml`) plus a live sweep: Render public endpoints + full authed flow
+(signup → upload → readiness **58** → jd-match **60**/Medium/real embeddings
+→ 5-provider run, top = intern/entry roles) and the identical flow locally
+(readiness **58**, jd-match **60**, `usedMock: false`, byte-identical
+Supabase download). Numbers, timeouts, budgets, and SQL shapes were read from
+source, not memory — re-check them the same way before trusting this file
+after any refactor.
