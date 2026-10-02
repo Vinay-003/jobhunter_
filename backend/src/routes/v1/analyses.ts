@@ -45,15 +45,23 @@ function getEmbeddingProvider(){
 async function loadResumeBuffer(resumeRow:any):Promise<Buffer>{
   const bucket = resumeRow.storage_bucket || 'resumes';
   const path = resumeRow.storage_object_path || resumeRow.file_path;
-  if (!path) throw new Error('Resume storage path missing');
+  if (!path) {
+    const err:any = new Error('This resume has no stored file — re-upload it to run analyses again.');
+    err.code = 'STORED_FILE_MISSING';
+    throw err;
+  }
   try {
     const data = await downloadFile({bucket, path, sha256: ""});
     return Buffer.from(data);
   } catch(e){
-    // fallback local file? try fs if path is local
-    const fs = await import('node:fs');
-    if (fs.existsSync(path)) return fs.readFileSync(path);
-    throw e;
+    // S4: the old fs.existsSync(path) fallback probed the RELATIVE object key
+    // (never matches anything). downloadFile already resolves local paths
+    // against localUploadsDir(), so a throw here means the bytes are gone —
+    // surface an actionable 410 instead of a generic 500 (S1 lost-file UX).
+    console.error(`[analyses] stored file missing bucket=${bucket} path=${path}:`, e);
+    const err:any = new Error('The stored file for this resume is missing — re-upload it to run analyses again.');
+    err.code = 'STORED_FILE_MISSING';
+    throw err;
   }
 }
 
@@ -102,6 +110,9 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
     }
     res.json({ success:true, analysisId, resumeId: row.id, readiness, profile, parserVersion: PARSER_VERSION, scorerVersion: SCORER_VERSION });
   } catch(e:any){
+    if (e?.code === 'STORED_FILE_MISSING') {
+      return res.status(410).json({ success:false, message: e.message });
+    }
     console.error('readiness error', e);
     res.status(500).json({ success:false, message:e.message || 'Failed to analyze'});
   }
@@ -232,6 +243,9 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     console.log(`[jd-match] done analysisId=${analysisId} provider=${providerName} model=${modelId}${usedMock ? ' (mock fallback — NOT real embeddings)' : ' (real embeddings)'} score=${jdMatchScore} explicit=${explicitPts} semantic=${semanticScore} texts=${vectors.length} ms=${Date.now() - embedStart}`);
     res.json({ success:true, analysisId, resumeId: row.id, readiness, jdMatch:{ score: jdMatchScore, breakdown:{ explicitMustHave: explicitPts, responsibilitySemantic: semanticScore, roleAlignment: rolePts, domain: domainPts, education: eduPts, confidence }, responsibilityCoverage, deterministic, jd }, versions:{ scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION, matcherVersion: JD_MATCHER_VERSION, embeddingModelId: modelId, dimension, usedMock }, confidence });
   } catch(e:any){
+    if (e?.code === 'STORED_FILE_MISSING') {
+      return res.status(410).json({ success:false, message: e.message });
+    }
     console.error('jd-match error', e);
     res.status(500).json({ success:false, message:e.message || 'JD match failed'});
   }
