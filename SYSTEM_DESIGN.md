@@ -410,3 +410,33 @@ packaging gap (fixed below). Per-route evidence in `LOCAL_SETUP.md` §6.
 - Local vs Render parity on identical inputs: readiness **58 = 58**, jd-match
   **60 = 60** (Medium, real embeddings both sides), recommendations top =
   intern/entry roles both sides.
+
+## 17. 2026-10-02/03 audit follow-up (PLAN.md)
+
+Second-pass audit of §1–16 against the running code. Fixed on `dev`
+(commits `2532a45`…`8e4b127`, not pushed):
+
+- **Issue 2 — resume deep links.** `GET /analyses?resumeId&latest` filters;
+  new `/app/resumes/:id` route (report if analyzed, card + Analyze CTA if
+  not); AtsPage `?resumeId` reuses the stored PDF (no re-upload); unknown ids
+  → "Resume not found", unknown analysis → contextual copy (was bare
+  "Analysis not found").
+- **Issue 3 — login gate.** Session GET capped at 8 s with single-flight
+  refresh; `PublicOnly` paints the form before the session resolves;
+  `SessionGuard` trusts `/auth/session` only (legacy `/latest-resume` fallback
+  dropped — S7); Google Fonts `@import` (render-blocking) replaced with
+  `<link rel=preconnect>` + `display=swap`.
+- **Issue 4 — deps.** Backend audit clean (0 vulns); frontend 11 → 4
+  (remaining = majors `esbuild`/`react-router-dom`/`vite`, deferred).
+- **Secondary:** PDF parsed once per upload (S3); startup banner reports the
+  `getDatabaseUrl()` source instead of always checking `DATABASE_URL` (S8);
+  dead relative-path `fs.existsSync` fallback removed — missing stored files
+  now return **410** with a re-upload message instead of a 500 (S4 + lost-file
+  UX of S1).
+- **Gates:** backend 23/23 tests; frontend `tsc --noEmit` + build; scripted
+  browser E2E 18/18 (resume view) + 2/2 (login gate), all `qa.*@example.com`
+  users deleted after runs.
+
+**Open:** Issue 1 (prod uploads — confirm Render `SUPABASE_URL`/service key,
+redeploy, re-probe), S1 backfill for irrecoverable rows, S2 orphan sweep
+(needs user go-ahead), frontend major bumps (`react-router-dom@7`, `vite@8`).

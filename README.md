@@ -14,6 +14,14 @@ Older notes: [ARCHITECTURE.md](./ARCHITECTURE.md) (pointer only), [DEPLOYMENT.md
 
 ## Verified status (2026-10-02 — supersedes the 2026-10-01 outage notes below)
 
+> **Audit follow-up (2026-10-02/03):** the sweep below verified the analysis
+> pipeline end-to-end, but a deeper audit found additional gaps — resume deep-link
+> 404s, a blank/slow login gate, dependency audits, and secondary fixes
+> S3/S4/S7/S8 — now fixed on `dev` with scripted browser E2E (18/18 + 2/2) and
+> 23/23 backend tests. **Still open:** prod uploads (verify Render `SUPABASE_URL` /
+> `SUPABASE_SERVICE_ROLE_KEY`, then redeploy) and the lost-file backfill / orphan
+> sweep. Changes are committed on `dev` but **not pushed**.
+
 Full sweep today: local backend + Render backend, same Supabase, same resume+JD.
 Test users/rows were created and **deleted afterwards** (0 orphans).
 
