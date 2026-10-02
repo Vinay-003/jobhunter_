@@ -339,6 +339,24 @@ export default function AtsPage() {
               {loading ? <><Loader2 size={16} className="animate-spin" /> Analyzing…</> : <>{mode === 'match' ? 'Analyze + match' : 'Build my report'} <ArrowRight size={15} /></>}
             </button>
           </div>
+
+          {/* Analysis can take 25–50 s on a cold backend — show what's happening
+              instead of leaving the button as the only signal (Issue 3 fix 2). */}
+          {loading && (
+            <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.04] p-4 md:p-5" role="status" aria-label="Analysis in progress">
+              <p className="text-sm font-medium text-amber-100">
+                {mode === 'match' ? 'Matching against the job description…' : 'Building your report…'}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-amber-200/60">
+                Uploading the PDF, parsing its structure, scoring it, and saving the results. On a cold backend this can take up to a minute — keep this tab open.
+              </p>
+              <div className="mt-3 space-y-2" aria-hidden="true">
+                <div className="h-2 w-full rounded bg-stone-800/70 animate-pulse" />
+                <div className="h-2 w-4/5 rounded bg-stone-800/50 animate-pulse" />
+                <div className="h-2 w-3/5 rounded bg-stone-800/40 animate-pulse" />
+              </div>
+            </div>
+          )}
         </div>
 
         <aside className="space-y-4">

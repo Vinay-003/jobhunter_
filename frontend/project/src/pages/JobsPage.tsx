@@ -362,7 +362,21 @@ export default function JobsPage() {
       {error && <div className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] p-4 text-xs text-rose-200">{error}</div>}
 
       {loading ? (
-        <div className="flex min-h-[45vh] items-center justify-center gap-2 text-sm text-slate-500"><Loader2 size={18} className="animate-spin" /> Ranking opportunities for this resume…</div>
+        // Ranking can run 25–50 s behind provider scrapes + embeds — show a
+        // structural skeleton of the results grid, not a bare spinner (§0 rule 7).
+        <div className="space-y-4" aria-busy="true" aria-label="Ranking opportunities for this resume">
+          <div className="flex items-center gap-2 text-xs text-slate-500"><Loader2 size={14} className="animate-spin" /> Ranking opportunities for this resume…</div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-2xl border border-stone-800 bg-stone-900/60 p-5 animate-pulse">
+                <div className="h-3.5 w-2/5 rounded bg-stone-800/70" />
+                <div className="mt-3 h-3 w-3/5 rounded bg-stone-800/50" />
+                <div className="mt-2.5 h-3 w-2/5 rounded bg-stone-800/40" />
+                <div className="mt-4 h-7 w-24 rounded-lg bg-stone-800/50" />
+              </div>
+            ))}
+          </div>
+        </div>
       ) : resumes.length === 0 ? (
         <div className="mx-auto max-w-xl rounded-3xl border border-white/[0.07] bg-white/[0.025] px-6 py-12 text-center">
           <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-amber-400/10 text-amber-300"><Briefcase size={23} /></span>

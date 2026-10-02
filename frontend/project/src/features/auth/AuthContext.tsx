@@ -1,5 +1,5 @@
 // src/features/auth/AuthContext.tsx
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import api, { getApiErrorMessage } from '../../lib/api';
 
 export interface User {
@@ -27,24 +27,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Issue 3 fix 3: single-flight — StrictMode's double mount (and any concurrent
+  // caller) shares ONE /auth/session request instead of issuing duplicates.
+  const inflight = useRef<Promise<void> | null>(null);
   const refresh = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res = await api.get('/auth/session');
-      const u = (res.data as { user?: User })?.user ?? null;
-      setUser(u);
-      setError(null);
-    } catch (err) {
-      // No session is not an error - just unauthenticated
-      const status = (err as { status?: number })?.status;
-      if (status === 401) {
+    if (inflight.current) return inflight.current;
+    const run = (async () => {
+      try {
+        setLoading(true);
+        // 8s cap (Issue 3): a sleeping backend must not hold the UI hostage to the
+        // global 60s axios timeout — on timeout we resolve as guest.
+        const res = await api.get('/auth/session', { timeout: 8000 });
+        const u = (res.data as { user?: User })?.user ?? null;
+        setUser(u);
+        setError(null);
+      } catch {
+        // No session / timeout / network failure → unauthenticated (guest)
         setUser(null);
-      } else {
-        // Keep unauthenticated but note error for debugging
-        setUser(null);
+      } finally {
+        setLoading(false);
       }
+    })();
+    inflight.current = run;
+    try {
+      await run;
     } finally {
-      setLoading(false);
+      inflight.current = null;
     }
   }, []);
 

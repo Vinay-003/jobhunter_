@@ -1,8 +1,8 @@
 // src/app/router.tsx
 import { createBrowserRouter, Navigate, Outlet, useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import api from '../lib/api';
+import { useEffect } from 'react';
 import AppShell from './AppShell';
+import { useAuth } from '../features/auth/AuthContext';
 import LandingPage from '../pages/LandingPage';
 import LoginPage from '../pages/LoginPage';
 import SignupPage from '../pages/SignupPage';
@@ -32,63 +32,51 @@ function TermsPage() {
   );
 }
 
+// Issue 3: structural shell skeleton while the single session check resolves —
+// never a blank screen or text-only spinner (§0 rule 7).
+function AppShellSkeleton() {
+  return (
+    <div className="min-h-screen bg-[#0C0A09] text-stone-100" aria-busy="true" aria-label="Checking session">
+      <aside className="fixed inset-y-0 left-0 hidden w-[268px] animate-pulse border-r border-stone-800/70 p-5 lg:block">
+        <div className="h-8 w-36 rounded-lg bg-stone-800/70" />
+        <div className="mt-8 space-y-3">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-9 rounded-lg bg-stone-800/50" />
+          ))}
+        </div>
+      </aside>
+      <main className="min-h-screen p-5 md:p-8 lg:pl-[268px]">
+        <div className="h-7 w-44 rounded-lg bg-stone-800/70 animate-pulse" />
+        <div className="mt-3 h-3.5 w-72 max-w-full rounded bg-stone-800/50 animate-pulse" />
+        <div className="mt-8 grid gap-4 md:grid-cols-2">
+          <div className="h-40 rounded-2xl border border-stone-800 bg-stone-900/60 animate-pulse" />
+          <div className="h-40 rounded-2xl border border-stone-800 bg-stone-900/60 animate-pulse" />
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// SessionGuard / PublicOnly both consume AuthProvider (single source of truth —
+// Issue 3 fix 3: no more per-guard /auth/session calls or /latest-resume fallback).
 function SessionGuard({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<'loading' | 'authed' | 'guest'>('loading');
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    let cancelled = false;
-    async function check() {
-      try {
-        // V2 session endpoint is /auth/session (baseURL already is /api/v1)
-        const res = await api.get('/auth/session').catch(() =>
-          api.get('/latest-resume').then(() => ({ data: { user: { id: 1 } } })),
-        );
-        // If we get 200, consider authed (even if shape varies)
-        if (!cancelled) {
-          const data = res.data as { user?: unknown; success?: boolean };
-          if (data?.user || data?.success) setState('authed');
-          else setState('guest');
-        }
-      } catch {
-        if (!cancelled) setState('guest');
-      }
-    }
-    check();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!loading && !user) navigate('/login', { replace: true });
+  }, [loading, user, navigate]);
 
-  useEffect(() => {
-    if (state === 'guest') navigate('/login', { replace: true });
-  }, [state, navigate]);
-
-  if (state === 'loading') {
-    return (
-      <div className="min-h-screen bg-[#0C0A09] flex items-center justify-center text-stone-500 text-sm">
-        Checking session…
-      </div>
-    );
-  }
-  if (state === 'guest') return null;
+  if (loading) return <AppShellSkeleton />;
+  if (!user) return null;
   return <>{children}</>;
 }
 
 function PublicOnly({ children }: { children: React.ReactNode }) {
-  const [checked, setChecked] = useState(false);
-  const [isAuthed, setIsAuthed] = useState(false);
-
-  useEffect(() => {
-    api
-      .get('/auth/session')
-      .then(() => setIsAuthed(true))
-      .catch(() => setIsAuthed(false))
-      .finally(() => setChecked(true));
-  }, []);
-
-  if (!checked) return <div className="min-h-screen bg-[#0C0A09]" />;
-  if (isAuthed) return <Navigate to="/app/ats" replace />;
+  const { user, loading } = useAuth();
+  // Optimistic render (Issue 3 fix 1): the form shows immediately; we only
+  // redirect away once the session check resolves to an authenticated user.
+  if (!loading && user) return <Navigate to="/app/ats" replace />;
   return <>{children}</>;
 }
 

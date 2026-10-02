@@ -14,7 +14,6 @@ import {
   FileSearch,
   Gauge,
   ListChecks,
-  Loader2,
   Sparkles,
   Target,
   TrendingUp,
@@ -412,7 +411,30 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
   const totalChecks = rules.length;
   const metrics = readiness?.metrics;
 
-  if (loading) return <div className="flex min-h-[55vh] items-center justify-center gap-2 text-sm text-slate-500"><Loader2 size={18} className="animate-spin" /> Loading your report…</div>;
+  // Report skeleton (Issue 3 / §0 rule 7): header + overview card, never a bare spinner.
+  if (loading) return (
+    <div className="space-y-7 pb-12" aria-busy="true" aria-label="Loading your report">
+      <div className="flex items-center gap-3 animate-pulse">
+        <div className="h-7 w-28 rounded-lg bg-stone-800/70" />
+        <div className="h-7 w-40 rounded-lg bg-stone-800/50" />
+      </div>
+      <section className="rounded-3xl border border-stone-800 bg-[#1C1917]/90 p-5 md:p-7 animate-pulse">
+        <div className="h-3.5 w-44 rounded bg-stone-800/70" />
+        <div className="mt-4 h-8 w-72 max-w-full rounded bg-stone-800/70" />
+        <div className="mt-4 h-3.5 w-full max-w-xl rounded bg-stone-800/50" />
+        <div className="mt-2.5 h-3.5 w-2/3 rounded bg-stone-800/50" />
+        <div className="mt-6 flex flex-wrap gap-2">
+          <div className="h-7 w-32 rounded-full bg-stone-800/60" />
+          <div className="h-7 w-28 rounded-full bg-stone-800/60" />
+          <div className="h-7 w-44 rounded-full bg-stone-800/60" />
+        </div>
+      </section>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="h-36 rounded-2xl border border-stone-800 bg-stone-900/60 animate-pulse" />
+        <div className="h-36 rounded-2xl border border-stone-800 bg-stone-900/60 animate-pulse" />
+      </div>
+    </div>
+  );
 
   if (error || !view || !readiness) {
     return (
