@@ -76,8 +76,8 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
     }
     const profile = buildResumeProfile(parsed);
     const readiness = scoreReadiness(parsed, profile, targetLevel);
-    // ensure profile stored
-    await pool.query('INSERT INTO resume_profiles (resume_id, profile_json, profile_version) VALUES ($1,$2,$3) ON CONFLICT (resume_id) DO UPDATE SET profile_json=$2, profile_version=$3', [row.id, JSON.stringify(profile), PARSER_VERSION]).catch(()=>{});
+    // ensure profile stored (cache only — analysis proceeds even if this fails, but the failure is visible)
+    await pool.query('INSERT INTO resume_profiles (resume_id, profile_json, profile_version) VALUES ($1,$2,$3) ON CONFLICT (resume_id) DO UPDATE SET profile_json=$2, profile_version=$3', [row.id, JSON.stringify(profile), PARSER_VERSION]).catch((e)=>console.error('[analyses] resume_profile upsert failed:', e));
     const analysisId = crypto.randomUUID();
     const breakdown = readiness.breakdown;
     const evidence = {
@@ -94,7 +94,12 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
     };
     try {
       await pool.query(`INSERT INTO analyses (id, user_id, resume_id, analysis_type, readiness_score, score_breakdown_json, evidence_json, target_level, scorer_version, parser_version, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())`, [analysisId, userId, row.id, 'readiness', readiness.score, JSON.stringify(breakdown), JSON.stringify(evidence), targetLevel||null, SCORER_VERSION, PARSER_VERSION]);
-    } catch(e){ /* table may not exist yet, ignore */ }
+    } catch(e){
+      // Returning 200 here would hand the SPA an analysisId that has no row — a guaranteed
+      // broken report link. Fail loud instead (mirrored in jd-match below).
+      console.error('[analyses] readiness insert failed:', e);
+      return res.status(500).json({ success:false, message:'Failed to save analysis results' });
+    }
     res.json({ success:true, analysisId, resumeId: row.id, readiness, profile, parserVersion: PARSER_VERSION, scorerVersion: SCORER_VERSION });
   } catch(e:any){
     console.error('readiness error', e);
@@ -218,7 +223,11 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
         responsibilityCoverage,
         deterministic,
       }), targetLevel||null, jdHash.slice(0,32), SCORER_VERSION, PARSER_VERSION, modelId, JD_MATCHER_VERSION]);
-    } catch{}
+    } catch(e){
+      // see readiness handler: never return an analysisId that wasn't persisted
+      console.error('[analyses] jd-match insert failed:', e);
+      return res.status(500).json({ success:false, message:'Failed to save analysis results' });
+    }
 
     console.log(`[jd-match] done analysisId=${analysisId} provider=${providerName} model=${modelId}${usedMock ? ' (mock fallback — NOT real embeddings)' : ' (real embeddings)'} score=${jdMatchScore} explicit=${explicitPts} semantic=${semanticScore} texts=${vectors.length} ms=${Date.now() - embedStart}`);
     res.json({ success:true, analysisId, resumeId: row.id, readiness, jdMatch:{ score: jdMatchScore, breakdown:{ explicitMustHave: explicitPts, responsibilitySemantic: semanticScore, roleAlignment: rolePts, domain: domainPts, education: eduPts, confidence }, responsibilityCoverage, deterministic, jd }, versions:{ scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION, matcherVersion: JD_MATCHER_VERSION, embeddingModelId: modelId, dimension, usedMock }, confidence });
@@ -228,12 +237,23 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
   }
 });
 
+// GET /analyses[?resumeId=<uuid>][&latest=true] — resumeId filters to one resume;
+// latest=true returns only the newest row (used by the resume view, PLAN Issue 2).
 router.get('/', authenticateAny, async (req:any,res)=>{
   const userId = String(req.user.id);
+  const resumeId = req.query.resumeId ? String(req.query.resumeId) : '';
+  const latest = String(req.query.latest ?? '') === 'true';
   try {
-    const r = await pool.query('SELECT * FROM analyses WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50', [userId]);
+    const params:any[] = [userId];
+    let where = 'user_id=$1';
+    if (resumeId) { params.push(resumeId); where += ` AND resume_id=$${params.length}`; }
+    const limit = latest ? 1 : 50;
+    const r = await pool.query(`SELECT * FROM analyses WHERE ${where} ORDER BY created_at DESC LIMIT ${limit}`, params);
     res.json({ success:true, analyses: r.rows });
-  } catch(e:any){ res.json({ success:true, analyses: []}); }
+  } catch(e:any){
+    console.error('[analyses] list failed:', e);
+    res.status(500).json({ success:false, message:'Failed to list analyses' });
+  }
 });
 
 router.get('/:id', authenticateAny, async (req:any,res)=>{
@@ -243,7 +263,11 @@ router.get('/:id', authenticateAny, async (req:any,res)=>{
     const r = await pool.query('SELECT * FROM analyses WHERE id=$1 AND user_id=$2', [id, userId]);
     if (!r.rows.length) return res.status(404).json({ success:false, message:'Analysis not found'});
     res.json({ success:true, analysis: r.rows[0]});
-  } catch(e:any){ res.status(404).json({ success:false, message:'Analysis not found'}); }
+  } catch(e:any){
+    // a failing query is NOT "not found" — never mask DB errors as 404
+    console.error('[analyses] get failed:', e);
+    res.status(500).json({ success:false, message:'Failed to load analysis' });
+  }
 });
 
 export default router;
