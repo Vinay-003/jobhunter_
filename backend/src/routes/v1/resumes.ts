@@ -53,11 +53,12 @@ router.post('/', authenticateAny, upload.single('resume'), async (req:any,res)=>
     const resumeId = crypto.randomUUID();
     const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
     const targetLevel = req.body?.targetLevel;
-    // parse for page count and validation
+    // parse for page count and validation (S3: reuse for profile below)
     let pageCount=1;
     let parserVersion='2.0.0';
+    let parsed: any = null;
     try {
-      const parsed = await parsePdfBuffer(buf);
+      parsed = await parsePdfBuffer(buf);
       pageCount = parsed.pages.length || 1;
       if (parsed.detectedAsScanned) {
       }
@@ -113,8 +114,8 @@ router.post('/', authenticateAny, upload.single('resume'), async (req:any,res)=>
     }
 
     try {
-      const parsed = await parsePdfBuffer(buf);
-      const profile = buildResumeProfile(parsed);
+      const p = parsed ?? await parsePdfBuffer(buf);
+      const profile = buildResumeProfile(p);
       await pool.query('INSERT INTO resume_profiles (resume_id, profile_json, profile_version) VALUES ($1,$2,$3) ON CONFLICT (resume_id) DO UPDATE SET profile_json=$2, profile_version=$3, updated_at=now()', [row.id, JSON.stringify(profile), '2.0.0']).catch(()=>{});
     } catch{}
 
