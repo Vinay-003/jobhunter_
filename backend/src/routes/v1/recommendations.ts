@@ -13,7 +13,7 @@ import { JobQueryPlanner } from '../../modules/jobs/queryPlanner.js';
 import { rankJobsBatch, VERSION as rankerVersion } from '../../modules/jobs/ranking.js';
 import { deduplicateJobs, upsertJob } from '../../providers/jobs/jobStore.js';
 import { reserveDailyCall } from '../../providers/jobs/providerBudgets.js';
-import type { NormalizedJob, JobProvider } from '../../providers/jobs/JobProvider.js';
+import type { NormalizedJob, JobProvider, ProviderSearchResult } from '../../providers/jobs/JobProvider.js';
 import { retrievalPlan, sourceEnvelope } from '../../providers/jobs/retrievalPlan.js';
 import { effectivePreferences, eligibleJob, countryCodeForLocation } from '../../modules/jobs/eligibility.js';
 import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
@@ -81,28 +81,34 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
     const sources: any[] = [];
     const all: NormalizedJob[] = [];
     const runSearch = async (name: string, provider: JobProvider, query: string, location: string, page: number, ttl: number) => {
-        const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ version: 4, name, query, location, page, preferences,
+        const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ version: 5, name, query, location, page, preferences,
           providerLimit: name === 'jobspipe' ? process.env.JOBSPIPE_LIMIT ?? '15' : name === 'adzuna' ? process.env.ADZUNA_RESULTS_PER_PAGE ?? '15' : null,
           ...(name === 'jobspipe' || name === 'adzuna' ? {country:countryCodeForLocation(location) ?? (name === 'jobspipe' ? process.env.JOBSPIPE_COUNTRY ?? 'IN' : process.env.ADZUNA_COUNTRY ?? 'in')} : {}) })).digest('hex');
       const started = new Date().toISOString();
       let cacheHit = false;
       try {
         const cached = await pool.query('SELECT result_json,created_at FROM job_search_cache WHERE query_hash=$1', [cacheKey]);
-        let jobs: NormalizedJob[];
-        if (cached.rows[0] && Date.now() - new Date(cached.rows[0].created_at).getTime() < ttl) { jobs = cached.rows[0].result_json; cacheHit = true; }
-        else {
-          if (name === 'jooble' && !(await reserveDailyCall('jooble', Number(process.env.JOOBLE_CALL_BUDGET || 100)))) {
-            sources.push({ provider:name,status:'budgetLimited',cacheHit:false,fetchedCount:0,attemptedAt:started }); return;
-          }
-           jobs = await provider.search({ keywords: query, location, page, country: countryCodeForLocation(location) ?? undefined, seniorityHint: profile.seniority, daysPosted: preferences.daysPosted });
-          // Adapter DB fallback keeps original source IDs; never call it a live result of this provider.
-           if (jobs.some((j) => j.retrieval?.status === 'fallback' || j.source !== name)) sources.push({ ...sourceEnvelope(name,jobs,false), location,page,attemptedAt:started });
-           else {
-            await pool.query('INSERT INTO job_search_cache (query_hash,query_text,result_json,created_at) VALUES ($1,$2,$3,now()) ON CONFLICT (query_hash) DO UPDATE SET result_json=$3,created_at=now()', [cacheKey, `${name}:${query}`, JSON.stringify(jobs)]);
-             sources.push({ ...sourceEnvelope(name,jobs,false), location,page,attemptedAt:started });
+        let result: ProviderSearchResult;
+        if (cached.rows[0] && Date.now() - new Date(cached.rows[0].created_at).getTime() < ttl) {
+          const data = cached.rows[0].result_json;
+          if (data && !Array.isArray(data) && Array.isArray(data.jobs) && typeof data.status === 'string') {
+            result = data; cacheHit = true;
           }
         }
-         if (cacheHit) sources.push({ ...sourceEnvelope(name,jobs,true), location,page,attemptedAt:started });
+        if (!cacheHit) {
+          if (name === 'jooble' && !(await reserveDailyCall('jooble', Number(process.env.JOOBLE_CALL_BUDGET || 100)))) {
+            result = { jobs: [], status: 'budgetLimited' };
+          } else {
+            result = await provider.searchResult({ keywords: query, location, page, country: countryCodeForLocation(location) ?? undefined, seniorityHint: profile.seniority, daysPosted: preferences.daysPosted });
+          }
+          await pool.query('INSERT INTO job_search_cache (query_hash,query_text,result_json,created_at) VALUES ($1,$2,$3,now()) ON CONFLICT (query_hash) DO UPDATE SET result_json=$3,created_at=now()', [cacheKey, `${name}:${query}`, JSON.stringify(result)]).catch(() => undefined);
+        }
+        const jobs = result!.jobs;
+        sources.push({ provider: name, status: result!.status, cacheHit, fetchedCount: jobs.length,
+          ...(result!.fallbackReason ? { fallbackReason: result!.fallbackReason } : {}),
+          ...(result!.errorCode ? { errorCode: result!.errorCode } : {}),
+          ...(result!.status === 'fallback' ? { fallbackSource: [...new Set(jobs.map(j => j.source))] } : {}),
+          location, page, attemptedAt: started });
         all.push(...jobs);
        } catch { sources.push({ ...sourceEnvelope(name,[],cacheHit,'error'), location,page,errorCode: 'PROVIDER_UNAVAILABLE', attemptedAt: started }); }
     };

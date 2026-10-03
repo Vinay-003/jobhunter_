@@ -1,8 +1,8 @@
 import axios from 'axios';
-import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
+import type { JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
 import { env } from '../../config/env.js';
 import pool from '../../config/database.js';
-import { markFallback, storeJobsToDb } from './jobStore.js';
+import { markFallback, storeJobsToDb, searchJobsFromDb } from './jobStore.js';
 
 /**
  * Jooble provider — axios POST to Jooble, with env key handling, timeout, fallback to DB,
@@ -32,9 +32,14 @@ export class JoobleProvider implements JobProvider {
   }
 
   async search(query: JobSearchQuery): Promise<NormalizedJob[]> {
+    return (await this.searchResult(query)).jobs;
+  }
+
+  async searchResult(query: JobSearchQuery): Promise<ProviderSearchResult> {
+
     if (!this.apiKey) {
       // Fallback to DB
-      return this.fallbackFromDb(query);
+      return this.fallbackResult(query, 'unavailable');
     }
 
     try {
@@ -58,20 +63,17 @@ export class JoobleProvider implements JobProvider {
       // Store to jobs table (best-effort, ignore errors in dev when DB not reachable)
       await storeJobsToDb(normalized).catch(() => {});
 
-      if (normalized.length === 0) {
-        console.warn(`[JoobleProvider] Jooble empty for "${query.keywords}" — fallback to DB cache`);
-        const fallback = await this.fallbackFromDb(query).catch(() => [] as NormalizedJob[]);
-        console.log(`[JoobleProvider] DB fallback returned ${fallback.length} jobs for "${query.keywords}"`);
-        return fallback.length ? fallback : normalized;
-      }
-
-      return normalized;
+      if (!normalized.length) return this.fallbackResult(query, 'empty');
+      return { jobs: normalized, status: 'ok' };
     } catch (err) {
       console.warn('[JoobleProvider] Jooble request failed, falling back to DB:', (err as Error).message);
-      const fallback = await this.fallbackFromDb(query).catch(() => [] as NormalizedJob[]);
-      console.log(`[JoobleProvider] DB fallback after error returned ${fallback.length} jobs for "${query.keywords}"`);
-      return fallback;
+      return this.fallbackResult(query, 'error');
     }
+  }
+
+  private async fallbackResult(query: JobSearchQuery, reason: 'empty' | 'error' | 'budgetLimited' | 'unavailable'): Promise<ProviderSearchResult> {
+    const jobs = await searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'jooble')).catch(() => [] as NormalizedJob[]);
+    return { jobs, status: jobs.length ? 'fallback' : reason, fallbackReason: reason, ...(['error', 'unavailable'].includes(reason) ? { errorCode: 'PROVIDER_UNAVAILABLE' } : {}) };
   }
 
   private normalize(j: JoobleJob): NormalizedJob | null {
@@ -96,33 +98,6 @@ export class JoobleProvider implements JobProvider {
     };
   }
 
-  private async fallbackFromDb(query: JobSearchQuery): Promise<NormalizedJob[]> {
-    // Simple ILIKE search on title/description
-    const kw = query.keywords.trim();
-    if (!kw) return [];
-    const like = `%${kw.split(/\s+/).join('%')}%`;
-    const { rows } = await pool.query<{
-      source: string; external_id: string; title: string; company: string; location: string | null;
-      description: string | null; url: string | null; salary: unknown;
-      posted_at: string | null; work_mode: string | null;
-    }>(
-      `SELECT source, external_id, title, company, location, description, url, salary, posted_at, work_mode
-       FROM jobs WHERE title ILIKE $1 OR description ILIKE $1 ORDER BY fetched_at DESC LIMIT 20`,
-      [like],
-    );
-    return markFallback(rows.map((r) => ({
-      source: r.source,
-      externalId: r.external_id,
-      title: r.title,
-      company: r.company,
-      location: r.location,
-      description: r.description,
-      url: r.url,
-      salary: r.salary,
-      postedAt: r.posted_at,
-      workMode: r.work_mode,
-    })), 'jooble');
-  }
 }
 
 export default JoobleProvider;

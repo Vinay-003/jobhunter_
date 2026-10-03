@@ -21,8 +21,8 @@ export function retrievalPlan(providers: string[], locations: string[], queries:
     const selectedPlaces = capability.locations ? places : [''];
     const selectedTerms = provider === 'jooble' ? terms : terms.slice(0, 1);
     const steps: RetrievalStep[] = [];
-    for (let page = 1; page <= maxPages; page++) for (const location of selectedPlaces)
-      for (const keywords of selectedTerms) steps.push({ provider, keywords, location, page });
+    for (let page = 1; page <= maxPages; page++) for (const keywords of selectedTerms)
+      for (const location of selectedPlaces) steps.push({ provider, keywords, location, page });
     groups.push(steps);
   }
   const result: RetrievalStep[] = [];

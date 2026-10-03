@@ -41,11 +41,12 @@ def seed(profile, preferences, prefix):
     jobs=[]
     for i in range(65):
         jobs.append({'source':'jooble','externalId':f'{prefix}-{i}', 'title':'Junior Software Engineer', 'company':f'Audit Fixture {i}', 'location':'India', 'description':'Junior Software Engineer\nResponsibilities\n- Build Python and TypeScript REST APIs with PostgreSQL and unit tests.\nRequired Skills\n- At least one of Python or JavaScript.\n- SQL and Git.\nExperience\n0–2 years of professional development experience. Remote role available to candidates in India.', 'descriptionQuality':'full','url':f'https://example.test/jobs/{prefix}/{i}','salary':None,'workMode':'remote','postedAt':datetime.now(timezone.utc).isoformat()})
-    for query in queries:
-        key={'version':3,'name':'jooble','query':query['keywords'],'location':'India','preferences':preferences,'providerLimit':None}
-        digest=hashlib.sha256(json.dumps(key,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
-        payload=json.dumps(jobs,ensure_ascii=False).replace("'","''")
-        sql(f"INSERT INTO job_search_cache(query_hash,query_text,result_json) VALUES('{digest}','audit fixture','{payload}') ON CONFLICT(query_hash) DO UPDATE SET result_json=excluded.result_json,created_at=now();")
+    for page in range(1,4):
+        for query in queries:
+            key={'version':5,'name':'jooble','query':query['keywords'],'location':'India','page':page,'preferences':preferences,'providerLimit':None}
+            digest=hashlib.sha256(json.dumps(key,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
+            payload=json.dumps({'jobs':jobs,'status':'ok'},ensure_ascii=False).replace("'","''")
+            sql(f"INSERT INTO job_search_cache(query_hash,query_text,result_json) VALUES('{digest}','audit fixture','{payload}') ON CONFLICT(query_hash) DO UPDATE SET result_json=excluded.result_json,created_at=now();")
 
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=True)
@@ -104,6 +105,8 @@ with sync_playwright() as p:
             row[kind]=data['jdMatch']['score'];fresh.close()
         scores.append(row)
     (FIXTURES/'implementation-scores.json').write_text(json.dumps(scores,indent=2))
+    cache_rows=int(sql('SELECT count(*) FROM embedding_cache;'))
+    check('Persistent embedding cache populated',cache_rows>0,cache_rows)
     rid=uploaded[-1]
     prefs={'targetRoles':['Audit Software Engineer'],'locations':['India'],'workModes':['remote'],'emphasizedSkills':['Python'],'excludedRoles':[],'seniority':['junior']}
     r=ctx.request.put(API+'/profile/job-preferences',headers=headers,data=prefs)
@@ -121,8 +124,10 @@ with sync_playwright() as p:
     check('All recommendation UUIDs resolve',int(sql(f"SELECT count(*) FROM recommendations r JOIN jobs j ON r.job_id=j.id WHERE run_id='{run_id}';"))==65)
     again=ctx.request.post(API+'/recommendation-runs',headers=headers,data=body,timeout=180000).json()
     check('Idempotency returns original run',again['runId']==run_id and again['recommendations']==data['recommendations'])
+    cache_after_first_recommendation=int(sql('SELECT count(*) FROM embedding_cache;'))
     second=ctx.request.post(API+'/recommendation-runs',headers=headers,data={'resumeId':rid},timeout=180000).json()
     check('Existing-job conflicts still persist',second.get('returnedCount')==65 and len(ctx.request.get(API+f"/recommendation-runs/{second['runId']}/results?limit=100").json()['results'])==65)
+    check('Recommendation cache remains reusable',int(sql('SELECT count(*) FROM embedding_cache;'))==cache_after_first_recommendation)
     # Fail one insert deliberately in this isolated DB; all preceding rows must roll back.
     sql("""CREATE OR REPLACE FUNCTION audit_recommendation_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.rank=3 THEN RAISE EXCEPTION 'audit failure'; END IF; RETURN NEW; END $$;
 CREATE TRIGGER audit_fail BEFORE INSERT ON recommendations FOR EACH ROW EXECUTE FUNCTION audit_recommendation_fail();""")

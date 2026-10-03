@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
+import type { JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
 import { env } from '../../config/env.js';
 import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
 import { reserveDailyCall } from './providerBudgets.js';
@@ -36,9 +36,14 @@ export class RemotiveProvider implements JobProvider {
   }
 
   async search(query: JobSearchQuery): Promise<NormalizedJob[]> {
+    return (await this.searchResult(query)).jobs;
+  }
+
+  async searchResult(query: JobSearchQuery): Promise<ProviderSearchResult> {
+
     if (!(await reserveDailyCall('remotive', this.budget))) {
       console.warn(`[RemotiveProvider] daily budget ${this.budget} exhausted — skipping`);
-      return searchJobsFromDb(query.keywords).then(jobs => markFallback(jobs, 'remotive')).catch(() => [] as NormalizedJob[]);
+      return this.fallbackResult(query, 'budgetLimited');
     }
     try {
       console.log(`[RemotiveProvider] searching "${query.keywords}"`);
@@ -50,12 +55,17 @@ export class RemotiveProvider implements JobProvider {
       const jobs = (resp.data?.jobs ?? []).map((j) => this.normalize(j)).filter((j): j is NormalizedJob => j !== null);
       console.log(`[RemotiveProvider] returned ${jobs.length} jobs for "${query.keywords}"`);
       await storeJobsToDb(jobs).catch(() => {});
-      if (!jobs.length) return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'remotive')).catch(() => [] as NormalizedJob[]);
-      return jobs;
+      if (!jobs.length) return this.fallbackResult(query, 'empty');
+      return { jobs, status: 'ok' };
     } catch (err) {
       console.warn('[RemotiveProvider] request failed, falling back to DB:', (err as Error).message);
-      return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'remotive')).catch(() => [] as NormalizedJob[]);
+      return this.fallbackResult(query, 'error');
     }
+  }
+
+  private async fallbackResult(query: JobSearchQuery, reason: 'empty' | 'error' | 'budgetLimited' | 'unavailable'): Promise<ProviderSearchResult> {
+    const jobs = await searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'remotive')).catch(() => [] as NormalizedJob[]);
+    return { jobs, status: jobs.length ? 'fallback' : reason, fallbackReason: reason, ...(['error', 'unavailable'].includes(reason) ? { errorCode: 'PROVIDER_UNAVAILABLE' } : {}) };
   }
 
   private normalize(j: RemotiveJob): NormalizedJob | null {

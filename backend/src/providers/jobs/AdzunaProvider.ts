@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
+import type { JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
 import { env } from '../../config/env.js';
 import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
 import { reserveDailyCall } from './providerBudgets.js';
@@ -43,13 +43,18 @@ export class AdzunaProvider implements JobProvider {
   }
 
   async search(query: JobSearchQuery): Promise<NormalizedJob[]> {
+    return (await this.searchResult(query)).jobs;
+  }
+
+  async searchResult(query: JobSearchQuery): Promise<ProviderSearchResult> {
+
     if (!this.appId || !this.appKey) {
       console.warn('[AdzunaProvider] no creds — skipping (set ADZUNA_APP_ID/ADZUNA_APP_KEY)');
-      return [];
+      return this.fallbackResult(query, 'unavailable');
     }
     if (!(await reserveDailyCall('adzuna', this.budget))) {
       console.warn(`[AdzunaProvider] daily budget ${this.budget} exhausted — skipping`);
-      return searchJobsFromDb(query.keywords).then(jobs => markFallback(jobs, 'adzuna')).catch(() => [] as NormalizedJob[]);
+      return this.fallbackResult(query, 'budgetLimited');
     }
     try {
       const country = query.country || this.country;
@@ -70,12 +75,17 @@ export class AdzunaProvider implements JobProvider {
       const jobs = (resp.data?.results ?? []).map((j) => this.normalize(j)).filter((j): j is NormalizedJob => j !== null);
       console.log(`[AdzunaProvider] returned ${jobs.length} jobs for "${query.keywords}"`);
       await storeJobsToDb(jobs).catch(() => {});
-      if (!jobs.length) return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'adzuna')).catch(() => [] as NormalizedJob[]);
-      return jobs;
+      if (!jobs.length) return this.fallbackResult(query, 'empty');
+      return { jobs, status: 'ok' };
     } catch (err) {
       console.warn('[AdzunaProvider] request failed, falling back to DB:', (err as Error).message);
-      return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'adzuna')).catch(() => [] as NormalizedJob[]);
+      return this.fallbackResult(query, 'error');
     }
+  }
+
+  private async fallbackResult(query: JobSearchQuery, reason: 'empty' | 'error' | 'budgetLimited' | 'unavailable'): Promise<ProviderSearchResult> {
+    const jobs = await searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'adzuna')).catch(() => [] as NormalizedJob[]);
+    return { jobs, status: jobs.length ? 'fallback' : reason, fallbackReason: reason, ...(['error', 'unavailable'].includes(reason) ? { errorCode: 'PROVIDER_UNAVAILABLE' } : {}) };
   }
 
   private normalize(j: AdzunaJob): NormalizedJob | null {

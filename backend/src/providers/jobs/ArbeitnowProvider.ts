@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
+import type { JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
 import { env } from '../../config/env.js';
 import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback, normalizedPostedAt } from './jobStore.js';
 
@@ -28,6 +28,11 @@ type ArbeitnowJob = {
 
 export class ArbeitnowProvider implements JobProvider {
   async search(query: JobSearchQuery): Promise<NormalizedJob[]> {
+    return (await this.searchResult(query)).jobs;
+  }
+
+  async searchResult(query: JobSearchQuery): Promise<ProviderSearchResult> {
+
     try {
       console.log(`[ArbeitnowProvider] fetching dump, filtering by "${query.keywords}"`);
       const resp = await axios.get<{ data?: ArbeitnowJob[] }>('https://www.arbeitnow.com/api/job-board-api', {
@@ -44,11 +49,11 @@ export class ArbeitnowProvider implements JobProvider {
       const jobs = scored.map((s) => this.normalize(s.job)).filter((j): j is NormalizedJob => j !== null);
       console.log(`[ArbeitnowProvider] dump=${all.length} relevant=${jobs.length} for "${query.keywords}"`);
       await storeJobsToDb(jobs).catch(() => {});
-      if (!jobs.length) return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'arbeitnow')).catch(() => [] as NormalizedJob[]);
-      return jobs;
+      if (!jobs.length) return this.fallbackResult(query, 'empty');
+      return { jobs, status: 'ok' };
     } catch (err) {
       console.warn('[ArbeitnowProvider] request failed, falling back to DB:', (err as Error).message);
-      return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'arbeitnow')).catch(() => [] as NormalizedJob[]);
+      return this.fallbackResult(query, 'error');
     }
   }
 
@@ -59,6 +64,11 @@ export class ArbeitnowProvider implements JobProvider {
       if (hay.includes(t)) hits += t.length > 5 ? 2 : 1;
     }
     return hits;
+  }
+
+  private async fallbackResult(query: JobSearchQuery, reason: 'empty' | 'error' | 'budgetLimited' | 'unavailable'): Promise<ProviderSearchResult> {
+    const jobs = await searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'arbeitnow')).catch(() => [] as NormalizedJob[]);
+    return { jobs, status: jobs.length ? 'fallback' : reason, fallbackReason: reason, ...(['error', 'unavailable'].includes(reason) ? { errorCode: 'PROVIDER_UNAVAILABLE' } : {}) };
   }
 
   private normalize(j: ArbeitnowJob): NormalizedJob | null {

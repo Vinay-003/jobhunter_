@@ -18,3 +18,9 @@ test('source envelope distinguishes empty, fallback, error and cached responses'
   expect(sourceEnvelope('jooble', [{source:'jooble', retrieval:{status:'fallback'}}] as any, false).status).toBe('fallback');
   expect(sourceEnvelope('jooble', [], true).status).toBe('cached');
 });
+
+test('bounded plan covers every location before extra keyword variants', () => {
+  const plan = retrievalPlan(['jooble'], ['Toronto', 'Berlin', 'Paris'], ['Engineer', 'Developer', 'Architect'], 50);
+  expect(plan.slice(0, 3).map(step => step.location)).toEqual(['Toronto', 'Berlin', 'Paris']);
+  expect(plan.every(step => step.page >= 1 && step.page <= 3)).toBe(true);
+});

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
+import type { JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
 import { env } from '../../config/env.js';
 import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
 import { reserveMonthlyCredits, reconcileMonthlyCredits } from './providerBudgets.js';
@@ -48,14 +48,19 @@ export class JobsPipeProvider implements JobProvider {
   }
 
   async search(query: JobSearchQuery): Promise<NormalizedJob[]> {
+    return (await this.searchResult(query)).jobs;
+  }
+
+  async searchResult(query: JobSearchQuery): Promise<ProviderSearchResult> {
+
     if (!this.apiKey) {
       console.warn('[JobsPipeProvider] no key — skipping (set JOBSPIPE_API_KEY)');
-      return [];
+      return this.fallbackResult(query, 'unavailable');
     }
     const limit = Math.max(1, Math.min(100, this.limit, query.limit ?? this.limit));
     if (!(await reserveMonthlyCredits('jobspipe', this.monthlyBudget, limit))) {
       console.warn(`[JobsPipeProvider] monthly budget ${this.monthlyBudget} exhausted — skipping`);
-      return searchJobsFromDb(query.keywords).then(jobs => markFallback(jobs, 'jobspipe')).catch(() => [] as NormalizedJob[]);
+      return this.fallbackResult(query, 'budgetLimited');
     }
     try {
       // Primary role term as title filter; top skill terms as description terms.
@@ -85,12 +90,17 @@ export class JobsPipeProvider implements JobProvider {
       console.log(`[JobsPipeProvider] returned ${jobs.length} jobs (credits ${charged}) for "${query.keywords}"`);
        await reconcileMonthlyCredits('jobspipe', limit, charged);
       await storeJobsToDb(jobs).catch(() => {});
-       if (!jobs.length) return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'jobspipe')).catch(() => [] as NormalizedJob[]);
-      return jobs;
+       if (!jobs.length) return this.fallbackResult(query, 'empty');
+      return { jobs, status: 'ok' };
     } catch (err) {
       console.warn('[JobsPipeProvider] request failed, falling back to DB:', (err as Error).message);
-       return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'jobspipe')).catch(() => [] as NormalizedJob[]);
+       return this.fallbackResult(query, 'error');
     }
+  }
+
+  private async fallbackResult(query: JobSearchQuery, reason: 'empty' | 'error' | 'budgetLimited' | 'unavailable'): Promise<ProviderSearchResult> {
+    const jobs = await searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'jobspipe')).catch(() => [] as NormalizedJob[]);
+    return { jobs, status: jobs.length ? 'fallback' : reason, fallbackReason: reason, ...(['error', 'unavailable'].includes(reason) ? { errorCode: 'PROVIDER_UNAVAILABLE' } : {}) };
   }
 
   private companyName(c: JobsPipeJob['company']): string {

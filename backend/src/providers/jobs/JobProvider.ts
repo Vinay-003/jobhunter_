@@ -33,11 +33,14 @@ export type JobSearchQuery = {
 
 export type ProviderSearchResult = {
   jobs: NormalizedJob[];
-  status: 'ok' | 'empty' | 'fallback' | 'error' | 'budgetLimited';
+  status: 'ok' | 'empty' | 'fallback' | 'error' | 'budgetLimited' | 'unavailable';
+  /** Why a fallback was used, even if its jobs array is empty. */
+  fallbackReason?: 'empty' | 'error' | 'budgetLimited' | 'unavailable';
   nextCursor?: string | null;
   errorCode?: string;
 };
 
 export interface JobProvider {
   search(query: JobSearchQuery): Promise<NormalizedJob[]>;
+  searchResult(query: JobSearchQuery): Promise<ProviderSearchResult>;
 }
