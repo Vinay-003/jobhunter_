@@ -24,6 +24,21 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 
+// Render puts one reverse proxy in front of the service. Trust exactly that
+// hop so req.ip uses the address Render forwards, without trusting an
+// arbitrary-length X-Forwarded-For chain supplied by a direct client. Local
+// development defaults to no trusted proxies; TRUST_PROXY_HOPS is an explicit
+// 0/1 override for environments with the same topology.
+const configuredProxyHops = process.env.TRUST_PROXY_HOPS;
+const defaultProxyHops = process.env.NODE_ENV === 'production' ? 1 : 0;
+const parsedProxyHops = configuredProxyHops === undefined
+  ? defaultProxyHops
+  : Number(configuredProxyHops);
+const trustProxyHops = Number.isInteger(parsedProxyHops) && parsedProxyHops >= 0 && parsedProxyHops <= 1
+  ? parsedProxyHops
+  : defaultProxyHops;
+app.set('trust proxy', trustProxyHops);
+
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || process.env.FRONTEND_URL || '').split(',').map(s=>s.trim()).filter(Boolean);
 app.use(helmet());
 app.use(cors({
