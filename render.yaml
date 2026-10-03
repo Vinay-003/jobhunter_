@@ -20,6 +20,8 @@ services:
     branch: dev
     installCommand: npm ci --include=dev
     buildCommand: npm ci --include=dev && npm run build
+    # Run migrations as an explicit deploy step, never from web-process startup.
+    preDeployCommand: node dist/db/migrate.js
     startCommand: node dist/server.js
     healthCheckPath: /health
     # Alternative health path (also served): /api/v1/health

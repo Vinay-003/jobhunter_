@@ -16,6 +16,8 @@ import path from 'path';
 import { getDatabaseUrl } from './config/env.js';
 import { csrfProtection } from './middleware/csrf.js';
 import multer from 'multer';
+import db from './config/database.js';
+import { checkSchemaReadiness } from './db/schemaReadiness.js';
 
 dotenv.config();
 
@@ -113,7 +115,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+async function startServer(): Promise<void> {
+  await checkSchemaReadiness(db);
+  app.listen(PORT, '0.0.0.0', () => {
   console.log('='.repeat(50));
   console.log(`🚀 Server is running on http://localhost:${PORT}`);
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -159,6 +163,16 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('  GET  /api/jobs - Get all jobs');
   console.log('  GET  /api/jobs/recommendations - Get recommendations');
   console.log('='.repeat(50));
-});
+  });
+}
+
+// Keep importing the app useful for tests, but never expose a partially ready
+// process in production. A failed check exits before listen is called.
+if (process.env.NODE_ENV !== 'test') {
+  startServer().catch((error: unknown) => {
+    console.error('Database schema readiness check failed:', error instanceof Error ? error.message : 'unknown error');
+    process.exit(1);
+  });
+}
 
 export default app;
