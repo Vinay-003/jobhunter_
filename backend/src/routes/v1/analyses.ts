@@ -3,8 +3,7 @@ import { z } from 'zod';
 import crypto from 'node:crypto';
 import pool from '../../config/database.js';
 import { validate } from '../../middleware/validate.js';
-import * as Session from '../../modules/auth/session.js';
-import jwt from 'jsonwebtoken';
+import { requireSession as authenticateAny } from '../../middleware/requireSession.js';
 import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
 import { buildResumeProfile } from '../../modules/parsing/resumeProfile.js';
 import { scoreReadiness, VERSION as SCORER_VERSION } from '../../modules/ats/readinessScorer.js';
@@ -13,28 +12,24 @@ import { matchJd } from '../../modules/jd/matcher.js';
 import { downloadFile } from '../../modules/storage/supabaseStorage.js';
 import { MockEmbeddingProvider } from '../../providers/embeddings/MockEmbeddingProvider.js';
 import { AwsSageMakerEmbeddingProvider } from '../../providers/embeddings/AwsSageMakerEmbeddingProvider.js';
-import { LocalEmbeddingProvider } from '../../providers/embeddings/LocalEmbeddingProvider.js';
+import { getLocalEmbeddingProvider } from '../../providers/embeddings/LocalEmbeddingProvider.js';
+import { validateVectors } from '../../providers/embeddings/validateVectors.js';
+import { professionalEvidence } from '../../modules/matching/evidenceBuilder.js';
+import { scoreJdRubric, JD_RUBRIC_VERSION } from '../../modules/analysis/jdRubric.js';
+import { analysisSnapshot, REPORT_SCHEMA_VERSION, type ReportSnapshot } from '../../modules/analysis/reportSchema.js';
 
 const router = Router();
 
-function authenticateAny(req:any,res:any,next:any){
-  const cookies = req.cookies || {};
-  const cookieName = process.env.SESSION_COOKIE_NAME || 'jobhunter_session';
-  let token = cookies[cookieName] || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
-  if (!token) return res.status(401).json({ success:false, message:'Authentication required'});
-  Session.verifySession(token).then(sess=>{
-    if (sess) { req.user={ id:sess.user_id }; return next(); }
-    try { const secret=process.env.JWT_SECRET; if(!secret) throw new Error(); const d:any=jwt.verify(token, secret); req.user={id:String(d.id)}; return next(); } catch { return res.status(401).json({ success:false, message:'Invalid session'}); }
-  }).catch(()=> res.status(401).json({ success:false, message:'Invalid session'}));
-}
-
-const PARSER_VERSION='3.0.0';
-const JD_MATCHER_VERSION='2.0.0';
+const PARSER_VERSION='4.0.0';
+const JD_MATCHER_VERSION=JD_RUBRIC_VERSION;
+function hashProfile(profile: unknown) { return crypto.createHash('sha256').update(JSON.stringify(profile)).digest('hex'); }
+function saveSnapshot(snapshot: ReportSnapshot) { return JSON.stringify(snapshot); }
+function serializeRow(row: any) { return { ...row, readiness_score: Number(row.readiness_score), result_json: analysisSnapshot(row) ?? row.result_json }; }
 
 function getEmbeddingProvider(){
   const p = (process.env.EMBEDDING_PROVIDER || 'auto').toLowerCase();
   if (p === 'local' || process.env.USE_LOCAL_EMBEDDINGS === 'true') {
-    return new LocalEmbeddingProvider({ modelId: process.env.LOCAL_EMBEDDING_MODEL });
+    return getLocalEmbeddingProvider();
   }
   if (p === 'mock') return new MockEmbeddingProvider();
   // auto and aws both go through SageMaker provider — it will fallback to mock ONLY via hasAwsCreds check with warning
@@ -65,7 +60,7 @@ async function loadResumeBuffer(resumeRow:any):Promise<Buffer>{
   }
 }
 
-router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId: z.string().min(1), targetLevel: z.string().optional() }) }), async (req:any,res)=>{
+router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId: z.string().uuid(), targetLevel: z.string().optional() }) }), async (req:any,res)=>{
   const userId = String(req.user.id);
   const { resumeId, targetLevel } = req.body;
   try {
@@ -100,15 +95,18 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
       highPriorityIssueCount: readiness.highPriorityIssueCount,
       methodology: readiness.methodology,
     };
+    const createdAt = new Date().toISOString();
+    const snapshot: ReportSnapshot = { success:true, resultSchemaVersion: REPORT_SCHEMA_VERSION, analysisId, resumeId: row.id,
+      fileName: row.original_filename ?? null, createdAt, readiness, profileContentHash: hashProfile(profile),
+      versions: { scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION } };
     try {
-      await pool.query(`INSERT INTO analyses (id, user_id, resume_id, analysis_type, readiness_score, score_breakdown_json, evidence_json, target_level, scorer_version, parser_version, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())`, [analysisId, userId, row.id, 'readiness', readiness.score, JSON.stringify(breakdown), JSON.stringify(evidence), targetLevel||null, SCORER_VERSION, PARSER_VERSION]);
-    } catch(e){
-      // Returning 200 here would hand the SPA an analysisId that has no row — a guaranteed
-      // broken report link. Fail loud instead (mirrored in jd-match below).
+      await pool.query(`INSERT INTO analyses (id,user_id,resume_id,analysis_type,readiness_score,score_breakdown_json,evidence_json,target_level,scorer_version,parser_version,result_schema_version,result_json,profile_version,profile_content_hash,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [analysisId,userId,row.id,'readiness',readiness.score,JSON.stringify(breakdown),JSON.stringify(evidence),targetLevel||null,SCORER_VERSION,PARSER_VERSION,REPORT_SCHEMA_VERSION,saveSnapshot(snapshot),PARSER_VERSION,snapshot.profileContentHash,createdAt]);
+    } catch(e) {
       console.error('[analyses] readiness insert failed:', e);
       return res.status(500).json({ success:false, message:'Failed to save analysis results' });
     }
-    res.json({ success:true, analysisId, resumeId: row.id, readiness, profile, parserVersion: PARSER_VERSION, scorerVersion: SCORER_VERSION });
+    res.json(snapshot);
   } catch(e:any){
     if (e?.code === 'STORED_FILE_MISSING') {
       return res.status(410).json({ success:false, message: e.message });
@@ -118,7 +116,7 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
   }
 });
 
-router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: z.string().min(1), jobDescription: z.string().min(20).max(20000), targetRole: z.string().optional(), targetLevel: z.string().optional() }) }), async (req:any,res)=>{
+router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: z.string().uuid(), jobDescription: z.string().min(20).max(20000), targetRole: z.string().optional(), targetLevel: z.string().optional() }) }), async (req:any,res)=>{
   const userId = String(req.user.id);
   const { resumeId, jobDescription, targetRole, targetLevel } = req.body;
   try {
@@ -138,50 +136,36 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     const jd = parseJd(jobDescription);
     // deterministic match
     const deterministic = matchJd(profile, jd);
-    // semantic part - prepare redacted chunks
-    const resumeChunks:string[] = [];
-    // profile skills + experience bullets as chunks
-    if (profile.skills.length) resumeChunks.push('Skills: ' + profile.skills.join(', '));
-    for (const exp of profile.experience.slice(0,5)) {
-      if (exp.title) resumeChunks.push(exp.title);
-      if (exp.description) resumeChunks.push(exp.description.slice(0,500));
+    const resumeChunks = professionalEvidence(profile);
+    const jdChunks = [...jd.responsibilities.map((s: string) => s.slice(0, 400))];
+    if (!resumeChunks.length || !jdChunks.length) {
+      // A missing evidence source is not permission to embed contact/header text.
+      jdChunks.length = 0;
     }
-    if (!resumeChunks.length) resumeChunks.push(parsed.normalizedText.slice(0,1000));
 
-    const jdChunks:string[] = [];
-    if (jd.title) jdChunks.push(jd.title);
-    jdChunks.push(...jd.responsibilities.slice(0,10).map((s:string)=>s.slice(0,400)));
-    jdChunks.push(...jd.requiredSkills.slice(0,10).map((s:string)=>s.slice(0,200)));
-    if (!jdChunks.length) jdChunks.push(jobDescription.slice(0,1000));
-
-    // embedding — SageMaker/local when configured, mock ONLY on fallback
     const provider = getEmbeddingProvider();
-    const providerName = provider.constructor?.name ?? 'unknown';
-    // deduplicate texts by content hash
     const allTexts = [...resumeChunks, ...jdChunks];
-    const uniq = [...new Set(allTexts.map(t=>t.trim()).filter(Boolean))];
+    const uniq = [...new Set(allTexts.map(t => t.trim()).filter(Boolean))];
     let vectors: number[][] = [];
-    let modelId = 'mock-384';
-    let dimension = 384;
-    let usedMock = true;
-    const embedStart = Date.now();
-    try {
-      const resp = await provider.embed({ texts: uniq, purpose:'jd' });
-      vectors = resp.vectors;
-      modelId = resp.modelId;
-      dimension = resp.dimension;
-      usedMock = modelId.includes('mock');
-      const ms = Date.now() - embedStart;
-      if (usedMock) {
-        console.warn(`[jd-match] mock fallback provider=${providerName} model=${modelId} dim=${dimension} texts=${uniq.length} ms=${ms} — check EMBEDDING_PROVIDER/AWS creds or local venv`);
-      } else {
-        console.log(`[jd-match] embedding success provider=${providerName} model=${modelId} dim=${dimension} texts=${uniq.length} resumeChunks=${resumeChunks.length} jdChunks=${jdChunks.length} ms=${ms}`);
+    let modelId: string | null = null;
+    let dimension: number | null = null;
+    let modelRevision: string | null = null;
+    let embeddingStatus: 'real' | 'mock' | 'unavailable' = 'unavailable';
+    if (uniq.length && jdChunks.length) {
+      try {
+        const resp = await provider.embed({ texts: uniq, purpose:'jd' });
+        validateVectors(resp.vectors, uniq.length, resp.dimension);
+        vectors = resp.vectors;
+        modelId = resp.modelId;
+        dimension = resp.dimension;
+        modelRevision = 'modelRevision' in resp ? (resp.modelRevision as string | null) : null;
+        embeddingStatus = resp.modelId.includes('mock') ? 'mock' : 'real';
+      } catch (e) {
+        console.warn('[jd-match] embedding unavailable:', (e as Error).message);
       }
-      console.log(`[jd-match] skills jdRequired=${jd.requiredSkills.length} matched=${deterministic.matchedRequired?.length ?? 0} missing=${deterministic.missingRequired?.length ?? 0} partial=${deterministic.partialMatches?.length ?? 0} profileSkills=${profile.skills.length}`);
-    } catch(e:any){
-      console.warn(`[jd-match] embed failed provider=${providerName} ms=${Date.now() - embedStart}: ${(e as Error).message}`);
-      return res.json({ success:true, degraded:true, message:'Semantic matching temporarily unavailable. Resume readiness analysis is still available.', readiness, jd, deterministic, jdHash: crypto.createHash('sha256').update(jobDescription).digest('hex').slice(0,16) });
     }
+    // Mock vectors are deterministic test data, never a semantic fit signal.
+    if (embeddingStatus !== 'real') vectors = [];
     // build semantic responsibility coverage: for each jd responsibility find best cosine to resume chunks
     // simple cosine using mock vectors aligned to uniq order
     const textToVec = new Map<string, number[]>();
@@ -191,7 +175,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
       for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
       return dot / (Math.sqrt(na)*Math.sqrt(nb) || 1);
     }
-    const responsibilityCoverage = jd.responsibilities.slice(0,10).map((resp:string)=>{
+    const responsibilityCoverage = jd.responsibilities.map((resp:string)=>{
       const jv = textToVec.get(resp.slice(0,400).trim()) || textToVec.get(resp.trim());
       if (!jv) return { responsibility: resp, matchScore: 0, candidateEvidence: null };
       let best = -1; let bestChunk:string|null=null;
@@ -204,44 +188,34 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
       const score = Math.max(0, Math.min(1, best));
       return { responsibility: resp, matchScore: Number(score.toFixed(3)), candidateEvidence: bestChunk ? bestChunk.slice(0,200) : null };
     });
-    const avgSem = responsibilityCoverage.length ? responsibilityCoverage.reduce((s:number,c:any)=>s+c.matchScore,0)/responsibilityCoverage.length : 0;
-    const semanticScore = Math.round(avgSem * 30); // 30 points allocated
-
-    const explicitPts = Math.round((deterministic.requiredCoverage || 0) * 35);
-    const rolePts = jd.title && profile.skills.some((s:string)=> jd.title!.toLowerCase().includes(s.toLowerCase())) ? 15 : 5;
-    const domainPts = 5;
-    const eduPts = jd.requiredSkills.length===0 ? 10 : (deterministic.requiredCoverage>0.5 ? 8 : 2);
-    const jdMatchScore = Math.min(100, explicitPts + semanticScore + rolePts + domainPts + eduPts);
-
-    let confidence: 'High'|'Medium'|'Low' = 'Medium';
-    if (jobDescription.length > 1000 && jd.requiredSkills.length>=3) confidence='High';
-    else if (jobDescription.length < 300) confidence='Low';
-
+    const rubric = scoreJdRubric(profile, jd, deterministic, responsibilityCoverage);
+    const confidenceReasons = [embeddingStatus !== 'real' ? 'Semantic model unavailable; responsibility score is not inferred' : null,
+      !jd.responsibilities.length ? 'No reliably parsed responsibilities' : null,
+      !resumeChunks.length ? 'No professional resume evidence' : null,
+      rubric.qualificationReasons.length ? 'Qualification gap is separate from technology overlap' : null].filter(Boolean) as string[];
+    const confidence: 'High'|'Medium'|'Low' = confidenceReasons.length || !rubric.pointsPossible ? 'Low' : jd.responsibilities.length < 3 ? 'Medium' : 'High';
+    const jdMatch = { ...rubric, responsibilityCoverage, deterministic,
+      jd: { title: jd.title, seniority: jd.seniority, requiredSkills: jd.requiredSkills,
+        preferredSkills: jd.preferredSkills, responsibilities: jd.responsibilities,
+        yearsExperience: jd.yearsExperience, minYearsExperience: jd.minYears ?? jd.yearsExperience,
+        requirementGroups: jd.requirementGroups ?? null, domainTerms: jd.domainTerms },
+      score: rubric.score };
     const analysisId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
     const jdHash = crypto.createHash('sha256').update(jobDescription).digest('hex');
+    const snapshot: ReportSnapshot = { success:true, resultSchemaVersion: REPORT_SCHEMA_VERSION, analysisId, resumeId: row.id,
+      fileName: row.original_filename ?? null, createdAt, readiness, jdMatch, confidence, confidenceReasons,
+      profileContentHash: hashProfile(profile),
+      versions: { scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION, matcherVersion: JD_MATCHER_VERSION,
+        embeddingModelId: modelId, dimension, usedMock: embeddingStatus === 'mock', embeddingStatus, modelRevision, rubricVersion: JD_RUBRIC_VERSION } };
     try {
-      await pool.query(`INSERT INTO analyses (id, user_id, resume_id, analysis_type, readiness_score, jd_match_score, score_breakdown_json, evidence_json, target_level, jd_hash, scorer_version, parser_version, embedding_model_id, matching_version, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())`, [analysisId, userId, row.id, 'jd_match', readiness.score, jdMatchScore, JSON.stringify({ readiness: readiness.breakdown, jdMatch:{ explicitPts, semanticScore, rolePts, domainPts, eduPts }, deterministic }), JSON.stringify({
-        rules: readiness.rules,
-        strengths: readiness.strengths,
-        warnings: readiness.warnings,
-        priorityActions: readiness.priorityActions,
-        metrics: readiness.metrics,
-        scoreLabel: readiness.scoreLabel,
-        scoreMessage: readiness.scoreMessage,
-        issueCount: readiness.issueCount,
-        highPriorityIssueCount: readiness.highPriorityIssueCount,
-        methodology: readiness.methodology,
-        responsibilityCoverage,
-        deterministic,
-      }), targetLevel||null, jdHash.slice(0,32), SCORER_VERSION, PARSER_VERSION, modelId, JD_MATCHER_VERSION]);
-    } catch(e){
-      // see readiness handler: never return an analysisId that wasn't persisted
+      await pool.query(`INSERT INTO analyses (id,user_id,resume_id,analysis_type,readiness_score,jd_match_score,score_breakdown_json,evidence_json,target_level,jd_hash,scorer_version,parser_version,embedding_model_id,matching_version,result_schema_version,result_json,profile_version,profile_content_hash,embedding_status,embedding_dimension,embedding_model_revision,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+        [analysisId,userId,row.id,'jd_match',readiness.score,rubric.score,JSON.stringify({readiness:readiness.breakdown,jdMatch:rubric.breakdown,deterministic}),JSON.stringify({ ...jdMatch, rules:readiness.rules }),targetLevel||null,jdHash,SCORER_VERSION,PARSER_VERSION,modelId,JD_MATCHER_VERSION,REPORT_SCHEMA_VERSION,saveSnapshot(snapshot),PARSER_VERSION,snapshot.profileContentHash,embeddingStatus,dimension,modelRevision,createdAt]);
+    } catch(e) {
       console.error('[analyses] jd-match insert failed:', e);
       return res.status(500).json({ success:false, message:'Failed to save analysis results' });
     }
-
-    console.log(`[jd-match] done analysisId=${analysisId} provider=${providerName} model=${modelId}${usedMock ? ' (mock fallback — NOT real embeddings)' : ' (real embeddings)'} score=${jdMatchScore} explicit=${explicitPts} semantic=${semanticScore} texts=${vectors.length} ms=${Date.now() - embedStart}`);
-    res.json({ success:true, analysisId, resumeId: row.id, readiness, jdMatch:{ score: jdMatchScore, breakdown:{ explicitMustHave: explicitPts, responsibilitySemantic: semanticScore, roleAlignment: rolePts, domain: domainPts, education: eduPts, confidence }, responsibilityCoverage, deterministic, jd }, versions:{ scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION, matcherVersion: JD_MATCHER_VERSION, embeddingModelId: modelId, dimension, usedMock }, confidence });
+    res.json(snapshot);
   } catch(e:any){
     if (e?.code === 'STORED_FILE_MISSING') {
       return res.status(410).json({ success:false, message: e.message });
@@ -256,6 +230,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
 router.get('/', authenticateAny, async (req:any,res)=>{
   const userId = String(req.user.id);
   const resumeId = req.query.resumeId ? String(req.query.resumeId) : '';
+  if (resumeId && !z.string().uuid().safeParse(resumeId).success) return res.status(400).json({ success:false, message:'Invalid resume ID' });
   const latest = String(req.query.latest ?? '') === 'true';
   try {
     const params:any[] = [userId];
@@ -263,7 +238,7 @@ router.get('/', authenticateAny, async (req:any,res)=>{
     if (resumeId) { params.push(resumeId); where += ` AND resume_id=$${params.length}`; }
     const limit = latest ? 1 : 50;
     const r = await pool.query(`SELECT * FROM analyses WHERE ${where} ORDER BY created_at DESC LIMIT ${limit}`, params);
-    res.json({ success:true, analyses: r.rows });
+    res.json({ success:true, analyses: r.rows.map(serializeRow) });
   } catch(e:any){
     console.error('[analyses] list failed:', e);
     res.status(500).json({ success:false, message:'Failed to list analyses' });
@@ -273,10 +248,11 @@ router.get('/', authenticateAny, async (req:any,res)=>{
 router.get('/:id', authenticateAny, async (req:any,res)=>{
   const userId = String(req.user.id);
   const id = req.params.id;
+  if (!z.string().uuid().safeParse(id).success) return res.status(400).json({ success:false, message:'Invalid analysis ID' });
   try {
     const r = await pool.query('SELECT * FROM analyses WHERE id=$1 AND user_id=$2', [id, userId]);
     if (!r.rows.length) return res.status(404).json({ success:false, message:'Analysis not found'});
-    res.json({ success:true, analysis: r.rows[0]});
+    res.json({ success:true, analysis: serializeRow(r.rows[0])});
   } catch(e:any){
     // a failing query is NOT "not found" — never mask DB errors as 404
     console.error('[analyses] get failed:', e);

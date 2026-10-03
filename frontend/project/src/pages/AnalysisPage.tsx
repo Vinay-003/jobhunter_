@@ -88,7 +88,13 @@ type Readiness = {
 };
 
 type JdMatch = {
-  score?: number;
+  score?: number | null;
+  rawScore?: number;
+  pointsPossible?: number;
+  eligibility?: string;
+  qualificationReasons?: string[];
+  applicability?: Record<string, boolean>;
+  weights?: Record<string, number>;
   breakdown?: Record<string, number | string>;
   responsibilityCoverage?: Array<{ responsibility?: string; matchScore?: number; candidateEvidence?: string | null }>;
   deterministic?: {
@@ -112,17 +118,42 @@ type Versions = {
   embeddingModelId?: string;
   dimension?: number;
   usedMock?: boolean;
+  embeddingStatus?: string;
+  rubricVersion?: string;
 };
 
 type ViewModel = {
   readiness: Readiness;
   jdMatch?: JdMatch;
   confidence?: string;
+  confidenceReasons?: string[];
   fileName?: string;
   createdAt?: string;
   resumeId?: string;
   versions?: Versions;
 };
+
+type AnalysisRow = {
+  result_json?: unknown;
+  score_breakdown_json?: unknown;
+  evidence_json?: unknown;
+  readiness_score?: number | string | null;
+  score?: number | string | null;
+  jd_match_score?: number | string | null;
+  analysis_type?: string;
+  scorer_version?: string;
+  parser_version?: string;
+  matching_version?: string;
+  embedding_model_id?: string;
+  embedding_status?: string;
+  embedding_dimension?: number;
+  created_at?: string;
+  resume_id?: string;
+};
+type StoredBreakdown = { readiness?: Category[]; jdMatch?: Record<string, number>; deterministic?: JdMatch['deterministic'] };
+type StoredEvidence = Pick<Readiness, 'rules' | 'strengths' | 'warnings' | 'priorityActions' | 'metrics' | 'scoreLabel' | 'scoreMessage' | 'methodology' | 'issueCount' | 'highPriorityIssueCount'> &
+  Pick<JdMatch, 'responsibilityCoverage' | 'deterministic'>;
+type AnalysisLocationState = { initialAnalysis?: ViewModel & { analysis?: Readiness }; fileName?: string; createdAt?: string };
 
 function parseJson<T>(value: unknown): T | undefined {
   if (!value) return undefined;
@@ -157,13 +188,21 @@ function actionsFromRules(rules: Rule[]): Action[] {
 
 // Maps a raw `analyses` table row (SELECT * from GET /analyses[/:id]) into the
 // report ViewModel. Shared by AnalysisPage's own fetch and ResumeViewPage.
-export function viewModelFromAnalysisRow(row: any, fileName?: string): ViewModel {
-  const breakdownRaw = parseJson<any>(row.score_breakdown_json);
-  const evidence = parseJson<any>(row.evidence_json) ?? {};
-  const readinessBreakdown: Category[] = Array.isArray(breakdownRaw) ? breakdownRaw : (breakdownRaw?.readiness ?? []);
+export function viewModelFromAnalysisRow(row: AnalysisRow, fileName?: string): ViewModel {
+  const snapshot = parseJson<ViewModel & { resultSchemaVersion: number }>(row.result_json);
+  if (snapshot?.resultSchemaVersion === 1) return {
+    ...snapshot,
+    readiness: { ...snapshot.readiness, score: snapshot.readiness.score == null ? undefined : Number(snapshot.readiness.score) },
+    jdMatch: snapshot.jdMatch ? { ...snapshot.jdMatch, score: snapshot.jdMatch.score == null ? null : Number(snapshot.jdMatch.score) } : undefined,
+    fileName: snapshot.fileName ?? fileName,
+  };
+  const breakdownRaw = parseJson<StoredBreakdown | Category[]>(row.score_breakdown_json);
+  const breakdown = Array.isArray(breakdownRaw) ? undefined : breakdownRaw;
+  const evidence = parseJson<StoredEvidence>(row.evidence_json) ?? {};
+  const readinessBreakdown: Category[] = Array.isArray(breakdownRaw) ? breakdownRaw : (breakdown?.readiness ?? []);
   const rules: Rule[] = evidence.rules ?? readinessBreakdown.flatMap((category: Category) => category.rules ?? []);
   const readiness: Readiness = {
-    score: row.readiness_score ?? row.score,
+    score: row.readiness_score == null && row.score == null ? undefined : Number(row.readiness_score ?? row.score),
     breakdown: readinessBreakdown,
     rules,
     strengths: evidence.strengths ?? [],
@@ -177,19 +216,21 @@ export function viewModelFromAnalysisRow(row: any, fileName?: string): ViewModel
     highPriorityIssueCount: evidence.highPriorityIssueCount,
     version: row.scorer_version,
   };
-  const jdMatch = row.jd_match_score !== null && row.jd_match_score !== undefined ? {
-    score: row.jd_match_score,
-    breakdown: breakdownRaw?.jdMatch,
+  const jdBreakdown = breakdown?.jdMatch;
+  const jdMatch = row.analysis_type === 'jd_match' || row.jd_match_score != null ? {
+    score: row.jd_match_score == null ? null : Number(row.jd_match_score),
+    breakdown: jdBreakdown ? { explicitMustHave: jdBreakdown.explicitMustHave ?? jdBreakdown.explicitPts, responsibilitySemantic: jdBreakdown.responsibilitySemantic ?? jdBreakdown.semanticScore, roleAlignment: jdBreakdown.roleAlignment ?? jdBreakdown.rolePts, domain: jdBreakdown.domain ?? jdBreakdown.domainPts, education: jdBreakdown.education ?? jdBreakdown.eduPts } : undefined,
     responsibilityCoverage: evidence.responsibilityCoverage,
-    deterministic: evidence.deterministic ?? breakdownRaw?.deterministic,
+    deterministic: evidence.deterministic ?? breakdown?.deterministic,
   } as JdMatch : undefined;
   const versions: Versions = {
     scorerVersion: row.scorer_version,
     parserVersion: row.parser_version,
     matcherVersion: row.matching_version,
     embeddingModelId: row.embedding_model_id,
-    dimension: undefined,
+    dimension: row.embedding_dimension,
     usedMock: typeof row.embedding_model_id === 'string' ? row.embedding_model_id.includes('mock') : undefined,
+    embeddingStatus: row.embedding_status,
   };
   return { readiness, jdMatch, fileName, createdAt: row.created_at, resumeId: row.resume_id, versions };
 }
@@ -216,6 +257,7 @@ function buildReportMarkdown(view: ViewModel): string {
   lines.push('');
   lines.push(`- Date: ${view.createdAt || 'n/a'}`);
   lines.push(`- Scorer: ${view.versions?.scorerVersion || r.version || 'n/a'} | Parser: ${view.versions?.parserVersion || 'n/a'} | Matcher: ${view.versions?.matcherVersion || 'n/a'}`);
+  lines.push(`- Embedding status: ${view.versions?.embeddingStatus || (view.versions?.usedMock ? 'mock' : 'not recorded')}`);
   lines.push(`- Embedding model: ${view.versions?.embeddingModelId || 'n/a'}${view.versions?.usedMock ? ' (MOCK FALLBACK — not semantic)' : ''}`);
   lines.push('');
   lines.push(`## Resume Health: ${r.score ?? '—'}/100 ${r.scoreLabel ? `(${r.scoreLabel})` : ''}`);
@@ -226,8 +268,8 @@ function buildReportMarkdown(view: ViewModel): string {
   if (r.strengths?.length) r.strengths.forEach((s) => lines.push(`- ✅ ${s}`));
   else lines.push('- (none recorded)');
   lines.push('');
-  lines.push('### Minus points (failing checks)');
-  if (r.warnings?.length) r.warnings.forEach((w) => lines.push(`- ❌ ${w}`));
+  lines.push('### Warnings and checks needing attention');
+  if (r.warnings?.length) r.warnings.forEach((w) => lines.push(`- ⚠️ ${w}`));
   else lines.push('- (none recorded)');
   lines.push('');
   lines.push('### Category breakdown');
@@ -253,17 +295,22 @@ function buildReportMarkdown(view: ViewModel): string {
   if (view.jdMatch) {
     const j = view.jdMatch;
     const d = j.deterministic;
-    lines.push(`## Tailored Match (resume + JD): ${j.score ?? '—'}/100 ${view.confidence ? `(${view.confidence} confidence)` : ''}`);
+    lines.push(`## Tailored fit index (resume + JD): ${j.score ?? '—'}/100 ${view.confidence ? `(${view.confidence} confidence)` : ''}`);
     lines.push('');
     lines.push(`- JD title: ${j.jd?.title || 'n/a'}`);
-    lines.push(`- Required coverage: ${d?.requiredCoverage !== undefined ? `${Math.round(d.requiredCoverage * 100)}%` : 'n/a'} | Explicit score: ${(j.breakdown as any)?.explicitMustHave ?? 'n/a'} | Semantic: ${(j.breakdown as any)?.responsibilitySemantic ?? 'n/a'}`);
+    lines.push(`- Qualification: ${j.eligibility || 'unknown'}; ${j.qualificationReasons?.join('; ') || 'Requires independent verification'}`);
+    lines.push(`- Raw points: ${j.rawScore ?? 'n/a'}/${j.pointsPossible ?? 'n/a'} applicable; rubric: ${view.versions?.rubricVersion || 'legacy'}`);
+    lines.push(`- Confidence reasons: ${view.confidenceReasons?.join('; ') || '(none recorded)'}`);
+    if (j.applicability) lines.push(`- Applicable components: ${Object.entries(j.applicability).filter(([, v]) => v).map(([k]) => k).sort().join(', ')}`);
+  lines.push(`- Required coverage: ${d?.requiredCoverage !== undefined ? `${Math.round(d.requiredCoverage * 100)}%` : 'n/a'} | Explicit score: ${j.breakdown?.explicitMustHave ?? 'n/a'} | Semantic: ${j.breakdown?.responsibilitySemantic ?? 'n/a'}`);
     lines.push(`- Matched required: ${(d?.matchedRequired ?? []).join(', ') || '(none — exact match only)'}`);
+    lines.push(`- Preferred skills matched: ${(d?.matchedPreferred ?? []).join(', ') || '(none)'}`);
     lines.push(`- Missing required: ${(d?.missingRequired ?? []).join(', ') || '(none)'}`);
     if (d?.partialMatches?.length) {
       lines.push(`- Transferable (family hints, not scored): ${d.partialMatches.map((p) => `${p.resumeSkill} → ${p.jdSkill} (${p.family})`).join('; ')}`);
     }
     if (d?.strengths?.length) { lines.push(''); lines.push('### JD plus points'); d.strengths.forEach((s) => lines.push(`- ✅ ${s}`)); }
-    if (d?.warnings?.length) { lines.push(''); lines.push('### JD minus points'); d.warnings.forEach((w) => lines.push(`- ❌ ${w}`)); }
+    if (d?.warnings?.length) { lines.push(''); lines.push('### JD minus points'); d.warnings.forEach((w) => lines.push(`- ⚠️ ${w}`)); }
     if (j.responsibilityCoverage?.length) {
       lines.push(''); lines.push('### Responsibility coverage (semantic per bullet)');
       j.responsibilityCoverage.forEach((rc) => lines.push(`- [${rc.matchScore}] ${rc.responsibility}${rc.candidateEvidence ? ` | Evidence: ${rc.candidateEvidence}` : ''}`));
@@ -352,17 +399,19 @@ function CategoryPanel({ category }: { category: Category }) {
 export default function AnalysisPage({ initialView }: { initialView?: ViewModel } = {}) {
   const { id } = useParams();
   const location = useLocation();
-  const initial = initialView ?? (location.state as any)?.initialAnalysis;
-  const initialName = initialView?.fileName ?? (location.state as any)?.fileName;
-  const initialCreatedAt = initialView?.createdAt ?? (location.state as any)?.createdAt;
+  const locationState = location.state as AnalysisLocationState | null;
+  const initial = initialView ?? locationState?.initialAnalysis;
+  const initialName = initial?.fileName ?? locationState?.fileName;
+  const initialCreatedAt = initial?.createdAt ?? locationState?.createdAt;
   const [loading, setLoading] = useState(!initial);
   const [error, setError] = useState('');
   const [view, setView] = useState<ViewModel | null>(() => {
     if (!initial) return null;
     return {
-      readiness: initial.readiness ?? initial.analysis ?? {},
+       readiness: initial.readiness ?? ('analysis' in initial ? initial.analysis : undefined) ?? {},
       jdMatch: initial.jdMatch,
       confidence: initial.confidence,
+      confidenceReasons: initial.confidenceReasons,
       fileName: initialName,
       createdAt: initialCreatedAt,
       resumeId: initial.resumeId,
@@ -370,6 +419,7 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
     };
   });
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
 
   useEffect(() => {
     if (initial || !id) return;
@@ -377,12 +427,14 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
     (async () => {
       try {
         const response = await api.get(`/analyses/${id}`);
-        const row = (response.data as any)?.analysis ?? response.data;
+        const body = response.data as { analysis?: AnalysisRow } & AnalysisRow;
+        const row = body.analysis ?? body;
         let fileName: string | undefined;
         if (row.resume_id) {
           try {
             const resumeResponse = await api.get(`/resumes/${row.resume_id}`);
-            fileName = (resumeResponse.data as any)?.resume?.fileName ?? (resumeResponse.data as any)?.resume?.file_name;
+            const resume = (resumeResponse.data as { resume?: { fileName?: string; file_name?: string } })?.resume;
+            fileName = resume?.fileName ?? resume?.file_name;
           } catch { /* report is still usable without the filename */ }
         }
         if (!cancelled) setView(viewModelFromAnalysisRow(row, fileName));
@@ -472,22 +524,23 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
               <span className="jh-chip"><ListChecks size={12} className="mr-1" /> {passed}/{totalChecks || '—'} checks passed</span>
               <span className="jh-chip"><AlertCircle size={12} className="mr-1" /> {readiness.issueCount ?? totalChecks - passed} issues</span>
               <span className="jh-chip" title="Resume Health scores document quality only — it never uses the JD or embeddings"><FileSearch size={12} className="mr-1" /> Resume Health • document-only</span>
-              {view.jdMatch
-                ? <span className="jh-chip border-amber-400/20 text-amber-200" title={`Embedding model: ${view.versions?.embeddingModelId || 'unknown'}`}><Target size={12} className="mr-1" /> Tailored Match • {shortModel(view.versions?.embeddingModelId)}{view.versions?.usedMock ? ' • mock' : ' • real'}</span>
+               {view.jdMatch
+                 ? <span className="jh-chip border-amber-400/20 text-amber-200" title={`Embedding model: ${view.versions?.embeddingModelId || 'unknown'}`}><Target size={12} className="mr-1" /> Tailored Match • {shortModel(view.versions?.embeddingModelId)} • {view.versions?.embeddingStatus || 'status not recorded'}</span>
                 : <span className="jh-chip opacity-70" title="Re-run with a JD to get Tailored Match"><Target size={12} className="mr-1" /> Tailored Match • not run</span>}
             </div>
             <p className="mt-5 max-w-3xl text-[11px] leading-5 text-slate-600">{readiness.methodology?.note || 'This is a Resume Health / ATS-readiness diagnostic, not an employer ATS ranking or a probability of getting hired. Job-specific relevance is scored separately.'}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <button
-                onClick={() => { try { void navigator.clipboard.writeText(buildReportMarkdown(view)); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* clipboard unavailable */ } }}
+                onClick={async () => { try { await navigator.clipboard.writeText(buildReportMarkdown(view)); setCopyError(''); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { setCopied(false); setCopyError('Could not copy report. Use Download .md instead.'); } }}
                 className="jh-button-ghost"
               >{copied ? <><Check size={14} /> Copied for LLM</> : 'Copy report for LLM'}</button>
               <button
-                onClick={() => { const blob = new Blob([buildReportMarkdown(view)], { type: 'text/markdown' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `jobhunter-report-${id || 'resume'}.md`; a.click(); URL.revokeObjectURL(url); }}
-                className="jh-button-ghost"
-              >Download .md</button>
-              <button onClick={() => window.print()} className="jh-button-primary">Print / Save PDF <ArrowRight size={14} /></button>
-            </div>
+                 onClick={() => { const blob = new Blob([buildReportMarkdown(view)], { type: 'text/markdown' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `jobhunter-report-${id || 'resume'}.md`; a.click(); URL.revokeObjectURL(url); }}
+                 className="jh-button-ghost"
+               >Download .md</button>
+               <button onClick={() => window.print()} className="jh-button-primary">Print / Save PDF <ArrowRight size={14} /></button>
+             </div>
+             {copyError && <p role="alert" className="mt-2 text-xs text-rose-200">{copyError}</p>}
           </div>
 
           <div className="flex items-center gap-5 xl:pr-2">
@@ -516,14 +569,14 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-amber-300/70">Separate job-specific signal</p>
               <h2 className="mt-1 text-lg font-semibold text-white">Tailored Match</h2>
-              <p className="mt-1 text-xs leading-5 text-stone-500">This measures fit to the JD you supplied. It does not change the Resume Health score above.</p>
+              <p className="mt-1 text-xs leading-5 text-stone-500">This is a fit index, not an employer ATS score or hiring probability. It measures fit to the JD you supplied. It does not change the Resume Health score above.</p>
             </div>
             <div className="text-left lg:text-right">
               <p className="text-3xl font-semibold tracking-[-0.04em] text-amber-300">{view.jdMatch.score ?? '—'}<span className="text-sm font-normal text-stone-600">/100</span></p>
               <p className="text-[10px] text-slate-600">{view.confidence ? `${view.confidence} confidence` : 'JD-specific fit'}</p>
             </div>
           </div>
-          <p className="mt-3 text-[11px] text-slate-600">Embedding model: <span className="text-slate-300">{view.versions?.embeddingModelId || 'unknown'}</span>{view.versions?.usedMock ? ' (mock fallback — semantic scores are placeholders)' : ' (real embeddings)'} • Exact skill match is strict (PostgreSQL ≠ MySQL); family hints below are not scored.</p>
+          <p className="mt-3 text-[11px] text-slate-600">Embedding model: <span className="text-slate-300">{view.versions?.embeddingModelId || 'unknown'}</span>{view.versions?.embeddingStatus === 'real' ? ' (real embeddings)' : ' (semantic evidence unavailable)'} • Exact skill match is strict (PostgreSQL ≠ MySQL); family hints below are not scored.</p>
           {view.jdMatch.deterministic && (
             <div className="mt-5 grid gap-3 md:grid-cols-2">
               <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.035] p-3.5">
@@ -633,7 +686,7 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
             <p className="text-[11px] font-semibold text-slate-300">Scoring provenance</p>
             <div className="mt-2 space-y-1 text-[11px] leading-5 text-slate-500">
               <p>Resume Health: <span className="text-slate-300">rule-based, no JD</span> (never embeddings)</p>
-              <p>Tailored Match: <span className="text-slate-300">{shortModel(view.versions?.embeddingModelId)}</span>{view.versions?.usedMock ? ' • mock fallback' : ' • real embeddings'}</p>
+               <p>Tailored Match: <span className="text-slate-300">{shortModel(view.versions?.embeddingModelId)}</span> • {view.versions?.embeddingStatus || 'status not recorded'}</p>
               {readiness.version && <p>Scorer v{readiness.version}</p>}
             </div>
           </div>
