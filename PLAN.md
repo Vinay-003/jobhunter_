@@ -6,9 +6,13 @@
 > every Render upload silently fell to disk). Fix = fail-loud logs + `/health?deep=1`
 > probe (`fee869b`, `58c24d2`) + Render `NODE_VERSION` 22.14.0 (`64e66c3`); prod upload
 > re-probed end-to-end (`storage_bucket='resumes'`, object listed, download roundtrip,
-> DELETE cleans object — §8.1). **Still open:** S1 legacy-row marking (bytes gone),
-> S2/Q2 (bucket now empty — confirm user cleared it), Q6 (frontend majors), Q7 (lockfile).
-> Q1/Q5 answered (env vars correct; Node 22 shipped).
+> DELETE cleans object — §8.1). **Round 2 (2026-10-03, user-directed):** S9 FK-race fix
+> (`efe9a26`), S1 executed as **removal** (user chose delete over marking: 8 dead rows
+> purged, 1 alive resume kept), retention cap **max 3 resumes/user** (`4411010`,
+> live-probed), Q7 lockfile single-source (`1c8ade1`), Q6 majors shipped — rr7+vite8
+> (`d153268`, tsc/build/E2E green). **Still open:** nothing from the §8 backlog —
+> S2 closed by user decision (**no cron**), Q2 answered (user cleared bucket).
+> Q1/Q5 answered earlier (env vars correct; Node 22 shipped).
 >
 > **Line refs:** re-verified 2026-10-03 against current `HEAD`. Issue sections whose bugs
 > are fixed label their evidence **[pre-fix @ `114773a`]** — those line numbers describe
@@ -175,6 +179,13 @@ object is gone. UX is honest already (`8e4b127`: analysis → **410** + re-uploa
 download → 404 with resume-view copy); remaining optional step = S1 status marking.
 Confirmed earlier in Render logs: `readiness error Error: Local
 file not found: /opt/render/project/src/backend/uploads/hc/test.pdf`.
+
+**Resolved 2026-10-03 — user chose removal over marking:** the 8 dead `bucket='local'`
+rows were deleted (cascade cleaned analyses/runs); the sole surviving row (`35cb26ae…`,
+`bucket='resumes'`) was verified to still have its 174,204 B object and was kept.
+Incident note: a bucket-wide sweep during that cleanup over-removed that object; it was
+restored byte-identical from `~/Downloads/resume/resuem_clgf.pdf` (sha256 matches the
+DB row) — bucket state verified after.
 
 ---
 
@@ -418,8 +429,8 @@ likely order of impact:
 
 | # | Finding | Where (current @ HEAD) | Suggested fix | Status |
 |---|---|---|---|---|
-| S1 | All 10 remaining resume rows now have unreachable bytes (9 `storage_bucket='local'`, disk wiped by deploys; 1 `='resumes'` whose object is gone) → download 404, re-analysis 410. **Live proof in prod logs:** `readiness error Error: Local file not found: /opt/render/project/src/backend/uploads/hc/test.pdf` (hand-crafted test row — path lacks the `<userId>/<resumeId>/` prefix — since deleted) | `resumes.ts:213`, `analyses.ts:45-64`; rows: 9 `local` + 1 `resumes` (object gone) | Backfill impossible (bytes gone) → for unrecoverable rows mark `processing_status='lost'` + UI: "re-upload required" | **Partial** — lost-file UX done (`8e4b127`: analysis on a missing file → **410** + re-upload copy, live-probed; download already 404s). Marking = open (data decision for user) |
-| S2 | Orphaned storage object: `resumes/301b4e73-…/1769d56b-…/hc_resume.pdf`, 1,396 bytes, created 2026-10-02 19:50:13 UTC; owner not in `users`, no `resumes`/`analyses` rows | Supabase bucket | ~~Ask user before deleting~~ | **Gone** — 2026-10-03 probe: bucket root list `[]`, object GET → 404 (user appears to have cleared the bucket; confirm Q2). Sweep job itself still open |
+| S1 | All 10 remaining resume rows now have unreachable bytes (9 `storage_bucket='local'`, disk wiped by deploys; 1 `='resumes'` whose object is gone) → download 404, re-analysis 410. **Live proof in prod logs:** `readiness error Error: Local file not found: /opt/render/project/src/backend/uploads/hc/test.pdf` (hand-crafted test row — path lacks the `<userId>/<resumeId>/` prefix — since deleted) | `resumes.ts:213`, `analyses.ts:45-64`; rows: 9 `local` + 1 `resumes` (object gone) | Backfill impossible (bytes gone) → for unrecoverable rows mark `processing_status='lost'` + UI: "re-upload required" | **✅ resolved — user chose removal over marking (2026-10-03):** 8 dead `local` rows deleted (cascade), 1 alive row (`35cb26ae`, object verified) kept; lost-file UX still done (`8e4b127`: analysis on a missing file → **410**, download → 404) |
+| S2 | Orphaned storage object: `resumes/301b4e73-…/1769d56b-…/hc_resume.pdf`, 1,396 bytes, created 2026-10-02 19:50:13 UTC; owner not in `users`, no `resumes`/`analyses` rows | Supabase bucket | ~~Ask user before deleting~~ | **Gone** — 2026-10-03 probe: bucket root list `[]`, object GET → 404 (user confirmed they cleared it). **Sweep job closed by user decision 2026-10-03: no cron** — orphan sources are (a) storage upload OK + DB insert fails, (b) row-first delete with storage failure, (c) manual dashboard edits; fail-loud + retention eviction make (a) rare. Revisit only if orphans reappear → then a manual `scripts/` sweep |
 | S3 | PDF parsed twice per upload (page count + profile) | `resumes.ts:61` (parse) → `:117` (reuse) | Parse once, reuse `parsed` | ✅ `d2d36b7` |
 | S4 | `loadResumeBuffer` fallback did `fs.existsSync(path)` on a *relative* object path — never matches | `analyses.ts:45-64` (fallback removed) | Remove or resolve against `localUploadsDir()` | ✅ `8e4b127` (removed; `downloadFile` already resolves local paths; missing bytes now tagged `STORED_FILE_MISSING` → 410) |
 | S5 | Resume delete must clean storage by the **recorded** bucket (not hardcode) | `resumes.ts:179` (deletes by the recorded bucket) | Delete by recorded bucket; orphan sweep (S2) as backstop | ✅ live-verified 2026-10-03: prod `DELETE /resumes/<id>` on a `bucket='resumes'` row removed the Supabase object (bucket `[]` after) |
@@ -427,6 +438,7 @@ likely order of impact:
 | S7 | `SessionGuard` legacy fallback `GET /latest-resume` can mark a user "authed" on a 200 from an unrelated endpoint | `router.tsx:62-70` (fallback removed) | Drop fallback; rely on `/auth/session` 401 → guest | ✅ `165d7ba` |
 | S8 | Startup banner printed `💾 Database: Not configured` while the DB was actually connected (it checked only `DATABASE_URL`; the app connects via `PG_DATABASE_STRING`) | `server.ts:114-127`, `env.ts:67-69` | Use `getDatabaseUrl()` presence (or the pool) for the banner; print a masked DSN source instead of a misleading status | ✅ `c675764` — banner prints `configured via PG_DATABASE_STRING` (source name only, never the DSN); live-verified |
 | S9 | Recommendation run hits `recommendation_runs.resume_id` FK (23503) when the resume is deleted during the ~55–140s ranking phase (entry ownership check passed earlier); response still claimed `success:true` with a phantom `runId` | `recommendations.ts` persist block (was `:177`) | Re-check resume exists right before insert; skip persist with one-line warn; respond `runId:null, persisted:false` (JobsPage only reads `recommendations`, GET `/:id` already 404s) | ✅ live-probed both paths: race → warn + no FK + `persisted:false`; happy → `persisted:true` + GET `/:id` 200; E2E 18/18 + 2/2 |
+| S10 | No per-user resume cap — unlimited uploads, no eviction policy | `resumes.ts` POST `/` | User rule: **max 3 resumes/user**; after insert evict oldest beyond the cap (row first → cascade, then storage object best-effort); expose `evicted[]` in upload response | ✅ `4411010` — live-probed: uploads 1–3 clean, 4th evicted #1 (row+object gone), GET list → 3; E2E 18/18 + 2/2 |
 
 ---
 
@@ -474,10 +486,11 @@ lived only in `/tmp/opencode/jh/`.
    download roundtrip + DELETE cleans it (2026-10-03 00:08–00:10 UTC).
 2. ✅/⏳ **Issue 4 (deps/runtime):** backend `npm audit fix` → **done** (`2532a45`, 0 vulns);
    frontend `npm audit fix` (non-breaking) → **done** (`f56492a`, 11 → 4);
-   frontend majors (`react-router-dom@7`, `vite@8`) → *open, Q6*; lockfile
-   single-source (`installCommand: npm ci`, bun.lock decision) → *open, Q7*;
-   `NODE_VERSION` → **done** (`64e66c3`: 22.14.0 in `render.yaml`, required by Issue 1;
-   `engines` field still open under Q7).
+   frontend majors (`react-router-dom@7`, `vite@8`) → **done** (`d153268`: rr 7.18.4,
+   vite 8.3.2, plugin-react 6.1.1; tsc + build + E2E 18/18 + 2/2 green); lockfile
+   single-source (`installCommand: npm ci`, bun.lock dropped, engines added) →
+   **done** (`1c8ade1`);
+   `NODE_VERSION` → **done** (`64e66c3`: 22.14.0 in `render.yaml`, required by Issue 1).
 3. ✅ **Issue 2 (resume view):** `/app/resumes/:id` route + resume view (report if analyzed,
    card+Download+Analyze CTA if not) + `?resumeId` on AtsPage + backend `resumeId` filter
    + error-status/copy fixes → **done** (`30933e9`, `9a58578`); browser test: Resumes →
@@ -494,24 +507,30 @@ lived only in `/tmp/opencode/jh/`.
    `cd frontend/project && npx tsc --noEmit && npm run build` · local feature run (§0 rule 4) · scripted
    browser suite (§0 rule 5: 18/18 + 2/2) · live curl probes from Issues 1–2.
    **Pushed** — `origin/dev` at `64e66c3` (everything through Issue 1).
+7. ✅ **Round 2 (2026-10-03, user-directed):** S9 FK-race fix (`efe9a26`) · S1 removal
+   executed (data op: 8 dead rows purged, alive row kept) · S10 retention cap 3/user
+   (`4411010`) · Q7 lockfile/engines (`1c8ade1`) · Q6 majors rr7+vite8 (`d153268`) ·
+   PLAN docs (this commit). Gates green per unit; pushed.
 
 ## 9. Open questions for the user
 
 1. ~~**Render checks for Issue 1**~~ **answered 2026-10-03:** (a) env vars all set,
    `https://` URL correct; (b) the log grep was superseded — `/health?deep=1` captured
    the failure reason directly (`createClient: native WebSocket not found`).
-2. **Orphan file (S2):** ~~delete `resumes/301b4e73-…/hc_resume.pdf`~~ — bucket is now
-   empty (object gone, GET → 404). *Did you clear the storage bucket yourself?* (If not,
-   need to understand who removed it.) Periodic sweep job still open.
-3. **Screenshot account:** your screenshots show resume records, but `301b4e73-…` (from
+2. ~~**Orphan file (S2):**~~ **answered 2026-10-03:** yes, the user cleared the bucket
+   themselves; and the sweep job is **closed by decision — no cron** (sources explained;
+   revisit only if orphans recur, then manual `scripts/` sweep).
+3. **Screenshot account:** your screenshots show resume records, but `301b4e73…` (from
    your signed URL) has no rows in the DB — which login was the app using? (Determines
    whether your real account's data is among the 14 `local` rows.)
 4. **Keep-alive:** is the backend on Render asleep often? If yes, decide whether to rely
    on `KEEPALIVE.md`'s cron or upgrade the instance (dominant factor in Issue 3).
 5. ~~**Node version for Issue 4:**~~ **done** — Render moved to 22.14.0 (`64e66c3`,
    forced by Issue 1). Local dev still runs bun; consider aligning later.
-6. **Frontend majors (Issue 4 fix 3):** go to `react-router-dom@7` + `vite@8` now (with
-   full E2E), or ship non-breaking fixes first and schedule majors separately?
-7. **Package manager (Issue 4 fix 4):** recommended — Render installs with
-   `npm ci` only (set `installCommand`), and we drop/regenerate the stale `bun.lock`.
-   Keep bun as your local runner anyway?
+6. ~~**Frontend majors (Issue 4 fix 3):**~~ **done** — `react-router-dom@7.18.4` +
+   `vite@8.3.2` shipped (`d153268`) with full E2E (18/18 + 2/2).
+7. ~~**Package manager (Issue 4 fix 4):**~~ **done** — `installCommand: npm ci` set for
+   both services, stale `bun.lock` + orphan root lockfile dropped, `engines` added
+   (`1c8ade1`). Bun remains your local runner (`bun run src/server.ts`).
+   Note: `render.yaml` changes apply on the next Render **blueprint sync/deploy** —
+   sync the blueprint in the dashboard if the installCommand isn't picked up.
