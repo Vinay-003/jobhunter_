@@ -85,7 +85,7 @@ Subsequent test/documentation commits contain the reproducible isolated acceptan
 | Frontend `npm run build` | Passed |
 | Frontend `npm run lint` | Passed with 0 errors / 7 existing warnings (Fast Refresh export structure and legacy Home hook dependencies) |
 | Migrations 006 and 007, isolated PostgreSQL | Applied successfully |
-| Isolated Playwright/API/SQL acceptance | **50 checks passed** |
+| Isolated Playwright/API/SQL acceptance | **53 checks passed**, including visible senior-qualification warnings |
 
 The browser acceptance run covered three actual supplied PDFs, all six JD flows with real local embeddings, exact fresh-tab clipboard parity, byte-identical downloads, fractional scores, profile preferences, malformed IDs, unreadable uploads, CSRF, logout and revoked opaque bearer rejection.
 
@@ -161,4 +161,4 @@ The script requires installed Python Playwright/Chromium and `psql`. It does not
 
 ### Verification limitations
 
-The 50-check integration run tested the isolated development cookie configuration and cached synthetic retrieval, not production `SameSite=None` across unrelated hosted domains. Frontend token handling supports the latter, but it still needs a deployment-origin acceptance test. The legacy `/api/*` system remains separate and has not been migrated to the new session model; restrict or retire it based on actual clients rather than assuming V1 fixes secure every legacy route.
+The 53-check integration run tested the isolated development cookie configuration and cached synthetic retrieval, not production `SameSite=None` across unrelated hosted domains. Frontend token handling supports the latter, but it still needs a deployment-origin acceptance test. The legacy `/api/*` system remains separate and has not been migrated to the new session model; restrict or retire it based on actual clients rather than assuming V1 fixes secure every legacy route.

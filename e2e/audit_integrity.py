@@ -98,7 +98,9 @@ with sync_playwright() as p:
                 (FIXTURES/'parity-restored.md').write_text(restored)
             check(label+' '+kind+' exact fresh-tab export parity',initial==restored)
             check(label+' '+kind+' all responsibilities covered',len(data['jdMatch']['responsibilityCoverage'])==(12 if kind=='junior' else 15))
-            if kind=='senior':check(label+' senior qualification gap',data['jdMatch']['eligibility']=='ineligible')
+            if kind=='senior':
+                check(label+' senior qualification gap',data['jdMatch']['eligibility']=='ineligible')
+                check(label+' senior warning visible',fresh.get_by_text('Not currently qualified for this role',exact=True).is_visible())
             row[kind]=data['jdMatch']['score'];fresh.close()
         scores.append(row)
     (FIXTURES/'implementation-scores.json').write_text(json.dumps(scores,indent=2))

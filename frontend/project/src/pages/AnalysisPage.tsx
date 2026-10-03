@@ -576,6 +576,14 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
               <p className="text-[10px] text-slate-600">{view.confidence ? `${view.confidence} confidence` : 'JD-specific fit'}</p>
             </div>
           </div>
+          <div className="mt-4 rounded-xl border border-stone-700 bg-stone-950/70 p-4" aria-label="Qualification assessment">
+            <p className={`text-sm font-semibold ${view.jdMatch.eligibility === 'ineligible' ? 'text-rose-200' : 'text-amber-200'}`}>
+              {view.jdMatch.eligibility === 'ineligible' ? 'Not currently qualified for this role' : view.jdMatch.eligibility === 'eligible' ? 'No confirmed qualification barrier' : 'Qualifications need verification'}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-stone-400">Technology similarity does not establish professional tenure, degree completion or senior engineering scope.</p>
+            {!!view.jdMatch.qualificationReasons?.length && <ul className="mt-2 space-y-1 text-xs text-stone-300">{view.jdMatch.qualificationReasons.map(reason => <li key={reason}>• {reason}</li>)}</ul>}
+            {view.jdMatch.pointsPossible !== undefined && <p className="mt-2 text-xs text-stone-400">{view.jdMatch.rawScore ?? '—'} / {view.jdMatch.pointsPossible} applicable points, normalized to a 100-point fit index.</p>}
+          </div>
           <p className="mt-3 text-[11px] text-slate-600">Embedding model: <span className="text-slate-300">{view.versions?.embeddingModelId || 'unknown'}</span>{view.versions?.embeddingStatus === 'real' ? ' (real embeddings)' : ' (semantic evidence unavailable)'} • Exact skill match is strict (PostgreSQL ≠ MySQL); family hints below are not scored.</p>
           {view.jdMatch.deterministic && (
             <div className="mt-5 grid gap-3 md:grid-cols-2">
