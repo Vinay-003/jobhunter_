@@ -26,6 +26,7 @@ const createRunSchema = z.object({
   resumeId: z.string().uuid(), targetRoles: list.optional(), locations: list.optional(), workModes: list.optional(),
   emphasizedSkills: list.optional(), excludedRoles: list.optional(), seniority: list.optional(),
   daysPosted: z.number().int().min(1).max(365).optional(), keywords: z.string().trim().max(120).optional(),
+  forceRefresh: z.boolean().optional(),
   idempotencyKey: z.string().uuid().optional(),
 });
 
@@ -43,13 +44,28 @@ const pagination = z.object({ offset: z.coerce.number().int().min(0).default(0),
 
 router.post('/', authenticate, validate({ body: createRunSchema }), async (req: any, res) => {
   const userId = String(req.user.id);
-  const { resumeId, idempotencyKey } = req.body;
+  const { resumeId, idempotencyKey, forceRefresh = false } = req.body;
   let runId: string | null = null;
   try {
     const resume = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
     if (!resume.rows[0]) return res.status(404).json({ success: false, message: 'Resume not found' });
     const saved = await pool.query('SELECT * FROM user_job_preferences WHERE user_id=$1', [userId]);
     const preferences = effectivePreferences(saved.rows[0], req.body);
+    // A normal page visit reuses the persisted report. Only an explicit refresh
+    // is allowed to spend provider/API/embedding work again.
+    if (!forceRefresh) {
+      const cachedRun = await pool.query(
+        `SELECT id,status,returned_count FROM recommendation_runs
+          WHERE user_id=$1 AND resume_id=$2 AND status='completed'
+            AND preferences_snapshot_json = $3::jsonb
+          ORDER BY completed_at DESC NULLS LAST LIMIT 1`,
+        [userId, resumeId, JSON.stringify(preferences)],
+      );
+      if (cachedRun.rows[0]) {
+        const prior = cachedRun.rows[0];
+        return res.json({ success: true, persisted: true, cached: true, runId: prior.id, status: prior.status, returnedCount: prior.returned_count, recommendations: await results(prior.id, 0, 20), nextOffset: prior.returned_count > 20 ? 20 : null });
+      }
+    }
     if (idempotencyKey) {
       const previous = await pool.query('SELECT * FROM recommendation_runs WHERE user_id=$1 AND idempotency_key=$2', [userId, idempotencyKey]);
       if (previous.rows[0]) {

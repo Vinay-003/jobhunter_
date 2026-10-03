@@ -348,7 +348,7 @@ export default function JobsPage() {
         workModes: prefs.workMode.split(',').map((value) => value.trim()).filter(Boolean),
         ...(prefs.daysPosted ? { daysPosted: Number(prefs.daysPosted) } : {}),
         ...(prefs.keywords.trim() ? { keywords: prefs.keywords.trim() } : {}),
-        idempotencyKey: crypto.randomUUID(),
+        ...(isRefresh ? { forceRefresh: true, idempotencyKey: crypto.randomUUID() } : {}),
       };
       // Local model loads ~90s cold; SageMaker cold starts can also exceed 60s.
       const response = await api.post('/recommendation-runs', payload, { timeout: 260000, signal: controller.signal });

@@ -18,6 +18,11 @@ const countries: Record<string, string[]> = {
 };
 const indianCities = /\b(?:delhi|mumbai|bengaluru|bangalore|hyderabad|pune|chennai|kolkata|noida|gurugram|gurgaon)\b/i;
 const germanCities = /\b(?:hamburg|berlin|munich|münchen|frankfurt|nuremberg|nürnberg|cologne)\b/i;
+// Provider feeds frequently omit the country for US listings and return only
+// "City, ST". Treat these well-known state abbreviations as geographic
+// evidence when the user explicitly requested India (rather than silently
+// keeping the job as merely uncertain).
+const usStateLocation = /,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/i;
 const countryOf = (value: string) => Object.entries(countries).find(([, aliases]) => aliases.some((alias) => alias.length === 2 && !['us','uk'].includes(alias) ? value.trim().toLowerCase() === alias : new RegExp(`\\b${alias}\\b`, 'i').test(value)))?.[0] ?? null;
 export function countryCodeForLocation(location: string | null | undefined): string | null {
   if (!location) return null;
@@ -83,7 +88,9 @@ export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | 
     if (locationCountry && !locationCountries.includes(locationCountry)) locationCountries.push(locationCountry);
     const worldwide = /\b(?:worldwide|global(?:ly)?)\b/i.test(location);
     const remote = /\bremote\b/i.test(location) || mode === 'remote';
-    if (allowed.length && !allowed.some(country => requested.includes(country!))) blockers.push('Geographic residency restriction');
+    const clearlyOutsideIndia = requested.includes('india') && (usStateLocation.test(location) || /\b(?:united states|usa|canada|germany|united kingdom|uk|australia)\b/i.test(location));
+    if (clearlyOutsideIndia) blockers.push('Location differs');
+    else if (allowed.length && !allowed.some(country => requested.includes(country!))) blockers.push('Geographic residency restriction');
     else if (!allowed.length && locationCountries.length && !locationCountries.some(country => requested.includes(country)) && !prefs.locations.some(loc => normalize(location).includes(normalize(loc)))) blockers.push('Location differs');
     else if (!allowed.length && /\b(?:europe|eu|eea)\b/i.test(location) && requested.includes('india')) blockers.push('Outside advertised European region');
     else if (!allowed.length && !worldwide && remote && !locationCountry) unknown.push('Remote residency eligibility unavailable');
