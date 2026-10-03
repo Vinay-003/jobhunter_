@@ -24,6 +24,10 @@ function hasSupabase(): boolean {
   return Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
+// Last getSupabaseClient failure, surfaced by probeStorage() so /health?deep=1
+// is self-explaining without console-log access.
+let lastClientFailure = '';
+
 async function getSupabaseClient(): Promise<unknown> {
   let mod: unknown;
   try {
@@ -31,6 +35,7 @@ async function getSupabaseClient(): Promise<unknown> {
     mod = await import('@supabase/supabase-js');
   } catch (err) {
     // Issue 1 fix 1.2: never swallow silently — one greppable token explains the fallback.
+    lastClientFailure = `import: ${(err as Error)?.message ?? err}`.slice(0, 200);
     console.error('[supabaseStorage] FALLBACK reason=import — @supabase/supabase-js unavailable:', (err as Error)?.message ?? err);
     return null;
   }
@@ -38,6 +43,7 @@ async function getSupabaseClient(): Promise<unknown> {
     const { createClient } = mod as { createClient: (url: string, key: string) => unknown };
     return createClient(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!);
   } catch (err) {
+    lastClientFailure = `create-client: ${(err as Error)?.message ?? err}`.slice(0, 200);
     console.error('[supabaseStorage] FALLBACK reason=create-client — SUPABASE_URL rejected:', (err as Error)?.message ?? err, `url=${JSON.stringify(env.SUPABASE_URL)}`);
     return null;
   }
@@ -88,7 +94,7 @@ export async function uploadFile(
       if (isProd) throw new Error(`Supabase upload failed: ${msg}`);
     } else {
       // reason already logged by getSupabaseClient (reason=import|create-client)
-      if (isProd) throw new Error('Supabase client unavailable (see [supabaseStorage] FALLBACK log)');
+      if (isProd) throw new Error(`Supabase client unavailable (${lastClientFailure || 'see [supabaseStorage] FALLBACK log'})`);
       console.warn('[supabaseStorage] FALLBACK reason=client-null (dev only — writing local)');
     }
   } else {
@@ -111,7 +117,7 @@ export async function probeStorage(): Promise<string> {
     const client = (await getSupabaseClient()) as {
       storage: { from: (b: string) => { list: (p: string, opts: unknown) => Promise<{ error: unknown }> } };
     } | null;
-    if (!client) return 'error client-unavailable';
+    if (!client) return `error client-unavailable (${lastClientFailure || 'no detail'})`;
     const { error } = await client.storage.from(getBucket()).list('', { limit: 1 });
     if (error) return `error ${(error as { code?: string }).code ?? (error as { message?: string }).message ?? 'unknown'}`;
     return 'ok';
