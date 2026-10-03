@@ -113,13 +113,36 @@ router.post('/', authenticateAny, upload.single('resume'), async (req:any,res)=>
       client.release();
     }
 
+    // Retention: max 3 resumes per user — evict the oldest beyond the cap
+    // (row first so a failed delete can never orphan storage; storage best-effort after).
+    const MAX_RESUMES_PER_USER = 3;
+    const evicted: string[] = [];
+    try {
+      const olds = await pool.query(
+        'SELECT id, storage_bucket, storage_object_path FROM resumes WHERE user_id=$1 AND id<>$2 ORDER BY created_at ASC',
+        [userId, row.id]);
+      const extra = olds.rows.length - (MAX_RESUMES_PER_USER - 1);
+      for (const old of olds.rows.slice(0, Math.max(0, extra))) {
+        try {
+          const d = await pool.query('DELETE FROM resumes WHERE id=$1', [old.id]);
+          if (d.rowCount) {
+            evicted.push(old.id);
+            if (old.storage_object_path) {
+              try { await deleteFile({ bucket: old.storage_bucket || 'resumes', path: old.storage_object_path, sha256: '' }); } catch{}
+            }
+          }
+        } catch(e){ console.warn('retention eviction failed for', old.id, e); }
+      }
+      if (evicted.length) console.warn(`[retention] evicted ${evicted.length} oldest resume(s) for user ${userId} (cap ${MAX_RESUMES_PER_USER})`);
+    } catch(e){ console.warn('retention check warning', e); }
+
     try {
       const p = parsed ?? await parsePdfBuffer(buf);
       const profile = buildResumeProfile(p);
       await pool.query('INSERT INTO resume_profiles (resume_id, profile_json, profile_version) VALUES ($1,$2,$3) ON CONFLICT (resume_id) DO UPDATE SET profile_json=$2, profile_version=$3, updated_at=now()', [row.id, JSON.stringify(profile), '2.0.0']).catch(()=>{});
     } catch{}
 
-    res.json({ success:true, resume:{ id: row.id, fileName: row.original_filename || row.file_name, uploadDate: row.created_at || row.upload_date, status: row.processing_status || row.status, sha256, pageCount, storageBucket: storage.bucket }});
+    res.json({ success:true, evicted, resume:{ id: row.id, fileName: row.original_filename || row.file_name, uploadDate: row.created_at || row.upload_date, status: row.processing_status || row.status, sha256, pageCount, storageBucket: storage.bucket }});
   } catch(e:any){
     console.error('upload error', e);
     res.status(500).json({ success:false, message: e.message || 'Upload failed'});
