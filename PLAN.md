@@ -426,6 +426,7 @@ likely order of impact:
 | S6 | Docs claim green: README "2026-10-02 green sweep" while prod storage is broken | `README.md` (status section), `SYSTEM_DESIGN.md` §17 | Re-verify & update **in the same commit** as the fixes | ✅ this docs commit — README audit note + `SYSTEM_DESIGN.md` §17 |
 | S7 | `SessionGuard` legacy fallback `GET /latest-resume` can mark a user "authed" on a 200 from an unrelated endpoint | `router.tsx:62-70` (fallback removed) | Drop fallback; rely on `/auth/session` 401 → guest | ✅ `165d7ba` |
 | S8 | Startup banner printed `💾 Database: Not configured` while the DB was actually connected (it checked only `DATABASE_URL`; the app connects via `PG_DATABASE_STRING`) | `server.ts:114-127`, `env.ts:67-69` | Use `getDatabaseUrl()` presence (or the pool) for the banner; print a masked DSN source instead of a misleading status | ✅ `c675764` — banner prints `configured via PG_DATABASE_STRING` (source name only, never the DSN); live-verified |
+| S9 | Recommendation run hits `recommendation_runs.resume_id` FK (23503) when the resume is deleted during the ~55–140s ranking phase (entry ownership check passed earlier); response still claimed `success:true` with a phantom `runId` | `recommendations.ts` persist block (was `:177`) | Re-check resume exists right before insert; skip persist with one-line warn; respond `runId:null, persisted:false` (JobsPage only reads `recommendations`, GET `/:id` already 404s) | ✅ live-probed both paths: race → warn + no FK + `persisted:false`; happy → `persisted:true` + GET `/:id` 200; E2E 18/18 + 2/2 |
 
 ---
 

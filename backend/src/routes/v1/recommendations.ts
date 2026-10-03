@@ -173,23 +173,33 @@ router.post('/', authenticateAny, validate({ body: createRunSchema }), async (re
     const runId = crypto.randomUUID();
     const rankerVersion = '2.0.0';
     console.log(`[recommendations] runId=${runId} queries=${limited.length} fetched=${allJobs.length} deduped=${deduped.length} ranked=${ranked.length} model=${runEmbeddingModelId}${runUsedMock ? ' (mock fallback)' : ''}`);
+    let persistedRunId: string | null = null;
     try {
-      await pool.query('INSERT INTO recommendation_runs (id, user_id, resume_id, preferences_snapshot_json, ranker_version, embedding_model_id, status, created_at, completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now(),now())', [runId, userId, resumeId, JSON.stringify(preferences), rankerVersion, runEmbeddingModelId, 'completed']);
-      for (let i=0;i<ranked.slice(0,20).length;i++){
-        const job = ranked[i];
-        // ensure job exists in jobs table - upsert
-        let jobId = job.id;
-        if (!jobId) {
-          try {
-            const ins = await pool.query('INSERT INTO jobs (id, source, external_id, title, company, location, description, description_quality, url, fetched_at, content_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),$10) ON CONFLICT DO NOTHING RETURNING id', [crypto.randomUUID(), job.source||'jooble', job.externalId||null, job.title, job.company||null, job.location||null, job.description||null, job.descriptionQuality||'snippet', job.url, crypto.createHash('sha256').update((job.title||'')+(job.description||'')).digest('hex')]);
-            jobId = ins.rows[0]?.id || crypto.randomUUID();
-          } catch{ jobId = crypto.randomUUID(); }
+      // Re-check before insert: ranking takes ~55s and the resume can be deleted
+      // meanwhile — inserting then would hit the recommendation_runs.resume_id FK
+      // after all the work is done (23503 in prod, 2026-10-03).
+      const still = await pool.query('SELECT 1 FROM resumes WHERE id=$1', [resumeId]);
+      if (!still.rows[0]) {
+        console.warn(`[recommendations] run ${runId} not persisted — resume ${resumeId} was deleted during ranking`);
+      } else {
+        await pool.query('INSERT INTO recommendation_runs (id, user_id, resume_id, preferences_snapshot_json, ranker_version, embedding_model_id, status, created_at, completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,now(),now())', [runId, userId, resumeId, JSON.stringify(preferences), rankerVersion, runEmbeddingModelId, 'completed']);
+        persistedRunId = runId;
+        for (let i=0;i<ranked.slice(0,20).length;i++){
+          const job = ranked[i];
+          // ensure job exists in jobs table - upsert
+          let jobId = job.id;
+          if (!jobId) {
+            try {
+              const ins = await pool.query('INSERT INTO jobs (id, source, external_id, title, company, location, description, description_quality, url, fetched_at, content_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),$10) ON CONFLICT DO NOTHING RETURNING id', [crypto.randomUUID(), job.source||'jooble', job.externalId||null, job.title, job.company||null, job.location||null, job.description||null, job.descriptionQuality||'snippet', job.url, crypto.createHash('sha256').update((job.title||'')+(job.description||'')).digest('hex')]);
+              jobId = ins.rows[0]?.id || crypto.randomUUID();
+            } catch{ jobId = crypto.randomUUID(); }
+          }
+          await pool.query('INSERT INTO recommendations (run_id, job_id, rank, fit_score, confidence, breakdown_json, evidence_json) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [runId, jobId, i+1, job.fitScore, job.confidence, JSON.stringify(job.breakdown), JSON.stringify(job.evidence)]).catch(()=>{});
         }
-        await pool.query('INSERT INTO recommendations (run_id, job_id, rank, fit_score, confidence, breakdown_json, evidence_json) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING', [runId, jobId, i+1, job.fitScore, job.confidence, JSON.stringify(job.breakdown), JSON.stringify(job.evidence)]).catch(()=>{});
       }
     } catch(e){ console.warn('run persist warning', e); }
 
-    res.json({ success:true, runId, totalFetched: allJobs.length, deduped: deduped.length, sources: sourceCounts, recommendations: ranked.slice(0,20), versions:{ rankerVersion, embeddingModelId: runEmbeddingModelId, usedMock: runUsedMock } });
+    res.json({ success:true, runId: persistedRunId, persisted: persistedRunId !== null, totalFetched: allJobs.length, deduped: deduped.length, sources: sourceCounts, recommendations: ranked.slice(0,20), versions:{ rankerVersion, embeddingModelId: runEmbeddingModelId, usedMock: runUsedMock } });
   } catch(e:any){
     console.error('recommendation run error', e);
     res.status(500).json({ success:false, message:e.message });
