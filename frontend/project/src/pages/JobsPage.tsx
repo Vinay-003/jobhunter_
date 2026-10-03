@@ -17,6 +17,7 @@ import {
   Sparkles,
   Target,
   X,
+  Copy,
 } from 'lucide-react';
 
 type BreakdownItem = { label: string; value: number };
@@ -82,6 +83,13 @@ function safeText(value?: string): string {
     .replace(/&#39;/g, "'")
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function displayValue(value: unknown): string {
+  if (typeof value === 'string') return safeText(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (value && typeof value === 'object') return safeText(JSON.stringify(value));
+  return '';
 }
 
 function safeExternalUrl(value?: string) {
@@ -156,8 +164,8 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold text-white">{job.title}</h3>
-              <p className="mt-0.5 truncate text-xs text-slate-500">{job.company || 'Company not listed'}</p>
+               <h3 className="truncate text-sm font-semibold text-white">{displayValue(job.title)}</h3>
+               <p className="mt-0.5 truncate text-xs text-slate-500">{displayValue(job.company) || 'Company not listed'}</p>
             </div>
             <div className={`shrink-0 rounded-xl border px-2.5 py-1.5 text-center ${tone.border} ${tone.bg}`}>
               <p className={`text-base font-semibold leading-none ${tone.text}`}>{score}%</p>
@@ -166,7 +174,7 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[10px] text-slate-600">
-            {job.location && <span className="flex items-center gap-1"><MapPin size={11} /> {job.location}</span>}
+             {job.location && <span className="flex items-center gap-1"><MapPin size={11} /> {displayValue(job.location)}</span>}
             {job.jobLevel && <span className="flex items-center gap-1"><Briefcase size={11} /> {job.jobLevel}</span>}
             {job.confidence && <span className="flex items-center gap-1"><Target size={11} /> {job.confidence} confidence</span>}
             {job.eligibility && <span>{job.eligibility.status === 'eligible' ? 'No confirmed barrier' : job.eligibility.status === 'uncertain' ? 'Qualifications unverified' : 'Eligibility barrier'}</span>}
@@ -174,7 +182,7 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
 
           {!!job.matchedSkills?.length && (
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {job.matchedSkills.slice(0, 4).map((skill) => <span key={skill} className="rounded-full border border-emerald-400/10 bg-emerald-400/[0.035] px-2 py-0.5 text-[9px] font-medium text-emerald-100/65">{skill}</span>)}
+              {job.matchedSkills.slice(0, 4).map((skill) => <span key={displayValue(skill)} className="rounded-full border border-emerald-400/10 bg-emerald-400/[0.035] px-2 py-0.5 text-[9px] font-medium text-emerald-100/65">{displayValue(skill)}</span>)}
               {job.matchedSkills.length > 4 && <span className="rounded-full border border-white/[0.055] px-2 py-0.5 text-[9px] text-slate-600">+{job.matchedSkills.length - 4}</span>}
             </div>
           )}
@@ -199,10 +207,10 @@ function JobDetail({ job }: { job: Job }) {
         <div className="flex min-w-0 gap-4">
           <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-white/[0.07] bg-white/[0.035] text-slate-300"><Building2 size={21} /></span>
           <div className="min-w-0">
-            <h2 className="text-xl font-semibold tracking-[-0.03em] text-white">{job.title}</h2>
-            <p className="mt-1 text-sm text-slate-500">{job.company || 'Company not listed'}</p>
+             <h2 className="text-xl font-semibold tracking-[-0.03em] text-white">{displayValue(job.title)}</h2>
+             <p className="mt-1 text-sm text-slate-500">{displayValue(job.company) || 'Company not listed'}</p>
             <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-600">
-              {job.location && <span className="jh-chip"><MapPin size={11} className="mr-1" />{job.location}</span>}
+               {job.location && <span className="jh-chip"><MapPin size={11} className="mr-1" />{displayValue(job.location)}</span>}
               {job.type && <span className="jh-chip">{job.type}</span>}
               {job.workMode && <span className="jh-chip">{job.workMode}</span>}
               {job.salary && job.salary !== 'Not specified' && <span className="jh-chip">{job.salary}</span>}
@@ -242,13 +250,13 @@ function JobDetail({ job }: { job: Job }) {
         <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.03] p-4">
           <div className="flex items-center gap-2 text-[11px] font-semibold text-emerald-200"><Check size={13} /> Matched skills</div>
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {job.matchedSkills?.length ? job.matchedSkills.map((skill) => <span key={skill} className="rounded-full border border-emerald-400/10 bg-emerald-400/[0.04] px-2 py-1 text-[9px] text-emerald-100/70">{skill}</span>) : <span className="text-[10px] text-slate-600">No explicit matched-skill list returned.</span>}
+            {job.matchedSkills?.length ? job.matchedSkills.map((skill) => <span key={displayValue(skill)} className="rounded-full border border-emerald-400/10 bg-emerald-400/[0.04] px-2 py-1 text-[9px] text-emerald-100/70">{displayValue(skill)}</span>) : <span className="text-[10px] text-slate-600">No explicit matched-skill list returned.</span>}
           </div>
         </div>
         <div className="rounded-xl border border-rose-400/10 bg-rose-400/[0.03] p-4">
           <div className="flex items-center gap-2 text-[11px] font-semibold text-rose-200"><AlertCircle size={13} /> Skill gaps</div>
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {job.missingSkills?.length ? job.missingSkills.map((skill) => <span key={skill} className="rounded-full border border-rose-400/10 bg-rose-400/[0.04] px-2 py-1 text-[9px] text-rose-100/70">{skill}</span>) : <span className="text-[10px] text-slate-600">No explicit required-skill gaps returned.</span>}
+            {job.missingSkills?.length ? job.missingSkills.map((skill) => <span key={displayValue(skill)} className="rounded-full border border-rose-400/10 bg-rose-400/[0.04] px-2 py-1 text-[9px] text-rose-100/70">{displayValue(skill)}</span>) : <span className="text-[10px] text-slate-600">No explicit required-skill gaps returned.</span>}
           </div>
         </div>
       </div>
@@ -257,7 +265,7 @@ function JobDetail({ job }: { job: Job }) {
         <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.06] p-4">
           <p className="text-[11px] font-semibold text-amber-200">Why this job surfaced</p>
           <ul className="mt-2.5 space-y-2 text-[11px] leading-5 text-stone-500">
-            {[...reasons, ...(job.evidence ?? [])].slice(0, 6).map((reason, index) => <li key={index} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-amber-300/70" /><span>{reason}</span></li>)}
+             {[...reasons, ...(job.evidence ?? [])].slice(0, 6).map((reason, index) => <li key={index} className="flex gap-2"><span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-amber-300/70" /><span>{displayValue(reason)}</span></li>)}
           </ul>
         </div>
       )}
@@ -390,6 +398,17 @@ export default function JobsPage() {
   const selected = visibleJobs[Math.min(selectedIndex, Math.max(0, visibleJobs.length - 1))];
   const topMatches = visibleJobs.filter((job) => scoreOf(job) >= 75).length;
   const selectedResumeName = resumes.find((resume) => resume.id === selectedResume)?.fileName ?? resumes.find((resume) => resume.id === selectedResume)?.file_name;
+  const copyMatches = async () => {
+    const markdown = visibleJobs.map((job, index) => {
+      const lines = [`## ${index + 1}. ${displayValue(job.title)}`, `- Company: ${displayValue(job.company) || 'Not listed'}`, `- Location: ${displayValue(job.location) || 'Not listed'}`, `- Fit score: ${scoreOf(job)}%`];
+      if (job.breakdown?.length) lines.push(`- Breakdown: ${job.breakdown.map((item) => `${item.label} ${Math.round(item.value)}`).join(', ')}`);
+      if (job.matchedSkills?.length) lines.push(`- Matched skills: ${job.matchedSkills.map(displayValue).join(', ')}`);
+      if (job.missingSkills?.length) lines.push(`- Skill gaps: ${job.missingSkills.map(displayValue).join(', ')}`);
+      if (job.link) lines.push(`- Link: ${job.link}`);
+      return lines.join('\n');
+    }).join('\n\n');
+    await navigator.clipboard.writeText(`# JobHunter match report\n\nResume: ${selectedResumeName || 'Unknown'}\n\n${markdown}`);
+  };
 
   return (
     <div className="space-y-6 pb-10">
@@ -465,7 +484,7 @@ export default function JobsPage() {
       ) : (
         <section className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
           <div className="jh-surface-strong p-3 xl:max-h-[calc(100vh-150px)] xl:overflow-y-auto jh-scrollbar">
-            <div className="sticky top-0 z-10 mb-2 flex items-center justify-between rounded-xl bg-[#10131f]/95 px-2 py-2 backdrop-blur"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-600">Ranked opportunities</p><span className="text-[10px] text-slate-700">best fit first</span></div>
+             <div className="sticky top-0 z-10 mb-2 flex items-center justify-between rounded-xl bg-[#10131f]/95 px-2 py-2 backdrop-blur"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-600">Ranked opportunities</p><button onClick={copyMatches} className="flex items-center gap-1 text-[10px] text-amber-300 hover:text-amber-200" title="Copy match report as Markdown"><Copy size={12} /> Copy report</button></div>
             <div className="space-y-2.5">{visibleJobs.map((job, index) => <JobCard key={String(job.id ?? job.jobId ?? `${job.title}-${job.company}-${index}`)} job={job} active={index === selectedIndex} onSelect={() => setSelectedIndex(index)} />)}</div>
             {nextOffset !== null && <button className="jh-button-ghost mt-4 w-full" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Loading…' : `Load more (${jobs.length} of ${total})`}</button>}
           </div>
