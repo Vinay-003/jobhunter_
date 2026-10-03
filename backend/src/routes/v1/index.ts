@@ -6,6 +6,7 @@ import profile from './profile.js';
 import recommendations from './recommendations.js';
 import keepalive from '../keepalive.js';
 import { probeStorage } from '../../modules/storage/supabaseStorage.js';
+import { issueCsrfToken } from '../../middleware/csrf.js';
 
 const router = Router();
 
@@ -13,7 +14,7 @@ router.use('/auth', auth);
 router.use('/resumes', resumes);
 router.use('/analyses', analyses);
 router.use('/profile', profile);
-router.use('/job-preferences', profile); // alias
+router.get('/csrf', issueCsrfToken);
 router.use('/recommendation-runs', recommendations);
 router.use('/recommendations', recommendations);
 router.use('/keepalive', keepalive);

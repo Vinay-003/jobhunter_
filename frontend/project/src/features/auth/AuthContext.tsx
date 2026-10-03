@@ -1,11 +1,12 @@
 // src/features/auth/AuthContext.tsx
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import api, { getApiErrorMessage } from '../../lib/api';
+import api, { ensureCsrfToken, getApiErrorMessage } from '../../lib/api';
 
 export interface User {
-  id: number;
+  id: string;
   username: string;
   email: string;
+  display_name?: string;
 }
 
 interface AuthState {
@@ -37,6 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoading(true);
         // 8s cap (Issue 3): a sleeping backend must not hold the UI hostage to the
         // global 60s axios timeout — on timeout we resolve as guest.
+        await ensureCsrfToken();
         const res = await api.get('/auth/session', { timeout: 8000 });
         const u = (res.data as { user?: User })?.user ?? null;
         setUser(u);
@@ -64,8 +66,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     setError(null);
     try {
+      await ensureCsrfToken();
       const res = await api.post('/auth/login', { email, password });
-      const data = res.data as { user?: User; token?: string };
+      const data = res.data as { user?: User };
       if (data.user) setUser(data.user);
       else await refresh();
     } catch (err) {
@@ -81,6 +84,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     setError(null);
     try {
+      await ensureCsrfToken();
       await api.post('/auth/signup', { username, email, password });
     } catch (err) {
       const msg = getApiErrorMessage(err);
@@ -93,16 +97,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
+      await ensureCsrfToken();
       await api.post('/auth/logout');
-    } catch {}
+    } catch (error) { throw new Error(getApiErrorMessage(error)); }
     setUser(null);
     setLoading(false);
   };
 
   const logoutAll = async () => {
     try {
+      await ensureCsrfToken();
       await api.post('/auth/logout-all');
-    } catch {}
+    } catch (error) { throw new Error(getApiErrorMessage(error)); }
     setUser(null);
   };
 

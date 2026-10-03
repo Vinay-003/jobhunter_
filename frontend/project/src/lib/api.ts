@@ -1,7 +1,7 @@
 // src/lib/api.ts - central API client
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
+const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 export interface ApiError {
   message: string;
@@ -12,7 +12,7 @@ export interface ApiError {
 
 function getCsrfToken(): string | null {
   // Try cookie first (double-submit pattern), then meta tag
-  const match = document.cookie.match(/(?:^|;\s*)csrfToken=([^;]*)/);
+  const match = document.cookie.match(/(?:^|;\s*)jobhunter_csrf=([^;]*)/);
   if (match?.[1]) return decodeURIComponent(match[1]);
   const meta = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]');
   if (meta?.content) return meta.content;
@@ -32,13 +32,26 @@ export const api = axios.create({
   timeout: 60000,
 });
 
+let csrfRequest: Promise<void> | null = null;
+// The API cookie may belong to another origin and cannot be read through
+// document.cookie. Its CORS-approved token response is kept only in memory.
+let apiCsrfToken: string | null = null;
+export function ensureCsrfToken(): Promise<void> {
+  if (apiCsrfToken) return Promise.resolve();
+  if (!csrfRequest) csrfRequest = api.get<{csrfToken:string}>('/csrf').then(response => {
+    if (!/^[a-f0-9]{64}$/.test(response.data.csrfToken)) throw new Error('Invalid CSRF response');
+    apiCsrfToken = response.data.csrfToken;
+  }).finally(() => { csrfRequest = null; });
+  return csrfRequest;
+}
+
 // Request interceptor: attach CSRF token
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = getCsrfToken();
+    const sameCookieHost = new URL(baseURL, window.location.href).hostname === window.location.hostname;
+    const token = (sameCookieHost ? getCsrfToken() : null) ?? apiCsrfToken;
     if (token && config.headers) {
       (config.headers as Record<string, string>)['X-CSRF-Token'] = token;
-      (config.headers as Record<string, string>)['X-XSRF-TOKEN'] = token;
     }
     return config;
   },

@@ -78,7 +78,7 @@ export async function logoutAll(userId: string): Promise<number> {
   return rowCount ?? 0;
 }
 
-function extractToken(req: Request): string | null {
+export function extractToken(req: Request): string | null {
   // 1) cookie
   const cookies: Record<string, string> | undefined = (req as unknown as { cookies?: Record<string, string> }).cookies;
   if (cookies && cookies[COOKIE_NAME]) return cookies[COOKIE_NAME];
@@ -86,7 +86,7 @@ function extractToken(req: Request): string | null {
   const cookieHeader = req.headers.cookie;
   if (cookieHeader) {
     const m = cookieHeader.match(new RegExp(`${COOKIE_NAME}=([^;\\s]+)`));
-    if (m) return decodeURIComponent(m[1]);
+    if (m) { try { return decodeURIComponent(m[1]); } catch { return null; } }
   }
   // 2) Authorization Bearer fallback
   const auth = req.headers.authorization;

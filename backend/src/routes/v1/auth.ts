@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import pool from '../../config/database.js';
 import { validate } from '../../middleware/validate.js';
 import * as Session from '../../modules/auth/session.js';
+import { requireSession } from '../../middleware/requireSession.js';
 
 const router = Router();
 
@@ -72,84 +72,36 @@ router.post('/login', validate({ body: loginSchema }), async (req, res) => {
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ success:false, message:'Invalid credentials'});
     await pool.query('UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=$1', [user.id]).catch(()=>{});
-    // create opaque session
-    let token:string|null=null;
-    try {
-      const s = await Session.createSession(String(user.id), req.headers['user-agent'] as string);
-      token = s.token;
-      Session.setSessionCookie(res, token);
-    } catch (e) {
-      console.warn('session create failed, falling back to JWT', e);
-    }
-    // also issue JWT for compatibility
-    const jwtSecret = process.env.JWT_SECRET;
-    let jwtToken:string|undefined;
-    if (jwtSecret) {
-      jwtToken = jwt.sign({ id:user.id, email:user.email }, jwtSecret, { expiresIn:'7d' });
-    }
-    res.json({ success:true, message:'Login successful', token: jwtToken, sessionToken: token, user:{ id:user.id, username:user.username ?? user.display_name, email:user.email, display_name: user.display_name }});
+    const { token } = await Session.createSession(String(user.id), req.headers['user-agent']);
+    Session.setSessionCookie(res, token);
+    res.json({ success:true, message:'Login successful', user:{ id:user.id, username:user.username ?? user.display_name, email:user.email, display_name: user.display_name }});
   } catch (e) {
     console.error('login error', e);
     res.status(500).json({ success:false, message:'Error during login'});
   }
 });
 
-router.post('/logout', async (req, res)=>{
-  // try session logout via cookie or bearer
-  const cookies = (req as any).cookies || {};
-  const cookieName = process.env.SESSION_COOKIE_NAME || 'jobhunter_session';
-  let token = cookies[cookieName];
-  if (!token) {
-    const hdr = req.headers.authorization;
-    if (hdr && hdr.startsWith('Bearer ')) token = hdr.slice(7);
-  }
-  if (token) await Session.logout(token).catch(()=>{});
+router.post('/logout', requireSession, async (req, res, next)=>{
+  try { await Session.logout(Session.extractToken(req)!); }
+  catch (error) { return next(error); }
   Session.clearSessionCookie(res);
   res.json({ success:true, message:'Logged out'});
 });
 
-router.post('/logout-all', Session.authenticateSession, async (req:any, res)=>{
-  await Session.logoutAll(String(req.user.id));
-  Session.clearSessionCookie(res);
-  res.json({ success:true, message:'All sessions revoked'});
+router.post('/logout-all', requireSession, async (req:any, res, next)=>{
+  try {
+    await Session.logoutAll(String(req.user.id));
+    Session.clearSessionCookie(res);
+    res.json({ success:true, message:'All sessions revoked'});
+  } catch (error) { next(error); }
 });
 
-router.get('/session', async (req, res)=>{
-  const cookies = (req as any).cookies || {};
-  const cookieName = process.env.SESSION_COOKIE_NAME || 'jobhunter_session';
-  let token = cookies[cookieName];
-  if (!token) {
-    const hdr = req.headers.authorization;
-    if (hdr && hdr.startsWith('Bearer ')) token = hdr.slice(7);
-  }
-  if (!token) return res.status(401).json({ success:false, message:'Not authenticated'});
-  // try opaque session first
-  const sess = await Session.verifySession(token).catch(()=>null);
-  if (sess) {
-    let u;
-    try {
-      u = await pool.query('SELECT id, username, email, display_name FROM users WHERE id=$1', [sess.user_id]);
-    } catch {
-      u = await pool.query('SELECT id, email, display_name FROM users WHERE id=$1', [sess.user_id]);
-    }
-    return res.json({ success:true, user: u.rows[0] });
-  }
-  // fallback JWT
+router.get('/session', requireSession, async (req:any, res, next)=>{
   try {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) throw new Error('no secret');
-    const decoded:any = jwt.verify(token, secret);
-    let u;
-    try {
-      u = await pool.query('SELECT id, username, email, display_name FROM users WHERE id=$1', [decoded.id]);
-    } catch {
-      u = await pool.query('SELECT id, email, display_name FROM users WHERE id=$1', [decoded.id]);
-    }
+    const u = await pool.query('SELECT id, email, display_name FROM users WHERE id=$1', [req.user.id]);
     if (!u.rows.length) return res.status(401).json({ success:false, message:'Invalid session'});
-    return res.json({ success:true, user: u.rows[0] });
-  } catch {
-    return res.status(401).json({ success:false, message:'Invalid session'});
-  }
+    return res.json({ success:true, user: { ...u.rows[0], username: u.rows[0].display_name } });
+  } catch (error) { next(error); }
 });
 
 export default router;

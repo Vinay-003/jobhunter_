@@ -14,6 +14,8 @@ import v1Router from './routes/v1/index.js';
 import fs from 'fs';
 import path from 'path';
 import { getDatabaseUrl } from './config/env.js';
+import { csrfProtection } from './middleware/csrf.js';
+import multer from 'multer';
 
 dotenv.config();
 
@@ -31,8 +33,11 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 const authLimiter = rateLimit({ windowMs: 15*60*1000, max: 20, standardHeaders: true, legacyHeaders: false });
-app.use('/api/auth', authLimiter);
+app.post(['/api/auth/login', '/api/auth/signup'], authLimiter);
 const uploadLimiter = rateLimit({ windowMs: 60*1000, max: 10, standardHeaders: true, legacyHeaders: false });
+app.post(['/api/v1/auth/login', '/api/v1/auth/signup'], authLimiter);
+app.post('/api/v1/resumes', uploadLimiter);
+app.use('/api/v1', csrfProtection);
 
 // Create required directories (ephemeral, for temp processing only - primary storage is Supabase)
 const uploadsDir = path.join(process.cwd(), 'uploads');
@@ -100,10 +105,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
     return next(err);
   }
   
-  res.status(err.status || 500).json({ 
+  const status = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE' ? 413
+    : err.status === 415 ? 415 : err.status === 413 ? 413 : 500;
+  res.status(status).json({
     success: false,
-    error: err.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    message: status === 413 ? 'Upload exceeds size limit' : status === 415 ? 'Only PDF files are allowed' : 'Internal server error',
   });
 });
 
@@ -132,10 +138,10 @@ app.listen(PORT, '0.0.0.0', () => {
   // ~60-90s cold SentenceTransformer load (frontend jd-match timeout is 180s).
   if ((process.env.EMBEDDING_PROVIDER || 'auto').toLowerCase() === 'local') {
     console.log('[embeddings] warming up local model in background...');
-    import('./providers/embeddings/LocalEmbeddingProvider.js').then(async ({ LocalEmbeddingProvider }) => {
+    import('./providers/embeddings/LocalEmbeddingProvider.js').then(async ({ getLocalEmbeddingProvider }) => {
       try {
         const t0 = Date.now();
-        const p = new LocalEmbeddingProvider({});
+        const p = getLocalEmbeddingProvider();
         const r = await p.embed({ texts: ['warmup'], purpose: 'jd' });
         console.log(`[embeddings] local warmup done model=${r.modelId} dim=${r.dimension} ms=${Date.now() - t0}`);
       } catch (e: any) {
