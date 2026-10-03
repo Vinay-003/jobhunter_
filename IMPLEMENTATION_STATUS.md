@@ -15,6 +15,9 @@ The detailed input audit remains at `docs/audits/2026-10-03-jobhunter-audit-and-
 | `f327a6e` | Canonical saved reports, fractional scores, explicit JD qualifications |
 | `c77b769` | Transactional job/result persistence, eligibility, pagination, provider accounting |
 | `f9ddd9a` | Frontend lint/typechecking repair and DTO cleanup |
+| `4e8898e` | Bounded multi-location and numbered-page retrieval |
+| `a2cbda5` | Revision-pinned persistent embeddings and label-driven evaluation harness |
+| `83ac3a7` | Truthful provider result envelopes and retrieval provenance |
 
 Subsequent test/documentation commits contain the reproducible isolated acceptance harness and this status. Work stays on `dev`; nothing was pushed.
 
@@ -25,7 +28,7 @@ Subsequent test/documentation commits contain the reproducible isolated acceptan
 - Recommendation run rows are created as running before retrieval, then results, real job foreign keys, immutable job snapshots and counts commit together. A failed insert rolls back the whole result set; response no longer claims persistence after an FK failure.
 - Existing `(source, external_id)` upserts return the existing database ID. No generated-UUID fallback.
 - Idempotency keys avoid duplicate logical runs; results are owner-scoped and paginated, default 20 with up to 200 stored candidates.
-- Additive migrations `006_analysis_integrity.sql` and `007_recommendation_integrity.sql` preserve old rows. Health scores now support decimals.
+- Additive migrations `006_analysis_integrity.sql`, `007_recommendation_integrity.sql` and `008_embedding_cache.sql` preserve old rows and add revision-pinned vector storage. Health scores now support decimals.
 - Saved reports retain the canonical report object, JD title/requirements, rubric, confidence reasons, qualification checks and actual embedding status. Fresh-tab and immediate Markdown exports are identical, including deterministic object-key ordering.
 - V1 login no longer issues JWTs. All V1 protected routes use opaque, server-revocable sessions. JWT-shaped bearer values cannot bypass logout.
 - Cookie mutations require a CSRF token; the frontend supports a separate API origin by retaining the CORS-approved token response in memory. Origin validation and the same header/cookie names are wired end to end.
@@ -63,7 +66,7 @@ Subsequent test/documentation commits contain the reproducible isolated acceptan
 - One shared local worker per model keeps SentenceTransformer loaded. Inputs travel over stdin, not process arguments. Requests are serialized and queue/batch bounded; worker output is validated for count, dimensions, finiteness and nonzero norm.
 - Structured professional evidence includes projects and redacts contacts. No raw-document/header fallback. Structured bullet objects are converted to their text, not `[object Object]`.
 - Token-aware chunks cover bounded input beyond the original 256-token truncation; chunk embeddings are mean-pooled and normalized. This is a versioned engineering baseline, not a validated superiority claim.
-- Process-private bounded embedding cache avoids repeated inference. It is **not** the persistent Postgres vector cache proposed in the longer plan.
+- Process-private bounded embedding cache avoids repeated inference, and migration 008 adds a persistent Postgres cache keyed by purpose, owner, content, model revision and evidence-builder versions. Resume vectors are owner-scoped; public job/JD vectors are shareable. Unknown model revisions are never persisted.
 - Local inference fails rather than silently switching models. Mock vectors cannot contribute semantic fit; unavailable semantics and model metadata remain explicit. Actual local model revision is stored when the transformer exposes it, otherwise unknown—not invented.
 
 ### F — Checks and rollout
@@ -79,13 +82,13 @@ Subsequent test/documentation commits contain the reproducible isolated acceptan
 | Check | Result |
 |---|---|
 | Backend `npm run build` | Passed |
-| Backend `bun test` | 61 passed; opt-in local-model suite disabled in this default invocation |
+| Backend `bun test` | 81 passed, 3 skipped; opt-in local-model suite disabled in this default invocation |
 | `RUN_LOCAL_MODEL_TESTS=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 bun test src/tests/localEmbeddings.integration.test.ts` | Both real-model tests passed, including repeated vectors and text beyond token truncation |
 | Frontend `npx tsc --noEmit -p tsconfig.app.json` | Passed |
 | Frontend `npm run build` | Passed |
 | Frontend `npm run lint` | Passed with 0 errors / 7 existing warnings (Fast Refresh export structure and legacy Home hook dependencies) |
-| Migrations 006 and 007, isolated PostgreSQL | Applied successfully |
-| Isolated Playwright/API/SQL acceptance | **53 checks passed**, including visible senior-qualification warnings |
+| Migrations 006–008, isolated PostgreSQL | Applied successfully |
+| Isolated Playwright/API/SQL acceptance | **55 checks passed**, including visible senior-qualification warnings and persistent-cache reuse |
 
 The browser acceptance run covered three actual supplied PDFs, all six JD flows with real local embeddings, exact fresh-tab clipboard parity, byte-identical downloads, fractional scores, profile preferences, malformed IDs, unreadable uploads, CSRF, logout and revoked opaque bearer rejection.
 
@@ -112,15 +115,15 @@ A no-network replay of the original cached 74/74/78-job pools removed the previo
 | B2 education | Degree/field/completion parsing is heuristic; equivalent practical experience and institution-specific degree aliases need broader fixtures. |
 | C scoring quality | New rubric/eligibility behavior is regression-tested, not statistically calibrated. Domain applicability, missing-evidence normalization and role-family taxonomy need labeled review. Scores remain an index, never hiring probability. |
 | C/D geographic coverage | Explicit country restrictions and common Indian/German city cases are covered. No global city/country ontology or legal work-authorization inference exists. Unknown locations must remain uncertain and require user verification. |
-| D1 provider contract | Per-job fallback metadata cannot fully explain an empty failed-provider result. Adapters need a result envelope with transport outcome even when zero jobs are returned. Live revised adapter payloads were not exercised in this implementation pass. |
-| D2 multi-location | Eligibility considers requested locations, but retrieval currently sends the first location rather than bounded fan-out for every location. Minimum salary has no normalized currency/period eligibility implementation; do not assume it filters results. |
+| D1 provider contract | Typed provider result envelopes now preserve ok/empty/error/unavailable/budget-limited/fallback outcomes even when zero jobs are returned. Live revised adapter payloads were not exercised in this implementation pass. |
+| D2 multi-location | Bounded retrieval fans out up to three requested locations for providers with documented location support and records location/page provenance. Minimum salary has no normalized currency/period eligibility implementation; do not assume it filters results. |
 | D3 dedup | Canonical URL and exact content identities are supported. Different-source URLs with similar but nonidentical descriptions still need cautious requisition/fuzzy identity reconciliation. |
-| D4 recall | Pagination is for persisted ranked results. Provider cursor traversal until 50 eligible jobs, bounded concurrent retrieval and production account quota reconciliation remain to implement. A small honest eligible pool is preferable to padding with senior/unrelated jobs. |
-| E2 persistent caching | Current cache is bounded and process-private. Versioned, owner-scoped database embedding cache and cancellation of running inference remain outstanding. Deployments must include the Python worker source or copy it beside compiled provider code. |
+| D4 recall | Implemented bounded multi-location and numbered-page retrieval for Jooble/Adzuna, stopping at 50 non-ineligible candidates or a maximum plan. JobsPipe/Remotive/Arbeitnow do not expose a documented cursor in this adapter and remain one-page; opaque cursor traversal is intentionally unsupported until an official provider contract is available. Live-provider recall still needs production API verification. |
+| E2 persistent caching | Implemented migration 008 with version/model/purpose/content keys, owner-scoped resume vectors and shared public job/JD vectors. Active JD and recommendation ranking paths use it after a model revision is known. Unknown revisions are usable for the request but are not persisted; cancellation, eviction and broader cache operations remain outstanding. |
 | E3 evaluation | Requires a consented labeled dataset across different candidates/employers. No independent test set, NDCG/precision calibration, cross-encoder comparison or model replacement is claimed. Three variants of one person's resume do not establish general accuracy. |
 | F deployment | Production migration/rollout, CI wiring for isolated browser fixtures, coverage threshold measurement and production cross-site browser verification remain unperformed. Seven existing frontend lint warnings remain. |
 
-Recommended next implementation order: complete provider result envelopes and bounded multi-location/cursor retrieval; repair remaining project span linkage; persist versioned input/profile hashes and owner-scoped vector caches; then build the labeled evaluation set before changing model/weights further.
+Recommended next implementation order: verify live provider envelopes/page semantics and add adapters only where official cursors exist; repair remaining project span linkage; add cache eviction/observability; then collect the consented disjoint labeled evaluation set before changing model/weights further.
 
 ## Apply and reproduce safely
 
@@ -128,7 +131,7 @@ Recommended next implementation order: complete provider result envelopes and bo
 
 1. Back up the intended database and inspect its applied versions. **Do not run against production implicitly through an existing `.env`.**
 2. From `backend`, explicitly set `PG_DATABASE_STRING` and appropriate SSL settings, then run `npm run migrate`. That command now calls the existing versioned migration runner, rather than the obsolete single-table legacy runner.
-3. Ensure migrations 001–007 are recorded before running the updated routes. A fresh database and repeat migration run were checked locally; reruns skip recorded versions.
+3. Ensure migrations 001–008 are recorded before running the updated routes. A fresh database and repeat migration run were checked locally; reruns skip recorded versions.
 4. Deploy backend and frontend together. V1 clients must use opaque cookies (or opaque session bearer), obtain `/api/v1/csrf`, and echo `X-CSRF-Token` for cookie mutations. Old V1 JWTs intentionally stop working; users sign in again.
 5. Keep `EMBEDDING_PROVIDER=local` for local testing. Ensure the Python environment has the intended model, torch and sentence-transformers. Use `HF_HUB_OFFLINE=1` / `TRANSFORMERS_OFFLINE=1` to prevent downloads in offline checks.
 6. Verify session login/logout, upload, new analysis, fresh-tab report, preference save and result read-back before exposure to users. Do not treat a successful bundle build as a deployment check.
@@ -162,3 +165,11 @@ The script requires installed Python Playwright/Chromium and `psql`. It does not
 ### Verification limitations
 
 The 53-check integration run tested the isolated development cookie configuration and cached synthetic retrieval, not production `SameSite=None` across unrelated hosted domains. Frontend token handling supports the latter, but it still needs a deployment-origin acceptance test. The legacy `/api/*` system remains separate and has not been migrated to the new session model; restrict or retire it based on actual clients rather than assuming V1 fixes secure every legacy route.
+
+### Offline ranking evaluation harness (new; not a validation result)
+
+`backend/src/modules/evaluation/rankingEvaluation.ts` parses strict version-1 JSONL judgments described by `backend/src/modules/evaluation/ranking-label.v1.schema.json`, with separate `eligibility`, `relevance` (0–3 for eligible jobs only), `skillEvidence`, and `responsibilitySupport`. Each row has opaque candidate, employer, posting and shared-requisition group IDs plus the **observed** 0–100 fit score. The committed fixture is wholly synthetic and cannot establish model quality. Do not commit real resume text, job descriptions, personal identifiers or private judgments.
+
+To reproduce the synthetic checks: `cd backend && bun test src/tests/rankingEvaluation.test.ts`, then `bun src/modules/evaluation/runEvaluation.ts src/modules/evaluation/fixtures/synthetic-labels.v1.jsonl 2`. For private consented labels, provide a JSONL path outside Git and an integer K. Optionally supply a second JSONL path as the held-out test set; the first is only checked for candidate/employer disjointness and is **not used to train or adjust scores**. Duplicate feed postings must share a `groupId`; conflicting annotations fail. Ties sort by group ID then posting ID. Metrics report judged precision@K, recall@K, mean NDCG@K over fully judged queries, explicit-ineligible@K and eligible/relevant binary diagnostic ECE bins. Unknown judgments do not become negatives; null means insufficient denominator. ECE compares the fit index divided by 100 with judged relevance but **does not make the fit index a probability**. Inspect the reported denominators and excluded queries before comparison.
+
+No calibrator is enabled: there are no suitable independent labels from which to fit one. Before claiming ranking improvements, gather consented, independently reviewed judgments spanning distinct candidates and employers (with shared requisition grouping), predeclare K and relevance/eligibility guidelines, reserve a candidate- and employer-disjoint held-out test set, measure confidence intervals and slice failures, and compare against a frozen baseline. Three versions of one private resume and synthetic fixtures cannot establish generalization, hiring probabilities or superiority over another model.
