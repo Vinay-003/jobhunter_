@@ -18,7 +18,13 @@ interface Job {
   updated: string;
   matchScore?: number;
   recommendationReasons?: string[];
+  matchLevel?: string;
+  semanticSimilarity?: number;
+  seniorityPenalty?: number;
+  jobLevel?: string;
 }
+
+interface LegacyResume { fileName: string; uploadDate: string; status: string; analysisData?: ResumeAnalysis }
 
 interface ResumeAnalysis {
   score: number;
@@ -43,7 +49,7 @@ const ResumeUploadSection = ({ onAnalysisComplete }: { onAnalysisComplete: (anal
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
   const [error, setError] = useState('');
-  const [latestResume, setLatestResume] = useState<any>(null);
+  const [latestResume, setLatestResume] = useState<LegacyResume | null>(null);
   const [targetLevel, setTargetLevel] = useState<string>('entry'); // New state for experience level
 
   useEffect(() => {
@@ -55,13 +61,13 @@ const ResumeUploadSection = ({ onAnalysisComplete }: { onAnalysisComplete: (anal
       const token = localStorage.getItem('token');
       if (!token) return;
 
-      const response = await axios.get<{ success: boolean; resume?: any; message?: string }>(`${API_URL}/latest-resume`, {
+      const response = await axios.get<{ success: boolean; resume?: LegacyResume; message?: string }>(`${API_URL}/latest-resume`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (response.data.success) {
-        setLatestResume(response.data.resume);
-        if (response.data.resume.analysisData) {
+        setLatestResume(response.data.resume ?? null);
+        if (response.data.resume?.analysisData) {
           onAnalysisComplete(response.data.resume.analysisData);
         }
       }
@@ -106,34 +112,34 @@ const ResumeUploadSection = ({ onAnalysisComplete }: { onAnalysisComplete: (anal
 
     try {
       // Upload resume
-      const uploadResponse = await axios.post(`${API_URL}/upload-resume`, formData, {
+      const uploadResponse = await axios.post<{ success: boolean; message?: string }>(`${API_URL}/upload-resume`, formData, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'multipart/form-data'
         }
       });
 
-      if (!(uploadResponse.data as any).success) {
-        throw new Error((uploadResponse.data as any).message || 'Upload failed');
+      if (!uploadResponse.data.success) {
+        throw new Error(uploadResponse.data.message || 'Upload failed');
       }
 
       setUploadStatus('Analyzing resume...');
 
       // Analyze resume with target level
-      const analyzeResponse = await axios.post(`${API_URL}/analyze`, 
+      const analyzeResponse = await axios.post<{ success: boolean; message?: string; resume: LegacyResume; analysis: ResumeAnalysis }>(`${API_URL}/analyze`,
         { targetLevel }, // Pass target level to analysis
         {
           headers: { 'Authorization': `Bearer ${token}` }
         }
       );
 
-      if (!(analyzeResponse.data as any).success) {
-        throw new Error((analyzeResponse.data as any).message || 'Analysis failed');
+      if (!analyzeResponse.data.success) {
+        throw new Error(analyzeResponse.data.message || 'Analysis failed');
       }
 
       setUploadStatus('Resume analyzed successfully!');
-      setLatestResume((analyzeResponse.data as any).resume);
-      onAnalysisComplete((analyzeResponse.data as any).analysis);
+      setLatestResume(analyzeResponse.data.resume);
+      onAnalysisComplete(analyzeResponse.data.analysis);
       setError('');
       
       // Reset file input
@@ -142,9 +148,9 @@ const ResumeUploadSection = ({ onAnalysisComplete }: { onAnalysisComplete: (anal
       setResumeFile(null);
       
       await fetchLatestResume();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error:', err);
-      setError(err.response?.data?.message || err.message || 'An error occurred');
+      setError(axios.isAxiosError<{ message?: string }>(err) ? err.response?.data?.message || err.message : err instanceof Error ? err.message : 'An error occurred');
       setUploadStatus('');
     } finally {
       setIsProcessing(false);
@@ -281,15 +287,15 @@ const JobRecommendations = ({ analysis }: { analysis: ResumeAnalysis | null }) =
       } else {
         setError(response.data.message || 'Failed to fetch recommendations');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error fetching recommendations:', err);
-      setError(err.response?.data?.message || 'Failed to fetch job recommendations');
+      setError(axios.isAxiosError<{ message?: string }>(err) ? err.response?.data?.message || 'Failed to fetch job recommendations' : 'Failed to fetch job recommendations');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleFilterChange = (key: string, value: any) => {
+  const handleFilterChange = <K extends keyof typeof filters>(key: K, value: (typeof filters)[K]) => {
     setFilters(prev => ({ ...prev, [key]: value }));
   };
 
@@ -409,15 +415,15 @@ const JobRecommendations = ({ analysis }: { analysis: ResumeAnalysis | null }) =
                   <div className="text-right">
                     <div className="text-2xl font-bold text-amber-400">{job.matchScore}%</div>
                     <div className="text-sm text-stone-400">Match</div>
-                    {(job as any).matchLevel && (
+                    {job.matchLevel && (
                       <div className={`mt-2 px-3 py-1 rounded-full text-xs font-medium ${
-                        (job as any).matchLevel === 'excellent' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                        (job as any).matchLevel === 'very-good' ? 'bg-amber-400/10 text-amber-300 border border-amber-400/20' :
-                        (job as any).matchLevel === 'good' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
-                        (job as any).matchLevel === 'fair' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                        job.matchLevel === 'excellent' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
+                        job.matchLevel === 'very-good' ? 'bg-amber-400/10 text-amber-300 border border-amber-400/20' :
+                        job.matchLevel === 'good' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                        job.matchLevel === 'fair' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
                         'bg-amber-400/20 text-amber-300 border border-amber-400/20'
                       }`}>
-                        {(job as any).matchLevel.replace('-', ' ').toUpperCase()}
+                        {job.matchLevel.replace('-', ' ').toUpperCase()}
                       </div>
                     )}
                   </div>
@@ -462,22 +468,22 @@ const JobRecommendations = ({ analysis }: { analysis: ResumeAnalysis | null }) =
               </div>
 
               {/* Match Details */}
-              {(job as any).semanticSimilarity !== undefined && (
+              {job.semanticSimilarity !== undefined && (
                 <div className="mb-4 flex gap-4 text-xs">
                   <div className="flex-1 bg-stone-950 rounded p-2 border border-stone-800">
                     <div className="text-stone-400 mb-1">AI Similarity</div>
-                    <div className="text-amber-300 font-bold">{(job as any).semanticSimilarity}%</div>
+                    <div className="text-amber-300 font-bold">{job.semanticSimilarity}%</div>
                   </div>
-                  {(job as any).seniorityPenalty > 0 && (
+                  {(job.seniorityPenalty ?? 0) > 0 && (
                     <div className="flex-1 bg-stone-950 rounded p-2 border border-yellow-900/20">
                       <div className="text-stone-400 mb-1">Level Gap</div>
-                      <div className="text-yellow-400 font-bold">-{(job as any).seniorityPenalty}</div>
+                      <div className="text-yellow-400 font-bold">-{job.seniorityPenalty}</div>
                     </div>
                   )}
-                  {(job as any).jobLevel && (
+                  {job.jobLevel && (
                     <div className="flex-1 bg-stone-950 rounded p-2 border border-stone-800">
                       <div className="text-stone-400 mb-1">Job Level</div>
-                      <div className="text-amber-300 font-bold capitalize">{(job as any).jobLevel}</div>
+                      <div className="text-amber-300 font-bold capitalize">{job.jobLevel}</div>
                     </div>
                   )}
                 </div>

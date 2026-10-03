@@ -64,8 +64,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ type }) => {
           setError(response.data.message || 'Login failed');
         }
       }
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Authentication failed');
+    } catch (err: unknown) {
+      setError(axios.isAxiosError<{ message?: string }>(err) ? err.response?.data?.message || 'Authentication failed' : 'Authentication failed');
       console.error('Error during authentication:', err);
     } finally {
       setIsLoading(false);

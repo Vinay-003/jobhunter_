@@ -85,7 +85,7 @@ export default function ResumeViewPage() {
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState('');
   const [resume, setResume] = useState<ResumeDetail | null>(null);
-  const [analysisRow, setAnalysisRow] = useState<any | null>(null);
+  const [analysisRow, setAnalysisRow] = useState<unknown | null>(null);
   const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
@@ -101,7 +101,7 @@ export default function ResumeViewPage() {
           api.get('/analyses', { params: { resumeId: id, latest: 'true' } }),
         ]);
         if (cancelled) return;
-        const r = (resumeRes.data as any)?.resume;
+        const r = (resumeRes.data as { resume?: ResumeDetail })?.resume;
         if (!r) { setMissing(true); return; }
         setResume({
           id: String(r.id ?? id),
@@ -111,7 +111,7 @@ export default function ResumeViewPage() {
           sha256: r.sha256,
           pageCount: r.pageCount,
         });
-        const rows = (analysisRes.data as any)?.analyses ?? [];
+        const rows = (analysisRes.data as { analyses?: unknown[] })?.analyses ?? [];
         setAnalysisRow(rows[0] ?? null);
       } catch (err) {
         if (cancelled) return;

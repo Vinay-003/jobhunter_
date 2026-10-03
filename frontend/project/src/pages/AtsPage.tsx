@@ -133,7 +133,7 @@ export default function AtsPage() {
       try {
         const res = await api.get(`/resumes/${existingResumeId}`);
         if (cancelled) return;
-        const r = (res.data as any)?.resume;
+        const r = (res.data as { resume?: { id?: string; fileName?: string } })?.resume;
         if (r) setExisting({ id: String(r.id ?? existingResumeId), fileName: r.fileName });
         else setError('That resume no longer exists — upload a PDF instead.');
       } catch (err) {
@@ -182,7 +182,8 @@ export default function AtsPage() {
         form.append('resume', file!);
         form.append('targetLevel', targetLevel);
         const upload = await api.post('/resumes', form, { headers: { 'Content-Type': 'multipart/form-data' } });
-        resumeId = (upload.data as any)?.resume?.id ?? (upload.data as any)?.id;
+         const uploaded = upload.data as { resume?: { id?: string }; id?: string };
+         resumeId = uploaded?.resume?.id ?? uploaded?.id ?? '';
         if (!resumeId) throw new Error('Upload succeeded but no resume id was returned.');
         fileName = file!.name;
       }
@@ -194,7 +195,7 @@ export default function AtsPage() {
         ? await api.post('/analyses/readiness', { resumeId, targetLevel }, { timeout: 120000 })
         : await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel }, { timeout: 260000 });
 
-      const data = response.data as any;
+       const data = response.data as { analysisId?: string; [key: string]: unknown };
       if (!data?.analysisId) throw new Error('Analysis completed but no report id was returned.');
 
       navigate(`/app/analysis/${data.analysisId}`, {
