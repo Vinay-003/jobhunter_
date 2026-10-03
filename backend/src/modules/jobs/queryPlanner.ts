@@ -43,7 +43,8 @@ export class JobQueryPlanner {
     const baseRoles = targetRoles.length ? targetRoles : fallbackRoles;
     // Filter excluded
     const filteredRoles = baseRoles.filter((r) => !excluded.has(r.toLowerCase()));
-    const roles = filteredRoles.length ? filteredRoles : baseRoles.slice(0, 1);
+    const roles = filteredRoles.length ? filteredRoles : fallbackRoles.filter((r) => !excluded.has(r.toLowerCase()));
+    if (!roles.length) return [];
 
     // Build skill-augmented queries without concatenating all skills.
     // Academic/list-only skills ("Data Structures and Algorithms", "DBMS",

@@ -1,8 +1,8 @@
 import axios from 'axios';
 import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
 import { env } from '../../config/env.js';
-import { stripHtml, storeJobsToDb, searchJobsFromDb } from './jobStore.js';
-import { getMonthlyCredits, recordMonthlyCredits } from './providerBudgets.js';
+import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
+import { reserveMonthlyCredits, reconcileMonthlyCredits } from './providerBudgets.js';
 
 /**
  * JobsPipe provider — unified 30+ source API (Greenhouse, Lever, Ashby,
@@ -52,20 +52,21 @@ export class JobsPipeProvider implements JobProvider {
       console.warn('[JobsPipeProvider] no key — skipping (set JOBSPIPE_API_KEY)');
       return [];
     }
-    const used = await getMonthlyCredits('jobspipe');
-    if (used + this.limit > this.monthlyBudget) {
-      console.warn(`[JobsPipeProvider] monthly budget ${this.monthlyBudget} nearly exhausted (used ${used}) — skipping`);
-      return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+    const limit = Math.max(1, Math.min(100, this.limit, query.limit ?? this.limit));
+    if (!(await reserveMonthlyCredits('jobspipe', this.monthlyBudget, limit))) {
+      console.warn(`[JobsPipeProvider] monthly budget ${this.monthlyBudget} exhausted — skipping`);
+      return searchJobsFromDb(query.keywords).then(jobs => markFallback(jobs, 'jobspipe')).catch(() => [] as NormalizedJob[]);
     }
     try {
       // Primary role term as title filter; top skill terms as description terms.
       const words = query.keywords.split(/\s+/).filter(Boolean);
       const body: Record<string, unknown> = {
         job_title_or: [words.slice(0, 3).join(' ') || query.keywords],
-        limit: this.limit,
-        posted_at_max_age_days: 30,
+         limit,
+         posted_at_max_age_days: query.daysPosted ?? 30,
       };
-      if (this.country) body.job_country_code_or = [this.country.toUpperCase()];
+       const country = query.country || this.country;
+       if (country) body.job_country_code_or = [country.toUpperCase()];
       if (words.length > 3) body.description_or = words.slice(3, 6);
       // Junior candidates drown in senior postings — bias toward entry/mid.
       // include_unknown keeps the ~90% of postings with no seniority label.
@@ -73,7 +74,7 @@ export class JobsPipeProvider implements JobProvider {
         body.job_seniority_or = ['entry_level', 'mid_level'];
         body.include_unknown = ['seniority'];
       }
-      console.log(`[JobsPipeProvider] searching title="${body.job_title_or}" country=${this.country} limit=${this.limit}`);
+       console.log(`[JobsPipeProvider] searching title="${body.job_title_or}" country=${country} limit=${limit}`);
       const resp = await axios.post<{ data?: JobsPipeJob[]; metadata?: { credits_charged?: number } }>(
         'https://api.jobspipe.dev/v1/jobs/search',
         body,
@@ -82,13 +83,13 @@ export class JobsPipeProvider implements JobProvider {
       const jobs = (resp.data?.data ?? []).map((j) => this.normalize(j)).filter((j): j is NormalizedJob => j !== null);
       const charged = resp.data?.metadata?.credits_charged ?? jobs.length;
       console.log(`[JobsPipeProvider] returned ${jobs.length} jobs (credits ${charged}) for "${query.keywords}"`);
-      await recordMonthlyCredits('jobspipe', charged);
+       await reconcileMonthlyCredits('jobspipe', limit, charged);
       await storeJobsToDb(jobs).catch(() => {});
-      if (!jobs.length) return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+       if (!jobs.length) return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'jobspipe')).catch(() => [] as NormalizedJob[]);
       return jobs;
     } catch (err) {
       console.warn('[JobsPipeProvider] request failed, falling back to DB:', (err as Error).message);
-      return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+       return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'jobspipe')).catch(() => [] as NormalizedJob[]);
     }
   }
 
@@ -115,8 +116,10 @@ export class JobsPipeProvider implements JobProvider {
       description: stripHtml(j.description),
       url: j.final_url ?? j.url ?? null,
       salary,
-      postedAt: j.date_posted ? new Date(j.date_posted).toISOString() : null,
-      workMode: j.remote ? 'remote' : (j.employment_statuses?.[0] ?? j.seniority ?? null),
+       postedAt: j.date_posted && Number.isFinite(new Date(j.date_posted).getTime()) ? new Date(j.date_posted).toISOString() : null,
+       workMode: j.remote ? 'remote' : null,
+       descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
+       retrieval: { status: 'live', requestedProvider: 'jobspipe' },
     };
   }
 }

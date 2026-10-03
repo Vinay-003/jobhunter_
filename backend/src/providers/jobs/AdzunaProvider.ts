@@ -1,8 +1,8 @@
 import axios from 'axios';
 import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
 import { env } from '../../config/env.js';
-import { stripHtml, storeJobsToDb, searchJobsFromDb } from './jobStore.js';
-import { checkDailyBudget, recordDailyCall } from './providerBudgets.js';
+import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
+import { reserveDailyCall } from './providerBudgets.js';
 
 /**
  * Adzuna provider — GET job search.
@@ -47,12 +47,13 @@ export class AdzunaProvider implements JobProvider {
       console.warn('[AdzunaProvider] no creds — skipping (set ADZUNA_APP_ID/ADZUNA_APP_KEY)');
       return [];
     }
-    if (!(await checkDailyBudget('adzuna', this.budget))) {
+    if (!(await reserveDailyCall('adzuna', this.budget))) {
       console.warn(`[AdzunaProvider] daily budget ${this.budget} exhausted — skipping`);
-      return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+      return searchJobsFromDb(query.keywords).then(jobs => markFallback(jobs, 'adzuna')).catch(() => [] as NormalizedJob[]);
     }
     try {
-      const url = `https://api.adzuna.com/v1/api/jobs/${encodeURIComponent(this.country)}/search/1`;
+      const country = query.country || this.country;
+      const url = `https://api.adzuna.com/v1/api/jobs/${encodeURIComponent(country)}/search/${Math.max(1, Math.min(10, query.page ?? 1))}`;
       console.log(`[AdzunaProvider] searching keywords="${query.keywords}" location="${query.location ?? ''}" country=${this.country}`);
       const resp = await axios.get<{ results?: AdzunaJob[] }>(url, {
         timeout: TIMEOUT_MS,
@@ -60,21 +61,20 @@ export class AdzunaProvider implements JobProvider {
         params: {
           app_id: this.appId,
           app_key: this.appKey,
-          results_per_page: this.perPage,
+          results_per_page: Math.max(1, Math.min(50, query.limit ?? this.perPage)),
           what: query.keywords,
           where: query.location ?? '',
-          'content-type': 'application/json',
+          ...(query.daysPosted ? { max_days_old: query.daysPosted } : {}),
         },
       });
       const jobs = (resp.data?.results ?? []).map((j) => this.normalize(j)).filter((j): j is NormalizedJob => j !== null);
       console.log(`[AdzunaProvider] returned ${jobs.length} jobs for "${query.keywords}"`);
-      await recordDailyCall('adzuna');
       await storeJobsToDb(jobs).catch(() => {});
-      if (!jobs.length) return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+      if (!jobs.length) return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'adzuna')).catch(() => [] as NormalizedJob[]);
       return jobs;
     } catch (err) {
       console.warn('[AdzunaProvider] request failed, falling back to DB:', (err as Error).message);
-      return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+      return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'adzuna')).catch(() => [] as NormalizedJob[]);
     }
   }
 
@@ -95,8 +95,10 @@ export class AdzunaProvider implements JobProvider {
       description: stripHtml(j.description),
       url: j.redirect_url ?? null,
       salary,
-      postedAt: j.created ? new Date(j.created).toISOString() : null,
-      workMode: j.contract_time ?? null,
+      postedAt: j.created && Number.isFinite(new Date(j.created).getTime()) ? new Date(j.created).toISOString() : null,
+      workMode: null,
+      descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
+      retrieval: { status: 'live', requestedProvider: 'adzuna' },
     };
   }
 }

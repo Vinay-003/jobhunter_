@@ -1,8 +1,8 @@
 import axios from 'axios';
 import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
 import { env } from '../../config/env.js';
-import { stripHtml, storeJobsToDb, searchJobsFromDb } from './jobStore.js';
-import { checkDailyBudget, recordDailyCall } from './providerBudgets.js';
+import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
+import { reserveDailyCall } from './providerBudgets.js';
 
 /**
  * Remotive provider — public API, no key.
@@ -36,26 +36,25 @@ export class RemotiveProvider implements JobProvider {
   }
 
   async search(query: JobSearchQuery): Promise<NormalizedJob[]> {
-    if (!(await checkDailyBudget('remotive', this.budget))) {
+    if (!(await reserveDailyCall('remotive', this.budget))) {
       console.warn(`[RemotiveProvider] daily budget ${this.budget} exhausted — skipping`);
-      return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+      return searchJobsFromDb(query.keywords).then(jobs => markFallback(jobs, 'remotive')).catch(() => [] as NormalizedJob[]);
     }
     try {
       console.log(`[RemotiveProvider] searching "${query.keywords}"`);
       const resp = await axios.get<{ jobs?: RemotiveJob[] }>('https://remotive.com/api/remote-jobs', {
         timeout: TIMEOUT_MS,
         headers: { Accept: 'application/json' },
-        params: { search: query.keywords, limit: this.limit },
+        params: { search: query.keywords, limit: Math.max(1, Math.min(100, query.limit ?? this.limit)) },
       });
       const jobs = (resp.data?.jobs ?? []).map((j) => this.normalize(j)).filter((j): j is NormalizedJob => j !== null);
       console.log(`[RemotiveProvider] returned ${jobs.length} jobs for "${query.keywords}"`);
-      await recordDailyCall('remotive');
       await storeJobsToDb(jobs).catch(() => {});
-      if (!jobs.length) return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+      if (!jobs.length) return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'remotive')).catch(() => [] as NormalizedJob[]);
       return jobs;
     } catch (err) {
       console.warn('[RemotiveProvider] request failed, falling back to DB:', (err as Error).message);
-      return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+      return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'remotive')).catch(() => [] as NormalizedJob[]);
     }
   }
 
@@ -72,8 +71,10 @@ export class RemotiveProvider implements JobProvider {
       description: stripHtml(j.description),
       url: j.url ?? null,
       salary: j.salary ? { raw: j.salary } : null,
-      postedAt: j.publication_date ? new Date(j.publication_date).toISOString() : null,
-      workMode: j.job_type ?? 'remote',
+      postedAt: j.publication_date && Number.isFinite(new Date(j.publication_date).getTime()) ? new Date(j.publication_date).toISOString() : null,
+      workMode: 'remote',
+      descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
+      retrieval: { status: 'live', requestedProvider: 'remotive' },
     };
   }
 }

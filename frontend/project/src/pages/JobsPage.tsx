@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../lib/api';
 import {
@@ -45,9 +45,30 @@ type Job = {
   matchedSkills?: string[];
   missingSkills?: string[];
   evidence?: string[];
+  eligibility?: { status: string; reasons?: string[] };
+  workMode?: string;
+  postedAt?: string;
 };
 
 type Resume = { id: string; fileName?: string; file_name?: string };
+type SavedPreferences = {
+  target_roles?: string[]; targetRoles?: string[]; locations?: string[];
+  work_modes?: string[]; workModes?: string[];
+};
+type RawRecommendation = Partial<Job> & {
+  job_id?: string | number; jobTitle?: string; job_title?: string;
+  companyName?: string; company_name?: string; fit_score?: number;
+  relevanceScore?: number; breakdown_json?: Record<string, number>;
+  matched_skills?: string[]; skillMatches?: string[];
+  missing_skills?: string[]; skillGaps?: string[];
+  matchEvidence?: string[]; work_mode?: string; posted_at?: string;
+  reasons?: string[];
+  breakdown?: BreakdownItem[] | Record<string, number>;
+};
+type RecommendationResponse = {
+  recommendations?: RawRecommendation[]; results?: RawRecommendation[];
+  runId?: string; nextOffset?: number | null; returnedCount?: number;
+};
 
 function safeText(value?: string): string {
   if (!value) return '';
@@ -89,25 +110,28 @@ const BREAKDOWN_MAX: Record<string, number> = {
   location: 5,
 };
 
-function mapRecommendation(raw: any): Job {
+function mapRecommendation(raw: RawRecommendation): Job {
   const breakdown = raw?.breakdown && !Array.isArray(raw.breakdown)
-    ? Object.entries(raw.breakdown).filter(([, value]) => typeof value === 'number').map(([label, value]) => ({ label, value: value as number }))
+    ? Object.entries(raw.breakdown).filter((entry): entry is [string, number] => typeof entry[1] === 'number').map(([label, value]) => ({ label, value }))
     : raw?.breakdown;
 
   return {
     ...raw,
-    id: raw.id ?? raw.jobId ?? raw.job_id,
+    id: raw.jobId ?? raw.job_id ?? raw.id,
     title: raw.title ?? raw.jobTitle ?? raw.job_title ?? 'Untitled role',
     company: raw.company ?? raw.companyName ?? raw.company_name,
     location: raw.location,
     snippet: raw.snippet ?? raw.description,
     link: raw.link ?? raw.url,
-    fitScore: raw.fitScore ?? raw.matchScore ?? raw.relevanceScore,
+    fitScore: raw.fitScore ?? raw.fit_score ?? raw.matchScore ?? raw.relevanceScore,
     confidence: raw.confidence ?? raw.matchLevel,
-    breakdown,
+     breakdown: breakdown ?? (raw.breakdown_json ? Object.entries(raw.breakdown_json).map(([label, value]) => ({ label, value: Number(value) })) : []),
     matchedSkills: raw.matchedSkills ?? raw.matched_skills ?? raw.skillMatches,
     missingSkills: raw.missingSkills ?? raw.missing_skills ?? raw.skillGaps,
     evidence: raw.evidence ?? raw.matchEvidence,
+    eligibility: raw.eligibility,
+    workMode: raw.workMode ?? raw.work_mode,
+    postedAt: raw.postedAt ?? raw.posted_at,
     recommendationReasons: raw.recommendationReasons ?? raw.reasons,
   };
 }
@@ -145,6 +169,7 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
             {job.location && <span className="flex items-center gap-1"><MapPin size={11} /> {job.location}</span>}
             {job.jobLevel && <span className="flex items-center gap-1"><Briefcase size={11} /> {job.jobLevel}</span>}
             {job.confidence && <span className="flex items-center gap-1"><Target size={11} /> {job.confidence} confidence</span>}
+            {job.eligibility && <span>{job.eligibility.status === 'eligible' ? 'No confirmed barrier' : job.eligibility.status === 'uncertain' ? 'Qualifications unverified' : 'Eligibility barrier'}</span>}
           </div>
 
           {!!job.matchedSkills?.length && (
@@ -179,6 +204,7 @@ function JobDetail({ job }: { job: Job }) {
             <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-600">
               {job.location && <span className="jh-chip"><MapPin size={11} className="mr-1" />{job.location}</span>}
               {job.type && <span className="jh-chip">{job.type}</span>}
+              {job.workMode && <span className="jh-chip">{job.workMode}</span>}
               {job.salary && job.salary !== 'Not specified' && <span className="jh-chip">{job.salary}</span>}
             </div>
           </div>
@@ -235,6 +261,7 @@ function JobDetail({ job }: { job: Job }) {
           </ul>
         </div>
       )}
+      <p className="text-xs text-amber-200">Qualification status: {job.eligibility?.status === 'eligible' ? 'No explicit barrier detected; verify the full posting and work authorization.' : job.eligibility?.status === 'uncertain' ? `Unverified — ${job.eligibility.reasons?.join('; ') || 'check the full posting'}` : job.eligibility?.status === 'ineligible' ? `Known barrier — ${job.eligibility.reasons?.join('; ')}` : 'Not evaluated for this historical result.'}</p>
 
       {description && (
         <div>
@@ -259,27 +286,35 @@ export default function JobsPage() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [runId, setRunId] = useState<string | null>(null);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const requestSequence = useRef(0);
+  const activeRequest = useRef<AbortController | null>(null);
   const [showFilters, setShowFilters] = useState(false);
-  const [prefs, setPrefs] = useState({ targetRole: '', location: 'India', minScore: 40, workMode: 'remote,hybrid' });
+  const [prefs, setPrefs] = useState({ targetRole: '', location: '', minScore: 40, workMode: '', keywords: '', daysPosted: '' });
 
   useEffect(() => {
     (async () => {
       try {
         const [resumeResponse, profileResponse] = await Promise.all([
           api.get('/resumes'),
-          api.get('/profile').catch(() => ({ data: {} })),
+          api.get('/profile/job-preferences').catch(() => ({ data: {} })),
         ]);
-        const list = ((resumeResponse.data as any)?.resumes ?? []) as Resume[];
+         const list = (resumeResponse.data as { resumes?: Resume[] })?.resumes ?? [];
         setResumes(list);
         if (list.length) setSelectedResume((value) => value || list[0].id);
 
-        const preferences = (profileResponse.data as any)?.preferences ?? (profileResponse.data as any)?.profile?.preferences;
+         const profile = profileResponse.data as { preferences?: SavedPreferences; profile?: { preferences?: SavedPreferences } };
+         const preferences = profile?.preferences ?? profile?.profile?.preferences;
         const roles = preferences?.target_roles ?? preferences?.targetRoles;
         const locations = preferences?.locations;
         setPrefs((current) => ({
           ...current,
           targetRole: current.targetRole || roles?.[0] || '',
           location: locations?.[0] || current.location,
+          workMode: (preferences?.work_modes ?? preferences?.workModes ?? []).join(','),
         }));
       } catch {
         // The empty state below explains what the user needs to do.
@@ -289,31 +324,64 @@ export default function JobsPage() {
 
   const runRecommendations = async (isRefresh = false) => {
     if (!selectedResume) return setError('Choose a resume before generating matches.');
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const sequence = ++requestSequence.current;
+    setJobs([]); setRunId(null); setNextOffset(null); setTotal(0); setSelectedIndex(0);
     setError('');
-    isRefresh ? setRefreshing(true) : setLoading(true);
+     if (isRefresh) setRefreshing(true);
+     else setLoading(true);
     try {
       const payload = {
         resumeId: selectedResume,
         ...(prefs.targetRole.trim() ? { targetRoles: [prefs.targetRole.trim()] } : {}),
         ...(prefs.location.trim() ? { locations: [prefs.location.trim()] } : {}),
         workModes: prefs.workMode.split(',').map((value) => value.trim()).filter(Boolean),
+        ...(prefs.daysPosted ? { daysPosted: Number(prefs.daysPosted) } : {}),
+        ...(prefs.keywords.trim() ? { keywords: prefs.keywords.trim() } : {}),
+        idempotencyKey: crypto.randomUUID(),
       };
       // Local model loads ~90s cold; SageMaker cold starts can also exceed 60s.
-      const response = await api.post('/recommendation-runs', payload, { timeout: 260000 });
-      const raw = (response.data as any)?.recommendations ?? (response.data as any)?.results ?? [];
-      const mapped = raw.map(mapRecommendation).sort((a: Job, b: Job) => scoreOf(b) - scoreOf(a));
+      const response = await api.post('/recommendation-runs', payload, { timeout: 260000, signal: controller.signal });
+      if (sequence !== requestSequence.current) return;
+       const result = response.data as RecommendationResponse;
+       const raw = result?.recommendations ?? result?.results ?? [];
+      const mapped = raw.map(mapRecommendation);
       setJobs(mapped);
+       setRunId(result?.runId ?? null);
+       setNextOffset(result?.nextOffset ?? null);
+       setTotal(result?.returnedCount ?? mapped.length);
       setSelectedIndex(0);
     } catch (err) {
-      setError(getApiErrorMessage(err));
+      if (sequence === requestSequence.current && !controller.signal.aborted) setError(getApiErrorMessage(err));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (sequence === requestSequence.current) { setLoading(false); setRefreshing(false); activeRequest.current = null; }
     }
+  };
+
+  const loadMore = async () => {
+    if (!runId || nextOffset === null || loadingMore) return;
+    const sequence = requestSequence.current;
+    const expectedRun = runId;
+    const expectedOffset = nextOffset;
+    setLoadingMore(true);
+    try {
+      const response = await api.get(`/recommendation-runs/${expectedRun}/results`, { params: { offset: expectedOffset, limit: 20 } });
+      if (sequence !== requestSequence.current) return;
+       const result = response.data as RecommendationResponse;
+       setJobs((current) => [...current, ...(result.results ?? []).map(mapRecommendation)]);
+       setNextOffset(result.nextOffset ?? null);
+    } catch (err) { if (sequence === requestSequence.current) setError(getApiErrorMessage(err)); }
+    finally { if (sequence === requestSequence.current) setLoadingMore(false); }
   };
 
   useEffect(() => {
     if (selectedResume) void runRecommendations(false);
+    const sequence = requestSequence.current;
+    const requestRef = activeRequest;
+    const sequenceRef = requestSequence;
+    return () => { requestRef.current?.abort(); if (sequenceRef.current === sequence) sequenceRef.current++; };
     // Run when the user switches the resume; filter changes are applied explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedResume]);
@@ -341,7 +409,7 @@ export default function JobsPage() {
       </section>
 
       <section className="grid gap-3 sm:grid-cols-3">
-        <div className="jh-surface p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Matches shown</p><p className="mt-2 text-2xl font-semibold text-white">{visibleJobs.length}</p><p className="mt-1 text-[10px] text-slate-600">minimum fit {prefs.minScore}%</p></div>
+        <div className="jh-surface p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Matches shown</p><p className="mt-2 text-2xl font-semibold text-white">{visibleJobs.length}</p><p className="mt-1 text-[10px] text-slate-600">{jobs.length} loaded of {total} stored; minimum fit {prefs.minScore}%</p></div>
         <div className="jh-surface p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Strong matches</p><p className="mt-2 text-2xl font-semibold text-emerald-200">{topMatches}</p><p className="mt-1 text-[10px] text-slate-600">75% fit or higher</p></div>
         <div className="jh-surface p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Resume source</p><p className="mt-2 truncate text-sm font-semibold text-white">{selectedResumeName || 'No resume selected'}</p><p className="mt-1 text-[10px] text-slate-600">change it in filters</p></div>
       </section>
@@ -354,6 +422,9 @@ export default function JobsPage() {
             <div><label className="text-[10px] font-medium text-slate-600">Target role</label><input value={prefs.targetRole} onChange={(event) => setPrefs((current) => ({ ...current, targetRole: event.target.value }))} className="jh-input mt-1.5" placeholder="e.g. Backend Engineer" /></div>
             <div><label className="text-[10px] font-medium text-slate-600">Location</label><input value={prefs.location} onChange={(event) => setPrefs((current) => ({ ...current, location: event.target.value }))} className="jh-input mt-1.5" placeholder="India, Bengaluru, Remote" /></div>
             <div><label className="text-[10px] font-medium text-slate-600">Minimum fit score</label><input type="number" min={0} max={100} value={prefs.minScore} onChange={(event) => setPrefs((current) => ({ ...current, minScore: Math.max(0, Math.min(100, Number(event.target.value) || 0)) }))} className="jh-input mt-1.5" /></div>
+            <div><label className="text-[10px] font-medium text-slate-600">Work mode (comma-separated)</label><input value={prefs.workMode} onChange={(event) => setPrefs((current) => ({ ...current, workMode: event.target.value }))} className="jh-input mt-1.5" placeholder="remote,hybrid" /></div>
+            <div><label className="text-[10px] font-medium text-slate-600">Keywords in job text</label><input value={prefs.keywords} onChange={(event) => setPrefs((current) => ({ ...current, keywords: event.target.value }))} className="jh-input mt-1.5" /></div>
+            <div><label className="text-[10px] font-medium text-slate-600">Posted within days</label><input type="number" min={1} max={365} value={prefs.daysPosted} onChange={(event) => setPrefs((current) => ({ ...current, daysPosted: event.target.value }))} className="jh-input mt-1.5" /></div>
           </div>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.055] pt-4"><p className="text-[10px] leading-4 text-slate-600">Target role drives provider retrieval. Resume evidence + semantic alignment drive ranking. Soft skills are not stuffed into the search query.</p><button onClick={() => runRecommendations(false)} className="jh-button-primary"><Search size={14} /> Apply & rerun</button></div>
         </section>
@@ -396,6 +467,7 @@ export default function JobsPage() {
           <div className="jh-surface-strong p-3 xl:max-h-[calc(100vh-150px)] xl:overflow-y-auto jh-scrollbar">
             <div className="sticky top-0 z-10 mb-2 flex items-center justify-between rounded-xl bg-[#10131f]/95 px-2 py-2 backdrop-blur"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-600">Ranked opportunities</p><span className="text-[10px] text-slate-700">best fit first</span></div>
             <div className="space-y-2.5">{visibleJobs.map((job, index) => <JobCard key={String(job.id ?? job.jobId ?? `${job.title}-${job.company}-${index}`)} job={job} active={index === selectedIndex} onSelect={() => setSelectedIndex(index)} />)}</div>
+            {nextOffset !== null && <button className="jh-button-ghost mt-4 w-full" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Loading…' : `Load more (${jobs.length} of ${total})`}</button>}
           </div>
 
           <div className="jh-surface-strong min-w-0 p-5 md:p-6 xl:sticky xl:top-8 xl:self-start">

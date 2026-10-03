@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
 import { env } from '../../config/env.js';
-import { stripHtml, storeJobsToDb, searchJobsFromDb } from './jobStore.js';
+import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback, normalizedPostedAt } from './jobStore.js';
 
 /**
  * Arbeitnow provider — public API, no key.
@@ -22,7 +22,7 @@ type ArbeitnowJob = {
   remote?: boolean;
   url?: string;
   location?: string;
-  created_at?: string;
+  created_at?: string | number;
   job_types?: string[];
 };
 
@@ -40,15 +40,15 @@ export class ArbeitnowProvider implements JobProvider {
         .map((j) => ({ job: j, hits: this.countHits(j, terms) }))
         .filter((s) => s.hits > 0)
         .sort((a, b) => b.hits - a.hits)
-        .slice(0, MAX_RETURN);
+        .slice(0, Math.max(1, Math.min(MAX_RETURN, query.limit ?? MAX_RETURN)));
       const jobs = scored.map((s) => this.normalize(s.job)).filter((j): j is NormalizedJob => j !== null);
       console.log(`[ArbeitnowProvider] dump=${all.length} relevant=${jobs.length} for "${query.keywords}"`);
       await storeJobsToDb(jobs).catch(() => {});
-      if (!jobs.length) return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+      if (!jobs.length) return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'arbeitnow')).catch(() => [] as NormalizedJob[]);
       return jobs;
     } catch (err) {
       console.warn('[ArbeitnowProvider] request failed, falling back to DB:', (err as Error).message);
-      return searchJobsFromDb(query.keywords).catch(() => [] as NormalizedJob[]);
+      return searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'arbeitnow')).catch(() => [] as NormalizedJob[]);
     }
   }
 
@@ -74,8 +74,10 @@ export class ArbeitnowProvider implements JobProvider {
       description: stripHtml(j.description),
       url: j.url ?? null,
       salary: null,
-      postedAt: j.created_at ? new Date(j.created_at).toISOString() : null,
-      workMode: j.remote ? 'remote' : (j.job_types?.[0] ?? null),
+      postedAt: normalizedPostedAt(j.created_at),
+      workMode: j.remote ? 'remote' : null,
+      descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
+      retrieval: { status: 'live', requestedProvider: 'arbeitnow' },
     };
   }
 }

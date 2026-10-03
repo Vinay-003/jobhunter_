@@ -22,8 +22,26 @@ async function getCount(key: string): Promise<number> {
     const r = await pool.query('SELECT request_count FROM external_api_usage WHERE provider=$1', [key]);
     return r.rows[0]?.request_count ?? 0;
   } catch {
-    return 0;
+    return Number.MAX_SAFE_INTEGER; // quota infrastructure failure must not permit calls
   }
+}
+
+/** One atomic reservation shared by concurrent workers on the same database. */
+export async function reserveCall(key: string, limit: number, credits = 1): Promise<boolean> {
+  if (!Number.isSafeInteger(limit) || limit <= 0 || !Number.isSafeInteger(credits) || credits <= 0 || credits > limit) return false;
+  const result = await pool.query(
+    `INSERT INTO external_api_usage (id,provider,request_count,last_called_at) VALUES ($1,$2,$3,now())
+     ON CONFLICT (provider) DO UPDATE SET request_count=external_api_usage.request_count+$3,last_called_at=now()
+     WHERE external_api_usage.request_count+$3 <= $4 RETURNING request_count`,
+    [crypto.randomUUID(),key,credits,limit],
+  );
+  return result.rows.length === 1;
+}
+export const reserveDailyCall = (name: string, limit: number) => reserveCall(dayKey(name),limit);
+export const reserveMonthlyCredits = (name: string, limit: number, credits: number) => reserveCall(monthKey(name),limit,credits);
+export async function reconcileMonthlyCredits(name: string, reserved: number, charged: number) {
+  if (charged > reserved) throw new Error('Provider exceeded reserved credit ceiling');
+  if (charged < reserved) await pool.query('UPDATE external_api_usage SET request_count=GREATEST(0,request_count-$2) WHERE provider=$1',[monthKey(name),reserved-charged]);
 }
 
 /** True if another call is allowed under the daily limit. */

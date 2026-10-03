@@ -1,0 +1,95 @@
+import type { NormalizedJob } from '../../providers/jobs/JobProvider.js';
+import type { ResumeProfile } from '../parsing/resumeProfile.js';
+import { parseJd } from '../jd/jdParser.js';
+import { detectJobSeniority, roleFamily } from './ranking.js';
+
+export type EffectivePreferences = { targetRoles: string[]; locations: string[]; workModes: string[]; emphasizedSkills: string[]; excludedRoles: string[]; seniority: string[]; daysPosted?: number; keywords?: string };
+export function effectivePreferences(saved: any, request: any): EffectivePreferences {
+  const list = (key: string, column: string): string[] => (request[key] !== undefined ? request[key] : saved?.[column] ?? []).map((s: string) => s.trim()).filter(Boolean);
+  return { targetRoles: list('targetRoles', 'target_roles'), locations: list('locations', 'locations'), workModes: list('workModes', 'work_modes'),
+    emphasizedSkills: list('emphasizedSkills', 'emphasized_skills'), excludedRoles: list('excludedRoles', 'excluded_roles'), seniority: list('seniority', 'seniority'),
+    daysPosted: request.daysPosted, keywords: request.keywords?.trim() || undefined };
+}
+export type CandidateQualification = Partial<ResumeProfile> & { professionalYears?: number | null };
+export type Eligibility = { status: 'eligible' | 'ineligible' | 'uncertain'; reasons: string[] };
+const countries: Record<string, string[]> = {
+  india: ['india', 'in'], 'united states': ['united states', 'usa', 'us'], canada: ['canada', 'ca'],
+  germany: ['germany', 'de'], 'united kingdom': ['united kingdom', 'uk', 'great britain'], australia: ['australia', 'au'],
+};
+const indianCities = /\b(?:delhi|mumbai|bengaluru|bangalore|hyderabad|pune|chennai|kolkata|noida|gurugram|gurgaon)\b/i;
+const germanCities = /\b(?:hamburg|berlin|munich|münchen|frankfurt|nuremberg|nürnberg|cologne)\b/i;
+const countryOf = (value: string) => Object.entries(countries).find(([, aliases]) => aliases.some((alias) => alias.length === 2 && !['us','uk'].includes(alias) ? value.trim().toLowerCase() === alias : new RegExp(`\\b${alias}\\b`, 'i').test(value)))?.[0] ?? null;
+export function countryCodeForLocation(location: string | null | undefined): string | null {
+  if (!location) return null;
+  const country = countryOf(location) ?? (indianCities.test(location) ? 'india' : null);
+  return country ? ({ india:'IN', 'united states':'US', canada:'CA', germany:'DE', 'united kingdom':'GB', australia:'AU' } as Record<string,string>)[country] ?? null : null;
+}
+const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const roleArea = (value: string) => /\b(frontend|front end|react|ui)\b/i.test(value) ? 'frontend' : /\b(backend|back end|api|server)\b/i.test(value) ? 'backend' : /\b(data engineer|data engineering)\b/i.test(value) ? 'data' : /\b(full stack|fullstack)\b/i.test(value) ? 'fullstack' : 'generic';
+
+/** Explicit barriers only; absent evidence is uncertain, not proof of eligibility. */
+export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | undefined, prefs: EffectivePreferences, candidate?: CandidateQualification): Eligibility {
+  const blockers: string[] = [];
+  const unknown: string[] = [];
+  const title = job.title.toLowerCase();
+  const description = job.description ?? '';
+  if (roleFamily(job.title) === 'other') blockers.push('Unrelated role family');
+  if (prefs.excludedRoles.some((role) => title.includes(role.toLowerCase()))) blockers.push('Excluded role');
+  if (prefs.targetRoles.length && roleFamily(job.title) !== 'other') {
+    const wanted = prefs.targetRoles.map(roleArea);
+    const actual = roleArea(job.title);
+    if (actual !== 'generic' && !wanted.includes('generic') && !wanted.includes('fullstack') && actual !== 'fullstack' && !wanted.includes(actual)) blockers.push('Outside requested role specialization');
+  }
+  const level = detectJobSeniority(job.title, job.description);
+  if (candidateLevel === 'junior' && (level === 'senior' || level === 'lead')) blockers.push('Explicit senior role');
+  if (prefs.seniority.length && level && !prefs.seniority.includes(level)) blockers.push('Outside target seniority');
+  if (prefs.keywords && !`${job.title} ${description}`.toLowerCase().includes(prefs.keywords.toLowerCase())) blockers.push('Keyword not found');
+  const mode = /\b(remote|hybrid|onsite|on-site)\b/i.exec(job.workMode ?? job.location ?? '')?.[1].toLowerCase().replace('on-site','onsite') ?? null;
+  if (prefs.workModes.length && mode && !prefs.workModes.map(s => s.toLowerCase().replace('on-site','onsite')).includes(mode)) blockers.push('Work mode differs');
+  if (prefs.workModes.length && !mode) unknown.push('Work mode unavailable');
+
+  const explicitRequirement = /\b(?:required|requires?|minimum|must have|at least|years? of|professional experience)\b/i.test(description);
+  const years = explicitRequirement ? parseJd(`Job title: ${job.title}\n${description}`).minYears : null;
+  if (years !== null && years !== undefined) {
+    const observed = candidate?.professionalYears ?? candidate?.totalExperienceYears ?? (
+      typeof candidate?.employmentYears === 'number' || typeof candidate?.internshipYears === 'number'
+        ? (candidate?.employmentYears ?? 0) + (candidate?.internshipYears ?? 0)
+        : null
+    );
+    if (typeof observed !== 'number' || !Number.isFinite(observed)) unknown.push(`Professional tenure for ${years}+ years requirement unavailable`);
+    else if (observed < years) blockers.push(`Requires ${years}+ professional years; observed ${observed}`);
+  }
+  if (/\b(?:completed|earned|obtained|graduated|hold(?:s|ing)?)\b.{0,45}\b(?:bachelor(?:'s)?|master(?:'s)?|degree|phd)\b|\b(?:bachelor(?:'s)?|master(?:'s)?|degree|phd)\b.{0,45}\b(?:completed|required|earned|obtained)\b/i.test(description)) {
+    const education = candidate?.education ?? [];
+    const requestedLevel = /\b(?:master(?:'s)?|msc|mtech)\b/i.test(description) ? 'master' : /\b(?:phd|doctorate)\b/i.test(description) ? 'doctorate' : /\b(?:bachelor(?:'s)?|btech|bsc)\b/i.test(description) ? 'bachelor' : null;
+    const requestedField = description.match(/\b(?:in|of)\s+(computer science|information technology|software engineering|electrical engineering|mathematics)\b/i)?.[1]?.toLowerCase();
+    const completed = education.some(entry => {
+      const degree = (entry.degree ?? '').toLowerCase();
+      const level = /\b(?:master|m\.?tech|m\.?sc|mba|mca)\b/.test(degree) ? 'master' : /\b(?:phd|doctor)\b/.test(degree) ? 'doctorate' : /\b(?:bachelor|b\.?tech|b\.?sc|b\.?e\.?|bca)\b/.test(degree) ? 'bachelor' : null;
+      const field = (entry.field ?? '').toLowerCase();
+      return (entry.completed === true || (entry as any).status === 'completed') && (!requestedLevel || level === requestedLevel) && (!requestedField || field === requestedField);
+    });
+    if (!completed) unknown.push('Completed degree, level or requested field unverified');
+  }
+
+  const location = job.location ?? '';
+  if (prefs.locations.length) {
+    const advertised = `${location} ${description}`;
+    const requested = prefs.locations.map(value => countryOf(value) ?? normalize(value));
+    const residency = advertised.match(/\b(?:us|usa|united states|canada|india|germany|united kingdom|uk|australia)(?:\s*(?:and|or|,|\/)\s*(?:us|usa|united states|canada|india|germany|united kingdom|uk|australia))*\s*(?:residents?|candidates?|based|only|eligible)\b|\b(?:only|residents?|based in|eligible in)\s*(?:the\s+)?(?:us|usa|united states|canada|india|germany|united kingdom|uk|australia)\b/i)?.[0] ?? '';
+    const allowed = [...new Set([...residency.matchAll(/\b(?:us|usa|united states|canada|india|germany|united kingdom|uk|australia)\b/gi)].map(match => countryOf(match[0])).filter(Boolean))];
+    const locationCountries = Object.entries(countries).filter(([,aliases]) => aliases.some(alias => alias.length === 2 ? location.trim().toLowerCase() === alias : new RegExp(`\\b${alias}\\b`,'i').test(location))).map(([country]) => country);
+    const locationCountry = countryOf(location) ?? (indianCities.test(location) ? 'india' : germanCities.test(location) ? 'germany' : null);
+    if (locationCountry && !locationCountries.includes(locationCountry)) locationCountries.push(locationCountry);
+    const worldwide = /\b(?:worldwide|global(?:ly)?)\b/i.test(location);
+    const remote = /\bremote\b/i.test(location) || mode === 'remote';
+    if (allowed.length && !allowed.some(country => requested.includes(country!))) blockers.push('Geographic residency restriction');
+    else if (!allowed.length && locationCountries.length && !locationCountries.some(country => requested.includes(country)) && !prefs.locations.some(loc => normalize(location).includes(normalize(loc)))) blockers.push('Location differs');
+    else if (!allowed.length && /\b(?:europe|eu|eea)\b/i.test(location) && requested.includes('india')) blockers.push('Outside advertised European region');
+    else if (!allowed.length && !worldwide && remote && !locationCountry) unknown.push('Remote residency eligibility unavailable');
+    else if ((!location || (!locationCountries.length && !worldwide && !prefs.locations.some(loc => normalize(location).includes(normalize(loc))))) && !remote) unknown.push('Location eligibility unavailable');
+  }
+  if (prefs.daysPosted && job.postedAt && Number.isFinite(new Date(job.postedAt).getTime()) && Date.now() - new Date(job.postedAt).getTime() > prefs.daysPosted * 86400000) blockers.push('Posting too old');
+  if (prefs.daysPosted && (!job.postedAt || !Number.isFinite(new Date(job.postedAt).getTime()))) unknown.push('Posting date unavailable');
+  return blockers.length ? { status:'ineligible', reasons:blockers } : unknown.length ? { status:'uncertain', reasons:unknown } : { status:'eligible', reasons:[] };
+}

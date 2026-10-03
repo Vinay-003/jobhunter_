@@ -1,12 +1,24 @@
 import type { ResumeProfile } from '../parsing/resumeProfile.js';
 import type { NormalizedJob } from '../../providers/jobs/JobProvider.js';
-import { normalizeSkill, CANONICAL_SKILL_ALIASES } from '../parsing/skillNormalizer.js';
+import { normalizeSkill } from '../parsing/skillNormalizer.js';
+import { extractSkills } from '../parsing/skillExtractor.js';
+import { professionalEvidence, redactProfessionalText } from '../matching/evidenceBuilder.js';
+import { parseJd } from '../jd/jdParser.js';
+import { matchJd } from '../jd/matcher.js';
+import { validateVectors } from '../../providers/embeddings/validateVectors.js';
 import { MockEmbeddingProvider } from '../../providers/embeddings/MockEmbeddingProvider.js';
 import { AwsSageMakerEmbeddingProvider } from '../../providers/embeddings/AwsSageMakerEmbeddingProvider.js';
-import { LocalEmbeddingProvider } from '../../providers/embeddings/LocalEmbeddingProvider.js';
+import { getLocalEmbeddingProvider } from '../../providers/embeddings/LocalEmbeddingProvider.js';
 import { env } from '../../config/env.js';
 
-export const VERSION = '2.0.0';
+export const VERSION = '3.0.0';
+
+export function roleFamily(title: string): 'software' | 'data' | 'other' {
+  if (/\b(?:software|developer|frontend|front.end|backend|back.end|full.stack|web|react|javascript|typescript|swe|sde|programmer|devops)\b/i.test(title)) return 'software';
+  if (/\b(?:data engineer|machine learning engineer|ml engineer)\b/i.test(title)) return 'data';
+  if (/\b(?:ui|application|qa|sqa|sdet|platform|cloud|test|ai)\b.*\bengineer\b/i.test(title)) return 'software';
+  return 'other';
+}
 
 /**
  * Ranking — compose fit score: Required skill 30 + Responsibility semantic 25 + Role/title 15 + Seniority 15 + Domain/education 10 + Location 5 =100
@@ -16,7 +28,7 @@ export const VERSION = '2.0.0';
 
 function getRankingEmbeddingProvider(): { embed: (input: { texts: string[]; purpose: 'resume'|'job'|'jd' }) => Promise<{ vectors: number[][]; modelId: string; dimension: number }> } {
   const p = (env.EMBEDDING_PROVIDER || 'auto').toLowerCase();
-  if (p === 'local' || process.env.USE_LOCAL_EMBEDDINGS === 'true') return new LocalEmbeddingProvider({ modelId: process.env.LOCAL_EMBEDDING_MODEL });
+  if (p === 'local' || process.env.USE_LOCAL_EMBEDDINGS === 'true') return getLocalEmbeddingProvider();
   if (p === 'aws' || (process.env.AWS_SAGEMAKER_ENDPOINT_NAME && process.env.AWS_ACCESS_KEY_ID)) return new AwsSageMakerEmbeddingProvider();
   // Do NOT default to mock silently — let Aws provider handle hasAwsCreds check and fallback with proper warning.
   // If no AWS creds, Aws provider will fallback to mock internally and log once, instead of ranking silently mocking.
@@ -37,6 +49,9 @@ export type RankResult = {
   fitScore: number;
   breakdown: RankBreakdown;
   evidence: string[];
+  matchedSkills?: string[];
+  missingSkills?: string[];
+  confidence?: string;
 };
 
 function normalizeSkillSet(skills: string[]): Set<string> {
@@ -57,9 +72,9 @@ const INDIAN_PLACES = [
 
 function locationScore(prefLocs: string[], jobLocation: string | null, workMode?: string | null): { points: number; note: string } {
   if (!prefLocs.length || !jobLocation) return { points: 3, note: '' };
-  if (workMode && workMode.toLowerCase() === 'remote') return { points: 5, note: 'Remote role — matches anywhere' };
+  if (workMode && workMode.toLowerCase() === 'remote') return { points: 3, note: 'Remote role — geographic eligibility not verified' };
   const jl = jobLocation.toLowerCase();
-  if (/\bremote\b/.test(jl)) return { points: 5, note: 'Remote — matches anywhere' };
+  if (/\bremote\b/.test(jl)) return { points: 3, note: 'Remote — residency eligibility not verified' };
   const direct = prefLocs.some((pl) => jl.includes(pl) || pl.includes(jl));
   if (direct) return { points: 5, note: `Location match ${jobLocation}` };
   // Country containment: pref "india" + job in an Indian city
@@ -90,196 +105,21 @@ function to01(rawCosine: number): number {
  * "N+ years" requirements as a fallback signal.
  */
 export function detectJobSeniority(title: string, description?: string | null): string | null {
-  const text = `${title} ${description ?? ''}`;
-  const lower = text.toLowerCase();
-  if (/(principal|staff(\s+engineer)?|lead(\s+engineer|\s+dev)?|\bl[56]\b|iv\b|architect|manager)/.test(lower)) return 'lead';
-  if (/\bsenior\b|\bsr\.?\b|iii\b|5\s*\+?\s*years?|6\s*\+?\s*years?|[7-9]\s*\+?\s*years?|10\s*\+?\s*years?/.test(lower)) return 'senior';
+  const lower = title.toLowerCase();
+  if (/\b(principal|staff|lead|director|vp|avp|architect|manager|l[56])\b/.test(lower)) return 'lead';
+  if (/\b(senior|sr\.?|iii|iv)\b/.test(lower)) return 'senior';
   // Indian-IT/US "Associate Software Engineer" (without "senior") is entry-level.
   if (/\bassociate\b/.test(lower) && /(engineer|developer)/.test(lower)) return 'junior';
-  if (/\bjunior\b|\bjr\.?\b|entry[\s-]?level|fresher|1\s*\+\s*years?|0\s*[-–]\s*1\s*years?|0\s*[-–]\s*2\s*years?|intern(ship)?\b|engineer\s*[-–/]?\s*(1|i)\b|\bswe\s*[-–/]?\s*1\b/.test(lower)) return 'junior';
-  if (/\bmid(\s+level)?\b|\bii\b|2\s*\+?\s*years?|3\s*\+?\s*years?|4\s*\+?\s*years?|\bl[34]\b/.test(lower)) return 'mid';
+  if (/\bjunior\b|\bjr\.?\b|entry[\s-]?level|fresher|graduate|intern(ship)?\b|engineer\s*[-–/]?\s*(1|i)\b|\bswe\s*[-–/]?\s*1\b/.test(lower)) return 'junior';
+  if (/\bmid(\s+level)?\b|\bii\b|\bl[34]\b/.test(lower)) return 'mid';
+  const years = parseJd(`Job title: ${title}\n${description ?? ''}`).minYears;
+  if (typeof years === 'number') return years >= 5 ? 'senior' : years >= 2 ? 'mid' : 'junior';
   return null;
 }
 
-async function semanticSimilarity(a: string, b: string): Promise<{ score: number; modelId: string; usedMock: boolean }> {
-  if (!a.trim() || !b.trim()) return { score: 0, modelId: 'none', usedMock: true };
-  const provider = getRankingEmbeddingProvider();
-  const res = await provider.embed({ texts: [a, b], purpose: 'job' });
-  const isMock = res.modelId.includes('mock');
-  const c = cosine(res.vectors[0], res.vectors[1]);
-  return { score: to01(c), modelId: res.modelId, usedMock: isMock };
-}
-
-export async function rankJob(
-  profile: ResumeProfile,
-  job: NormalizedJob,
-  opts?: { preferences?: { locations?: string[] | null } },
-): Promise<RankResult> {
-  const evidence: string[] = [];
-
-  // 1) Required skill 30
-  let requiredSkillScore = 0;
-  {
-    // Extract skills from job description
-    const jobText = `${job.title} ${job.description ?? ''}`.toLowerCase();
-    const profileSet = normalizeSkillSet(profile.skills);
-    // Use alias keys to find skills in job
-    const { CANONICAL_SKILL_ALIASES } = await getAliases();
-    const jobSkills: string[] = [];
-    for (const key of Object.keys(CANONICAL_SKILL_ALIASES)) {
-      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      if (new RegExp(`\\b${escaped}\\b`, 'i').test(jobText)) {
-        const norm = normalizeSkill(key).toLowerCase();
-        if (!jobSkills.includes(norm)) jobSkills.push(norm);
-      }
-    }
-    if (jobSkills.length === 0) {
-      requiredSkillScore = 15; // neutral when no skills detected
-      evidence.push('No skills detected in job — neutral skill score');
-    } else if (jobSkills.length <= 2) {
-      // Thin Jooble snippets: 1-2 detected skills is noise, not signal.
-      // A 1/1 "match" must not award full 30 points.
-      requiredSkillScore = 15;
-      const matchedThin = jobSkills.filter((s) => profileSet.has(s)).length;
-      evidence.push(`Only ${jobSkills.length} skill signal${jobSkills.length === 1 ? '' : 's'} in snippet (${matchedThin} matched) — neutral, too thin to judge`);
-    } else {
-      const matched = jobSkills.filter((s) => profileSet.has(s)).length;
-      const coverage = matched / jobSkills.length;
-      requiredSkillScore = Math.round(coverage * 30);
-      evidence.push(`Skill coverage ${matched}/${jobSkills.length}`);
-    }
-  }
-
-  // 2) Responsibility semantic 25
-  let responsibilitySemantic = 0;
-  let rankingEmbeddingModelId = env.EMBEDDING_MODEL_ID;
-  let rankingUsedMock = false;
-  {
-    const resumeText = profile.summary ?? profile.skills.join(' ') ?? '';
-    const jobDesc = job.description ?? job.title;
-    const { score: sim, modelId, usedMock } = await semanticSimilarity(resumeText.slice(0, 1000), jobDesc.slice(0, 1000));
-    rankingEmbeddingModelId = modelId;
-    rankingUsedMock = usedMock;
-    responsibilitySemantic = Math.round(sim * 25);
-    evidence.push(`Semantic similarity ${sim.toFixed(2)} via ${modelId}${usedMock ? ' (mock fallback)' : ''}`);
-  }
-
-  // 3) Role/title 15
-  let roleTitle = 0;
-  {
-    const titleLower = job.title.toLowerCase();
-    const resumeExpTitles = profile.experience.map((e) => (e.title ?? '').toLowerCase()).join(' ');
-    const resumeSummaryLower = (profile.summary ?? '').toLowerCase();
-    const combined = `${resumeExpTitles} ${resumeSummaryLower}`;
-    // Simple keyword overlap of title words
-    const titleWords = titleLower.split(/\W+/).filter((w) => w.length > 2);
-    let overlap = 0;
-    for (const w of titleWords) {
-      if (combined.includes(w)) overlap++;
-    }
-    const coverage = titleWords.length ? overlap / titleWords.length : 0;
-    // Also semantic fallback if low
-    let score = coverage;
-    if (score < 0.3) {
-      const { score: sim, modelId: simModel } = await semanticSimilarity(combined.slice(0, 500), job.title);
-      score = Math.max(score, sim * 0.8);
-      if (sim > coverage) {
-        rankingEmbeddingModelId = simModel;
-        evidence.push(`Title semantic ${sim.toFixed(2)} via ${simModel}`);
-      }
-    }
-    roleTitle = Math.round(score * 15);
-    evidence.push(`Title overlap ${overlap}/${titleWords.length}`);
-  }
-
-  // 4) Seniority / Level 15 - with explicit penalties (ResumeWorded strict)
-  let seniority = 0;
-  let jobSen: string | null = null;
-  {
-    const seniorityOrder = ['junior', 'mid', 'senior', 'lead'];
-    const profileSen = profile.seniority;
-    jobSen = detectJobSeniority(job.title, job.description);
-
-    if (!profileSen || !jobSen) {
-      seniority = 8; // partial when unknown
-      evidence.push('Level: unknown — partial (no penalty)');
-    } else if (profileSen === jobSen) {
-      seniority = 15;
-      evidence.push(`Level match: ${profileSen} = ${jobSen} (no penalty)`);
-    } else {
-      const diff = Math.abs(seniorityOrder.indexOf(profileSen) - seniorityOrder.indexOf(jobSen));
-      // Steeper penalties: adjacent -7, far -12 to -15. Senior roles must not
-      // top the list for entry-level candidates.
-      seniority = diff === 1 ? 8 : diff === 2 ? 3 : 0;
-      const penalty = 15 - seniority;
-      evidence.push(`Level penalty: ${penalty} pts — your ${profileSen} vs job ${jobSen} (diff ${diff})`);
-    }
-  }
-
-  // 5) Domain/education 10
-  let domainEducation = 0;
-  {
-    // Cheap heuristic: if job mentions degree and profile has education, score
-    const jobLower = (job.description ?? '').toLowerCase();
-    const eduKeywords = ['bachelor', 'master', 'degree', 'phd', 'education'];
-    const hasEduReq = eduKeywords.some((k) => jobLower.includes(k));
-    if (!hasEduReq) {
-      domainEducation = 6; // neutral
-    } else if (profile.education.length > 0) {
-      domainEducation = 10;
-      evidence.push('Education matches requirement');
-    } else {
-      domainEducation = 2;
-      evidence.push('Missing education for job requirement');
-    }
-    // Domain overlap bonus: reuse skill for domain? keep simple
-  }
-
-  // 6) Location 5
-  let location = 0;
-  {
-    const prefLocs = opts?.preferences?.locations?.map((s) => s.toLowerCase()) ?? [];
-    if (!prefLocs.length || !job.location) {
-      location = 3; // neutral
-    } else {
-      const { points, note } = locationScore(prefLocs, job.location, job.workMode);
-      location = points;
-      if (note) evidence.push(note);
-    }
-  }
-
-  const breakdown: RankBreakdown = {
-    requiredSkill: requiredSkillScore,
-    responsibilitySemantic,
-    roleTitle,
-    seniority,
-    domainEducation,
-    location,
-  };
-
-  let fitScore = Object.values(breakdown).reduce((s, v) => s + v, 0);
-  fitScore = Math.max(0, Math.min(100, fitScore));
-  // Hard cap: senior/lead postings can never top the list for junior profiles,
-  // no matter how well the keywords overlap.
-  if (profile.seniority === 'junior' && (jobSen === 'senior' || jobSen === 'lead')) {
-    if (fitScore > 65) {
-      evidence.push(`Capped at 65: ${jobSen}-level role is out of reach for a junior profile`);
-      fitScore = 65;
-    }
-  }
-
-  return {
-    fitScore,
-    breakdown,
-    evidence,
-    embeddingModelId: rankingEmbeddingModelId,
-    usedMock: rankingUsedMock,
-  } as RankResult & { embeddingModelId: string; usedMock: boolean };
-}
-
-async function getAliases(): Promise<{ CANONICAL_SKILL_ALIASES: Record<string, string> }> {
-  // Unified map — same source as resumeProfile + jdParser (bare react/python/html/css included).
-  return { CANONICAL_SKILL_ALIASES };
+/** Single-item compatibility path delegates to the same scorer used by runs. */
+export async function rankJob(profile: ResumeProfile, job: NormalizedJob, opts?: { preferences?: { locations?: string[] | null } }): Promise<RankResult> {
+  return (await rankJobsBatch(profile, [job], opts))[0];
 }
 
 export function rankJobsSync(
@@ -305,18 +145,13 @@ export async function rankJobsBatch(
   // Resume side mirrors jd-match: skills line + experience chunks, best-match wins.
   // A single short summary vector is too noisy (ranks "Java SWE II" above a
   // matching junior JD); max-over-chunks discriminates correctly.
-  const resumeChunks: string[] = [];
-  if (profile.skills.length) resumeChunks.push(('Skills: ' + profile.skills.join(', ')).slice(0, 500));
-  for (const exp of profile.experience.slice(0, 5)) {
-    if (exp.title) resumeChunks.push(exp.title.slice(0, 200));
-    if ((exp as any).description) resumeChunks.push(String((exp as any).description).slice(0, 500));
-  }
-  if (!resumeChunks.length) resumeChunks.push((profile.summary ?? '').slice(0, 1000));
-  const resumeExpTitles = profile.experience.map((e) => (e.title ?? '').toLowerCase()).join(' ');
-  const combinedBase = `${resumeExpTitles} ${(profile.summary ?? '').toLowerCase()}`.slice(0, 500);
+  if (!jobs.length) return [];
+  const resumeChunks = professionalEvidence(profile);
+   const resumeExpTitles = profile.experience.filter((e) => /engineer|develop|software|intern|programmer|project/i.test(e.title ?? '')).map((e) => (e.title ?? '').toLowerCase()).join(' ');
+   const combinedBase = resumeExpTitles.slice(0, 500);
 
   const perJobTexts = jobs.map((job) => ({
-    jobDesc: (job.description ?? job.title).slice(0, 1000),
+     jobDesc: redactProfessionalText(job.description ?? job.title).slice(0, 5000),
     combined: combinedBase,
     title: job.title,
   }));
@@ -328,18 +163,20 @@ export async function rankJobsBatch(
   const providerName = (provider as object).constructor?.name ?? 'unknown';
   const t0 = Date.now();
   let vec = new Map<string, number[]>();
-  let modelId = 'mock-384';
-  let usedMock = true;
+  let modelId = 'unavailable';
+  let usedMock = false;
   if (uniq.length) {
     try {
       const resp = await provider.embed({ texts: uniq, purpose: 'job' });
       modelId = resp.modelId;
       usedMock = modelId.includes('mock');
-      uniq.forEach((t, i) => vec.set(t, resp.vectors[i]));
+      validateVectors(resp.vectors, uniq.length, resp.dimension);
+      if (!usedMock) uniq.forEach((t, i) => vec.set(t, resp.vectors[i]));
       console.log(`[ranking] batch embed provider=${providerName} model=${modelId}${usedMock ? ' (mock fallback)' : ''} jobs=${jobs.length} texts=${uniq.length} ms=${Date.now() - t0}`);
     } catch (e: any) {
       console.warn(`[ranking] batch embed failed provider=${providerName}: ${e?.name || ''} ${e?.message || e} — scoring with keyword-only fallback`);
       vec = new Map();
+      modelId = 'unavailable';
     }
   }
 
@@ -361,25 +198,26 @@ export async function rankJobsBatch(
     {
       const jobText = `${job.title} ${job.description ?? ''}`.toLowerCase();
       const profileSet = normalizeSkillSet(profile.skills);
-      const jobSkills: string[] = [];
-      for (const key of Object.keys(CANONICAL_SKILL_ALIASES)) {
-        const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        if (new RegExp(`\\b${escaped}\\b`, 'i').test(jobText)) {
-          const norm = normalizeSkill(key).toLowerCase();
-          if (!jobSkills.includes(norm)) jobSkills.push(norm);
-        }
-      }
+      const jobSkills = extractSkills(jobText).map(s => s.toLowerCase());
+      const parsed = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`);
+      const structured = parsed.requirementGroups?.some(group => group.confidence >= .7);
       const display = (s: string) => normalizeSkill(s);
-      if (jobSkills.length === 0) {
-        requiredSkillScore = 15;
-        evidence.push('No skills detected in job — neutral skill score');
+      if (structured) {
+        const match = matchJd(profile, parsed);
+        requiredSkillScore = Math.round(match.overallScore / 100 * 30);
+        matchedSkills = [...match.matchedRequired, ...match.matchedPreferred];
+        missingSkills = match.missingRequired;
+        evidence.push(`Structured requirement coverage ${Math.round(match.requiredCoverage * 100)}%; alternatives are grouped`);
+      } else if (jobSkills.length === 0) {
+         requiredSkillScore = 0;
+         evidence.push('Requirements unavailable; no skill points inferred');
       } else if (jobSkills.length <= 2) {
         // Thin Jooble snippets: 1-2 detected skills is noise, not signal.
         const matchedThin = jobSkills.filter((s) => profileSet.has(s));
         matchedSkills = matchedThin.map(display);
         missingSkills = jobSkills.filter((s) => !profileSet.has(s)).map(display);
-        requiredSkillScore = 15;
-        evidence.push(`Only ${jobSkills.length} skill signal${jobSkills.length === 1 ? '' : 's'} in snippet (${matchedThin.length} matched) — neutral, too thin to judge`);
+         requiredSkillScore = Math.round(matchedThin.length / jobSkills.length * 15);
+         evidence.push(`Only ${jobSkills.length} skill signal${jobSkills.length === 1 ? '' : 's'} (${matchedThin.length} matched); limited evidence`);
       } else {
         const matched = jobSkills.filter((s) => profileSet.has(s));
         const missing = jobSkills.filter((s) => !profileSet.has(s));
@@ -408,24 +246,9 @@ export async function rankJobsBatch(
     let roleTitle = 0;
     let titleModel = modelId;
     {
-      const titleLower = job.title.toLowerCase();
-      const titleWords = titleLower.split(/\W+/).filter((w) => w.length > 2);
-      let overlap = 0;
-      for (const w of titleWords) {
-        if (combined.includes(w)) overlap++;
-      }
-      const coverage = titleWords.length ? overlap / titleWords.length : 0;
-      let score = coverage;
-      if (score < 0.3 && combined.trim() && title.trim()) {
-        const sim = pairScore(combined, title);
-        score = Math.max(score, sim * 0.8);
-        if (sim > coverage) {
-          titleModel = modelId;
-          evidence.push(`Title semantic ${sim.toFixed(2)} via ${modelId}`);
-        }
-      }
-      roleTitle = Math.round(score * 15);
-      evidence.push(`Title overlap ${overlap}/${titleWords.length}`);
+       const family = roleFamily(job.title);
+       roleTitle = family === 'other' ? 0 : combined && family === 'software' ? 15 : family === 'software' ? 8 : 5;
+       evidence.push(combined ? `Role family: ${family}, professional title evidence` : `Role family: ${family}; professional title evidence unavailable`);
     }
 
     // 4) Seniority 15
@@ -451,15 +274,12 @@ export async function rankJobsBatch(
     let domainEducation = 0;
     {
       const jobLower = (job.description ?? '').toLowerCase();
-      const hasEduReq = ['bachelor', 'master', 'degree', 'phd', 'education'].some((k) => jobLower.includes(k));
-      if (!hasEduReq) domainEducation = 6;
-      else if (profile.education.length > 0) {
-        domainEducation = 10;
-        evidence.push('Education matches requirement');
-      } else {
-        domainEducation = 2;
-        evidence.push('Missing education for job requirement');
-      }
+       const hasEduReq = /\b(?:bachelor(?:'s)?|master(?:'s)?|degree|phd)\b/.test(jobLower);
+       if (!hasEduReq) domainEducation = 0;
+       else if (profile.education.some((entry: any) => /bachelor|b\.?tech|b\.?e\.?|master|m\.?tech|phd/i.test(String(entry.degree ?? '')))) {
+         domainEducation = 5;
+         evidence.push('Degree type appears relevant; completion and field unverified');
+       } else evidence.push('Degree evidence unavailable');
     }
 
     // 6) Location 5
@@ -486,10 +306,7 @@ export async function rankJobsBatch(
     fitScore = Math.max(0, Math.min(100, fitScore));
     // Hard cap: senior/lead postings can never top the list for junior profiles.
     if (profile.seniority === 'junior' && (jobSen === 'senior' || jobSen === 'lead')) {
-      if (fitScore > 65) {
-        evidence.push(`Capped at 65: ${jobSen}-level role is out of reach for a junior profile`);
-        fitScore = 65;
-      }
+       evidence.push(`${jobSen}-level role is not eligible for a junior profile`);
     }
     void titleModel;
     return {
@@ -499,7 +316,8 @@ export async function rankJobsBatch(
       embeddingModelId: modelId,
       usedMock,
       matchedSkills,
-      missingSkills,
+       missingSkills,
+        confidence: job.descriptionQuality === 'full' && !usedMock && modelId !== 'unavailable' && job.description && job.description.length > 300 ? 'Medium' : 'Low',
     };
   });
 }

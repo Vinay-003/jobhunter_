@@ -1,8 +1,8 @@
 import axios from 'axios';
-import crypto from 'node:crypto';
 import type { JobProvider, JobSearchQuery, NormalizedJob } from './JobProvider.js';
 import { env } from '../../config/env.js';
 import pool from '../../config/database.js';
+import { markFallback, storeJobsToDb } from './jobStore.js';
 
 /**
  * Jooble provider — axios POST to Jooble, with env key handling, timeout, fallback to DB,
@@ -56,7 +56,7 @@ export class JoobleProvider implements JobProvider {
       console.log(`[JoobleProvider] Jooble returned ${normalized.length} jobs (raw ${jobs.length}) for "${query.keywords}"`);
 
       // Store to jobs table (best-effort, ignore errors in dev when DB not reachable)
-      await this.storeToDb(normalized).catch(() => {});
+      await storeJobsToDb(normalized).catch(() => {});
 
       if (normalized.length === 0) {
         console.warn(`[JoobleProvider] Jooble empty for "${query.keywords}" — fallback to DB cache`);
@@ -89,54 +89,11 @@ export class JoobleProvider implements JobProvider {
       description: j.snippet ? String(j.snippet) : null,
       url: j.link ? String(j.link) : null,
       salary: j.salary ? { raw: String(j.salary) } : null,
-      postedAt: j.updated ? new Date(String(j.updated)).toISOString() : null,
-      workMode: j.type ? String(j.type) : null,
+       postedAt: j.updated && Number.isFinite(new Date(String(j.updated)).getTime()) ? new Date(String(j.updated)).toISOString() : null,
+       workMode: j.type && /\b(remote|hybrid|onsite|on-site)\b/i.test(String(j.type)) ? String(j.type).toLowerCase() : null,
+       descriptionQuality: 'snippet',
+       retrieval: { status: 'live', requestedProvider: 'jooble' },
     };
-  }
-
-  private contentHash(job: NormalizedJob): string {
-    return crypto
-      .createHash('sha256')
-      .update(`${job.source}|${job.externalId}|${job.title}|${job.company}`)
-      .digest('hex');
-  }
-
-  private async storeToDb(jobs: NormalizedJob[]): Promise<void> {
-    for (const j of jobs) {
-      const hash = this.contentHash(j);
-      try {
-        await pool.query(
-          `INSERT INTO jobs (source, external_id, title, company, location, description, url, salary, work_mode, posted_at, content_hash)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-           ON CONFLICT (source, external_id) DO UPDATE SET
-             title = EXCLUDED.title,
-             company = EXCLUDED.company,
-             location = EXCLUDED.location,
-             description = EXCLUDED.description,
-             url = EXCLUDED.url,
-             salary = EXCLUDED.salary,
-             work_mode = EXCLUDED.work_mode,
-             posted_at = EXCLUDED.posted_at,
-             content_hash = EXCLUDED.content_hash,
-             fetched_at = now()`,
-          [
-            j.source,
-            j.externalId,
-            j.title,
-            j.company,
-            j.location,
-            j.description,
-            j.url,
-            j.salary ? JSON.stringify(j.salary) : null,
-            j.workMode,
-            j.postedAt,
-            hash,
-          ],
-        );
-      } catch {
-        // ignore per-row errors
-      }
-    }
   }
 
   private async fallbackFromDb(query: JobSearchQuery): Promise<NormalizedJob[]> {
@@ -153,7 +110,7 @@ export class JoobleProvider implements JobProvider {
        FROM jobs WHERE title ILIKE $1 OR description ILIKE $1 ORDER BY fetched_at DESC LIMIT 20`,
       [like],
     );
-    return rows.map((r) => ({
+    return markFallback(rows.map((r) => ({
       source: r.source,
       externalId: r.external_id,
       title: r.title,
@@ -164,7 +121,7 @@ export class JoobleProvider implements JobProvider {
       salary: r.salary,
       postedAt: r.posted_at,
       workMode: r.work_mode,
-    }));
+    })), 'jooble');
   }
 }
 
