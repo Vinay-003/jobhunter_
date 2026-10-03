@@ -18,6 +18,7 @@ services:
     plan: free
     rootDir: backend
     branch: dev
+    installCommand: npm ci --include=dev
     buildCommand: npm ci --include=dev && npm run build
     startCommand: node dist/server.js
     healthCheckPath: /health
@@ -109,6 +110,7 @@ services:
     runtime: static
     branch: dev
     rootDir: frontend/project
+    installCommand: npm ci --include=dev
     buildCommand: npm ci --include=dev && npm run build
     staticPublishPath: dist
     # SPA fallback — required for react-router

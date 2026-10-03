@@ -4,6 +4,9 @@
   "description": "Resume ATS and Job Recommendation System Backend",
   "main": "src/server.ts",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "bun run src/server.ts",
     "start": "bun run src/server.ts",
