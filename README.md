@@ -16,11 +16,15 @@ Older notes: [ARCHITECTURE.md](./ARCHITECTURE.md) (pointer only), [DEPLOYMENT.md
 
 > **Audit follow-up (2026-10-02/03):** the sweep below verified the analysis
 > pipeline end-to-end, but a deeper audit found additional gaps — resume deep-link
-> 404s, a blank/slow login gate, dependency audits, and secondary fixes
-> S3/S4/S7/S8 — now fixed on `dev` with scripted browser E2E (18/18 + 2/2) and
-> 23/23 backend tests. **Still open:** prod uploads (verify Render `SUPABASE_URL` /
-> `SUPABASE_SERVICE_ROLE_KEY`, then redeploy) and the lost-file backfill / orphan
-> sweep. Changes are committed on `dev` but **not pushed**.
+> 404s, a blank/slow login gate, dependency audits, secondary fixes
+> S3/S4/S7/S8, and **Issue 1 (prod uploads)** — all fixed on `dev` and
+> **pushed** (through `64e66c3`), with scripted browser E2E (18/18 + 2/2) and
+> 23/23 backend tests. Issue 1 root cause: Render ran Node 20 while
+> `@supabase/supabase-js` ≥2.117 needs Node 22+ (native WebSocket) — fixed by
+> fail-loud storage logging + `/health?deep=1` probe and `NODE_VERSION` 22.14.0;
+> prod re-probed end-to-end (upload → `storage_bucket='resumes'` → object →
+> download → delete). **Still open:** S1 lost-row marking, S2 orphan sweep,
+> frontend majors (Q6), lockfile (Q7).
 
 Full sweep today: local backend + Render backend, same Supabase, same resume+JD.
 Test users/rows were created and **deleted afterwards** (0 orphans).

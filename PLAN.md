@@ -1,10 +1,14 @@
 # PLAN — Bug Investigation & Fix Plan (2026-10-03)
 
-> **Status (2026-10-03): fixes implemented on `dev`, NOT pushed.** Issues 2–4
-> (non-breaking parts) and secondary S3/S4/S6/S7/S8 + S1 lost-file UX are done, each with
-> local + scripted-browser evidence (§8 marks every step). **Still open:** Issue 1 (needs
-> the §9 Render dashboard checks) and Q5–Q7 (Node version, frontend majors, lockfile).
-> All commits from `2532a45` onward (through this docs refresh) sit ahead of `origin/dev`.
+> **Status (2026-10-03): all of Issues 1–4 + S1–S8 pushed to `origin/dev` (through
+> `64e66c3`).** Issue 1 is **RESOLVED and verified live** (root cause: Render ran Node 20;
+> `@supabase/supabase-js` ≥2.117 `createClient()` needs native WebSocket → Node 22+ →
+> every Render upload silently fell to disk). Fix = fail-loud logs + `/health?deep=1`
+> probe (`fee869b`, `58c24d2`) + Render `NODE_VERSION` 22.14.0 (`64e66c3`); prod upload
+> re-probed end-to-end (`storage_bucket='resumes'`, object listed, download roundtrip,
+> DELETE cleans object — §8.1). **Still open:** S1 legacy-row marking (bytes gone),
+> S2/Q2 (bucket now empty — confirm user cleared it), Q6 (frontend majors), Q7 (lockfile).
+> Q1/Q5 answered (env vars correct; Node 22 shipped).
 >
 > **Line refs:** re-verified 2026-10-03 against current `HEAD`. Issue sections whose bugs
 > are fixed label their evidence **[pre-fix @ `114773a`]** — those line numbers describe
@@ -55,6 +59,19 @@
 ## Issue 1 — Resumes uploaded in production never reach Supabase Storage
 
 **Severity: high (data loss risk) · Confidence: confirmed by live test**
+
+> **Status: RESOLVED** — fixes `fee869b` + `58c24d2` + `64e66c3`, prod-verified
+> 2026-10-03 00:08–00:10 UTC. **Root cause (final):** Render ran **Node 20.11.0**
+> (`render.yaml` NODE_VERSION); `@supabase/supabase-js@2.117.2` `createClient()` throws
+> *"Node.js detected but native WebSocket not found — run Node.js 22+ or provide a
+> WebSocket transport"*. The throw hit the silent `catch` in `getSupabaseClient()`
+> (leading hypothesis below — cause was Node version, not URL format) → `client=null` →
+> disk fallback with **zero log lines**. Decisive evidence: new `/health?deep=1` on prod
+> returned `storage:"error client-unavailable (create-client: Node.js detected but
+> native WebSocket not found…)"` on Node 20, and `storage:"ok"` after the Node 22.14.0
+> deploy. (The "intermittent" 23:34 success was a **localhost** upload — bun has
+> WebSocket + the same shared Supabase — Render itself failed 100% of the time.)
+> *Pre-fix evidence below.*
 
 ### Symptom
 Uploads "succeed" in the UI, but the Supabase Storage bucket contains almost nothing.
@@ -116,10 +133,11 @@ The bucket `resumes` contains exactly **one** folder (`301b4e73-…`) holding a
    evidence at once**: deprecation warning present (import ran) + zero `[supabaseStorage]`
    lines + `bucket=local`. Two rival paths remain (they do print a warn) — table below.
 
-### Open (needs Render dashboard — cannot be probed remotely)
-Logs narrowed the field (dep + package present), but the exact failing branch needs two
-dashboard checks — Render → `jobhunter-backend` → **Logs** around **22:11 & 22:31 UTC**
-and → **Environment**:
+### ~~Open (needs Render dashboard)~~ — **answered 2026-10-03**
+Environment vars were correct all along (Q1 — `SUPABASE_URL` has `https://`, key set,
+`SUPABASE_RESUME_BUCKET=resumes`). The "no `[supabaseStorage]` line" row below was right:
+`createClient()` threw inside the silent catch — actual throw message captured live via
+the new probe (Node/WebSocket, not URL). Superseded by the status banner above.
 
 | Observation | Meaning | Action |
 |---|---|---|
@@ -132,34 +150,30 @@ and → **Environment**:
 git (`.gitignore:29`) and `env.ts:31-32` reads `process.env` — so Render sees **only**
 dashboard values, nothing else.
 
-### Proposed fix
-1. **Verify prod state first** (dashboard): Render → `jobhunter-backend` → Logs, grep
-   `supabaseStorage`; Environment → confirm `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`;
-   Deploys → confirm a deploy for `92f7116`/`114773a` succeeded.
-2. **Fail loudly, not silently** — `supabaseStorage.ts`:
-   - `getSupabaseClient()`: log the import error before returning null
-     (`console.error('[supabaseStorage] @supabase/supabase-js unavailable:', err)`).
-   - `uploadFile()`: when Supabase is configured but the write lands on local disk in
-     **production** (`NODE_ENV=production`), return/throw an error instead of pretending
-     success — or at minimum attach `storageMode: 'local-fallback'` to the response.
-3. **Surface storage state in the API** — `resumes.ts:122` and `:140`: include
-   `storageBucket: row.storage_bucket`. UI can badge it (`saved: supabase | local(dev)`).
-4. **Structured warning** — replace free-text warns with one greppable token, e.g.
-   `[supabaseStorage] FALLBACK reason=import|env|upload-error`, so one log grep answers
-   the table above forever.
-5. **Health check** — extend `/health` (`backend/src/routes/v1/index.ts:20`) with an
-   optional `?deep=1` that runs `storage.from(bucket).list('', {limit:1})` and reports
-   `storage: ok|error <code>` (never leaking the key).
-6. **Re-deploy + re-run the exact probe** from §7 (upload → assert
-   `storage_bucket == 'resumes'` → bucket folder exists → DELETE cleans it).
+### Proposed fix — **all done (see status banner)**
+1. ✅ **Verify prod state first** — env vars confirmed via user screenshot (Q1); the
+   failing branch identified live via `?deep=1` instead of a log grep.
+2. ✅ **Fail loudly** — `fee869b`: `getSupabaseClient()` logs `reason=import|create-client`;
+   `uploadFile()` **throws in production** on env/client-null/upload-error (dev keeps disk
+   fallback with a `FALLBACK reason=` token).
+3. ✅ **Surface storage state in the API** — `fee869b`: `storageBucket` on upload (`resumes.ts:122`)
+   and list (`:140`) responses (list also fixed `fileName/uploadDate` for `SELECT *` rows).
+4. ✅ **Structured warning** — `[supabaseStorage] FALLBACK reason=import|create-client|env|client-null|upload-error`.
+5. ✅ **Health check** — `fee869b` + `58c24d2`: `GET /api/v1/health?deep=1` →
+   `storage: ok | error <code/reason> | not-configured` (never leaks the key).
+6. ✅ **Re-deploy + re-run the exact probe** — after `64e66c3` (Node 22.14.0):
+   `?deep=1` → `storage:"ok"`; prod signup+upload → `storageBucket:"resumes"`,
+   DB row `storage_bucket='resumes'`, bucket folder listed, download 200 (173,303 B,
+   `%PDF-1.5`), `DELETE /resumes/<id>` removed the object; cleanup verified
+   (0 qa users, 0 orphan rows, bucket `[]`).
 
 ### Consequence already realized (fix separately, §6)
-All 14 existing rows say `bucket='local'` → their bytes live (or lived) only on an
-ephemeral Render disk / this machine. Files from Aug 30–Sep 23 are **already gone**
-(only 3 of them exist under `backend/uploads/`, see §6) → re-analysis and download for
-those resumes will fail (`resumes.ts:213` → 404 "File not found in storage";
-`analyses.ts:45-64` → **410** with re-upload copy since `8e4b127`; was a 500). Confirmed
-live in Render logs: `readiness error Error: Local
+The legacy rows (now 10 total: 9 `bucket='local'` + 1 `bucket='resumes'` whose object
+was removed from the bucket) have **no reachable bytes** — Render's ephemeral disk was
+wiped by today's deploys, local `backend/uploads/` holds no PDFs, and the one Supabase
+object is gone. UX is honest already (`8e4b127`: analysis → **410** + re-upload copy;
+download → 404 with resume-view copy); remaining optional step = S1 status marking.
+Confirmed earlier in Render logs: `readiness error Error: Local
 file not found: /opt/render/project/src/backend/uploads/hc/test.pdf`.
 
 ---
@@ -318,8 +332,9 @@ likely order of impact:
 **Severity: medium (1 critical, prod-relevant) · Source: Render build/runtime logs + `npm audit`**
 
 > **Status: PARTIAL** — fix 1 done (`2532a45`: backend audit clean, 0 vulns), fix 2 done
-> (`f56492a`: frontend 11 → 4 vulns, all remaining are majors). Fixes 3–5 (majors Q6,
-> lockfile Q7, `NODE_VERSION` Q5) await user decisions; evidence below is as-of 2026-10-02.
+> (`f56492a`: frontend 11 → 4 vulns, all remaining are majors), fix 5 done (`64e66c3`:
+> `NODE_VERSION` 22.14.0, forced by Issue 1). Fixes 3–4 (majors Q6, lockfile Q7) await
+> user decisions; evidence below is as-of 2026-10-02.
 
 ### Evidence (2026-10-02)
 1. Render build log: `10 vulnerabilities (4 moderate, 5 high, 1 critical)` after `npm ci`,
@@ -403,11 +418,11 @@ likely order of impact:
 
 | # | Finding | Where (current @ HEAD) | Suggested fix | Status |
 |---|---|---|---|---|
-| S1 | 13 of 14 resume rows point at files that no longer exist (ephemeral disk) → download 404, re-analysis failed. **Live proof in prod logs:** `readiness error Error: Local file not found: /opt/render/project/src/backend/uploads/hc/test.pdf` (hand-crafted test row — path lacks the `<userId>/<resumeId>/` prefix — since deleted) | `resumes.ts:213`, `analyses.ts:45-64`; rows: all `storage_bucket='local'` | After Issue 1 fix: migration/backfill to re-upload any recoverable bytes; for unrecoverable rows mark `processing_status='lost'` and UI: "re-upload required" instead of 500/404 | **Partial** — lost-file UX done (`8e4b127`: analysis on a missing file → **410** + re-upload copy, live-probed; download already 404s with resume-view copy). Backfill/'lost' marking waits on Issue 1 |
-| S2 | Orphaned storage object: `resumes/301b4e73-…/1769d56b-…/hc_resume.pdf`, 1,396 bytes, created 2026-10-02 19:50:13 UTC; owner not in `users`, no `resumes`/`analyses` rows | Supabase bucket | **Ask user before deleting** (likely test artifact of the previous sweep, but it's the file in their screenshot). Then: add a periodic orphan sweep (storage objects with no matching `resumes.storage_object_path`) | **Open** (Q2 — needs user go-ahead) |
+| S1 | All 10 remaining resume rows now have unreachable bytes (9 `storage_bucket='local'`, disk wiped by deploys; 1 `='resumes'` whose object is gone) → download 404, re-analysis 410. **Live proof in prod logs:** `readiness error Error: Local file not found: /opt/render/project/src/backend/uploads/hc/test.pdf` (hand-crafted test row — path lacks the `<userId>/<resumeId>/` prefix — since deleted) | `resumes.ts:213`, `analyses.ts:45-64`; rows: 9 `local` + 1 `resumes` (object gone) | Backfill impossible (bytes gone) → for unrecoverable rows mark `processing_status='lost'` + UI: "re-upload required" | **Partial** — lost-file UX done (`8e4b127`: analysis on a missing file → **410** + re-upload copy, live-probed; download already 404s). Marking = open (data decision for user) |
+| S2 | Orphaned storage object: `resumes/301b4e73-…/1769d56b-…/hc_resume.pdf`, 1,396 bytes, created 2026-10-02 19:50:13 UTC; owner not in `users`, no `resumes`/`analyses` rows | Supabase bucket | ~~Ask user before deleting~~ | **Gone** — 2026-10-03 probe: bucket root list `[]`, object GET → 404 (user appears to have cleared the bucket; confirm Q2). Sweep job itself still open |
 | S3 | PDF parsed twice per upload (page count + profile) | `resumes.ts:61` (parse) → `:117` (reuse) | Parse once, reuse `parsed` | ✅ `d2d36b7` |
 | S4 | `loadResumeBuffer` fallback did `fs.existsSync(path)` on a *relative* object path — never matches | `analyses.ts:45-64` (fallback removed) | Remove or resolve against `localUploadsDir()` | ✅ `8e4b127` (removed; `downloadFile` already resolves local paths; missing bytes now tagged `STORED_FILE_MISSING` → 410) |
-| S5 | Resume delete cleans storage only for bucket≠local; for `bucket='local'` rows on Render it silently no-ops on missing file (fine) but leaves **no** way to clean real Supabase orphans if bucket was misrecorded | `resumes.ts:179` (already deletes by the recorded bucket) | After Issue 1: delete by recorded bucket; orphan sweep (S2) as backstop | **Open** (nothing meaningful until Issue 1 fixes bucket recording; sweep = S2) |
+| S5 | Resume delete must clean storage by the **recorded** bucket (not hardcode) | `resumes.ts:179` (deletes by the recorded bucket) | Delete by recorded bucket; orphan sweep (S2) as backstop | ✅ live-verified 2026-10-03: prod `DELETE /resumes/<id>` on a `bucket='resumes'` row removed the Supabase object (bucket `[]` after) |
 | S6 | Docs claim green: README "2026-10-02 green sweep" while prod storage is broken | `README.md` (status section), `SYSTEM_DESIGN.md` §17 | Re-verify & update **in the same commit** as the fixes | ✅ this docs commit — README audit note + `SYSTEM_DESIGN.md` §17 |
 | S7 | `SessionGuard` legacy fallback `GET /latest-resume` can mark a user "authed" on a 200 from an unrelated endpoint | `router.tsx:62-70` (fallback removed) | Drop fallback; rely on `/auth/session` 401 → guest | ✅ `165d7ba` |
 | S8 | Startup banner printed `💾 Database: Not configured` while the DB was actually connected (it checked only `DATABASE_URL`; the app connects via `PG_DATABASE_STRING`) | `server.ts:114-127`, `env.ts:67-69` | Use `getDatabaseUrl()` presence (or the pool) for the banner; print a masked DSN source instead of a misleading status | ✅ `c675764` — banner prints `configured via PG_DATABASE_STRING` (source name only, never the DSN); live-verified |
@@ -433,6 +448,7 @@ likely order of impact:
 | Render signup/login/upload/analysis (`qa.e2e.1790979078@…`, user `8df327f9-…`, resume `fc1767ac-…`, analysis `0b8eeb02-…`) | 22:11 UTC | `DELETE /resumes/fc1767ac…` (cascades analyses/profiles) + `DELETE /rest/v1/users?id=eq.8df327f9…` |
 | Local signup/upload (`qa.local.1790979777@…`, user `cb95d000-…`, resume `ae893a43-…`) | 22:22 UTC | `DELETE /resumes/ae893a43…` (removes Supabase object too) + `DELETE /rest/v1/users?id=eq.cb95d000…` |
 | Render re-probe after logs (`qa.v3.*@example.com`, user `c7b4e1d9-…`, resume `037f616d-…`) | 22:31 UTC | `DELETE` by `user_id` on `resumes`/`sessions` (204) + `DELETE /rest/v1/users?id=eq.c7b4e1d9…` (204); analysis list `[]` |
+| Issue 1 fix verification on prod (`qa.prodnode22@example.com`, user `04808ddf-…`, resume `d85d4661-…`) | 2026-10-03 00:08 UTC | `DELETE /resumes/d85d4661…` (removed DB row **and** Supabase object) + psql `sessions`/`users` (1 row each); bucket root `[]`, qa/orphan counts 0/0 |
 
 Final verification (all empty for the three test users):
 ```
@@ -450,15 +466,17 @@ lived only in `/tmp/opencode/jh/`.
 
 **§0 applies to every step: small commits · local-first · browser-E2E green before push.**
 
-1. ⏳ **Render triage for Issue 1** (Environment check + log grep `supabaseStorage` around
-   22:11/22:31 UTC) → apply fixes 1.2–1.6 → redeploy → rerun upload probe
-   (assert `storage_bucket='resumes'` + object visible in bucket) → **commit**.
-   *Blocked on Q1 (dashboard access).*
+1. ✅ **Render triage + fix for Issue 1** — env vars confirmed (user screenshot, Q1);
+   root cause pinned live via `/health?deep=1` (no dashboard log access needed);
+   fixes 1.2–1.5 (`fee869b`, `58c24d2`) + `NODE_VERSION` 22.14.0 (`64e66c3`) →
+   redeployed → prod upload probe: `storage_bucket='resumes'` + object visible +
+   download roundtrip + DELETE cleans it (2026-10-03 00:08–00:10 UTC).
 2. ✅/⏳ **Issue 4 (deps/runtime):** backend `npm audit fix` → **done** (`2532a45`, 0 vulns);
    frontend `npm audit fix` (non-breaking) → **done** (`f56492a`, 11 → 4);
    frontend majors (`react-router-dom@7`, `vite@8`) → *open, Q6*; lockfile
    single-source (`installCommand: npm ci`, bun.lock decision) → *open, Q7*;
-   `NODE_VERSION` 22 + `engines` → *open, Q5*.
+   `NODE_VERSION` → **done** (`64e66c3`: 22.14.0 in `render.yaml`, required by Issue 1;
+   `engines` field still open under Q7).
 3. ✅ **Issue 2 (resume view):** `/app/resumes/:id` route + resume view (report if analyzed,
    card+Download+Analyze CTA if not) + `?resumeId` on AtsPage + backend `resumeId` filter
    + error-status/copy fixes → **done** (`30933e9`, `9a58578`); browser test: Resumes →
@@ -474,22 +492,23 @@ lived only in `/tmp/opencode/jh/`.
 6. ✅ **Per-commit gates:** `cd backend && npm run build && npm test` (23/23 each time) ·
    `cd frontend/project && npx tsc --noEmit && npm run build` · local feature run (§0 rule 4) · scripted
    browser suite (§0 rule 5: 18/18 + 2/2) · live curl probes from Issues 1–2.
-   **Push only when green — not pushed yet (Issue 1 open).**
+   **Pushed** — `origin/dev` at `64e66c3` (everything through Issue 1).
 
 ## 9. Open questions for the user
 
-1. **Render (two quick checks for Issue 1):** (a) *Environment* tab — are `SUPABASE_URL`
-   and `SUPABASE_SERVICE_ROLE_KEY` set, and does the URL start with `https://`?
-   (b) *Logs* — grep `supabaseStorage` around **22:11 & 22:31 UTC** (my two test uploads).
-   Either answer decides the last unknown (table in Issue 1).
-2. **Orphan file (S2):** delete `resumes/301b4e73-…/hc_resume.pdf`, or is it yours?
+1. ~~**Render checks for Issue 1**~~ **answered 2026-10-03:** (a) env vars all set,
+   `https://` URL correct; (b) the log grep was superseded — `/health?deep=1` captured
+   the failure reason directly (`createClient: native WebSocket not found`).
+2. **Orphan file (S2):** ~~delete `resumes/301b4e73-…/hc_resume.pdf`~~ — bucket is now
+   empty (object gone, GET → 404). *Did you clear the storage bucket yourself?* (If not,
+   need to understand who removed it.) Periodic sweep job still open.
 3. **Screenshot account:** your screenshots show resume records, but `301b4e73-…` (from
    your signed URL) has no rows in the DB — which login was the app using? (Determines
    whether your real account's data is among the 14 `local` rows.)
 4. **Keep-alive:** is the backend on Render asleep often? If yes, decide whether to rely
    on `KEEPALIVE.md`'s cron or upgrade the instance (dominant factor in Issue 3).
-5. **Node version for Issue 4:** bump Render to **22** (minimum for both deprecation
-   warnings) or **24** (match your local machine)?
+5. ~~**Node version for Issue 4:**~~ **done** — Render moved to 22.14.0 (`64e66c3`,
+   forced by Issue 1). Local dev still runs bun; consider aligning later.
 6. **Frontend majors (Issue 4 fix 3):** go to `react-router-dom@7` + `vite@8` now (with
    full E2E), or ship non-breaking fixes first and schedule majors separately?
 7. **Package manager (Issue 4 fix 4):** recommended — Render installs with

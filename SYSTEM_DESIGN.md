@@ -298,7 +298,7 @@ Default in `api.ts` if env missing: `http://localhost:3001/api` (**not** `/api/v
 
 `render.yaml`:
 
-- **jobhunter-backend**: Node 20.11.0, `rootDir: backend`, build `npm ci --include=dev && npm run build`, start `node dist/server.js`, health `/health`, `branch: dev`, plan free, secrets `sync: false`
+- **jobhunter-backend**: Node 22.14.0 (`NODE_VERSION` — was 20.11.0; `@supabase/supabase-js` ≥2.117 requires Node 22+ for native WebSocket, see Issue 1), `rootDir: backend`, build `npm ci --include=dev && npm run build`, start `node dist/server.js`, health `/health`, `branch: dev`, plan free, secrets `sync: false`
 - **jobhunter**: static, `rootDir: frontend/project`, publish `dist`, SPA rewrite `/* → /index.html`
 
 Free Render **hibernates**. Wake requires a successful `node dist/server.js`. Because `database.ts` exits on connect failure, a dead Supabase project makes wake **impossible** (`x-render-routing: hibernate-wake-error`).
@@ -414,7 +414,13 @@ packaging gap (fixed below). Per-route evidence in `LOCAL_SETUP.md` §6.
 ## 17. 2026-10-02/03 audit follow-up (PLAN.md)
 
 Second-pass audit of §1–16 against the running code. Fixed on `dev`
-(commits `2532a45`…`8e4b127`, not pushed):
+(commits `2532a45`…`64e66c3`, pushed to `origin/dev`):
+
+- **Issue 1 — prod uploads (2026-10-03).** Root cause: Node 20 + `@supabase/supabase-js`
+  ≥2.117 (needs native WebSocket → Node 22+); `createClient()` threw inside a silent
+  catch → every Render upload fell to disk. Fix: fail-loud logs +
+  `storageBucket` in API + `GET /health?deep=1` storage probe + `NODE_VERSION` 22.14.0;
+  prod re-probed end-to-end (upload → bucket → download → delete).
 
 - **Issue 2 — resume deep links.** `GET /analyses?resumeId&latest` filters;
   new `/app/resumes/:id` route (report if analyzed, card + Analyze CTA if
@@ -437,6 +443,7 @@ Second-pass audit of §1–16 against the running code. Fixed on `dev`
   browser E2E 18/18 (resume view) + 2/2 (login gate), all `qa.*@example.com`
   users deleted after runs.
 
-**Open:** Issue 1 (prod uploads — confirm Render `SUPABASE_URL`/service key,
-redeploy, re-probe), S1 backfill for irrecoverable rows, S2 orphan sweep
-(needs user go-ahead), frontend major bumps (`react-router-dom@7`, `vite@8`).
+**Open:** S1 lost-row marking (`processing_status='lost'` for the 10 irrecoverable
+rows), S2 periodic orphan sweep, frontend major bumps (`react-router-dom@7`,
+`vite@8`), lockfile single-sourcing. (Issue 1 resolved 2026-10-03: Node 22 on
+Render + fail-loud storage + `/health?deep=1`.)
