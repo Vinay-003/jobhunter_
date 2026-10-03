@@ -80,8 +80,8 @@ function entriesFor(body: string, kind: ExperienceEntry['kind'], bullets: Docume
     }
     const range = line.match(RANGE);
     const role = /\b(?:intern|engineer|developer|analyst|architect|designer|consultant|manager|lead|secretary|coordinator|editor)\b/i;
-    const projectTitle = kind === 'project' && !current && line.length < 100 && !/[.!?:]$/.test(line);
-    const projectNextTitle = kind === 'project' && !!current && line.length < 75 && !/[.!?:]$/.test(line)
+    const projectTitle = kind === 'project' && !current && (line.split('|')[0].trim().length < 100) && !/[.!?:]$/.test(line);
+    const projectNextTitle = kind === 'project' && !!current && (line.length < 75 || (line.includes('|') && line.split('|')[0].trim().length < 75)) && !/[.!?:]$/.test(line)
       && !/^\s/.test(rawLine) && !/\b(?:built|developed|created|designed|implemented|integrated|deployed|maintained|optimized|using|with)\b/i.test(line);
     if (range || projectTitle || projectNextTitle) {
       const withoutDate = line.replace(RANGE, '').replace(/\s*[|,;–—-]\s*$/, '').trim();
@@ -119,7 +119,9 @@ export function buildResumeProfile(parsedDoc: ParsedDocument, evaluationDate = n
   const years = months === null ? null : Math.round(months / 12 * 100) / 100;
   const fullTime = unionMonths(experience.filter(e => e.kind === 'employment'), evaluationDate);
   const internship = unionMonths(experience.filter(e => e.kind === 'internship'), evaluationDate);
-  const seniority: ResumeProfile['seniority'] = years === null || years < 2 ? 'junior' : years < 5 ? 'mid' : years < 8 ? 'senior' : 'lead';
+  // Tenure alone does not confer leadership scope; senior titles remain senior.
+  const seniority: ResumeProfile['seniority'] = years === null || years < 2 ? 'junior' : years < 5 ? 'mid'
+    : experience.some(entry => /\b(?:tech(?:nical)? lead|lead (?:software |platform )?engineer|engineering manager)\b/i.test(entry.title ?? '')) ? 'lead' : 'senior';
   const summary = (sections.summary ?? sections.objective ?? sections.profile)
     ?.replace(/^(?:summary|objective|profile)\s*:?\s*/i, '')
     .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '[email]')

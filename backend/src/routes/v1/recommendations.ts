@@ -80,8 +80,8 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
     const enabled = new Set((process.env.JOB_PROVIDERS || 'jooble,jobspipe,adzuna,remotive,arbeitnow').split(',').map((s) => s.trim().toLowerCase()));
     const sources: any[] = [];
     const all: NormalizedJob[] = [];
-    const runSearch = async (name: string, provider: JobProvider, query: string, location: string, page: number, ttl: number) => {
-        const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ version: 5, name, query, location, page, preferences,
+    const runSearch = async (name: string, provider: JobProvider, query: string, location: string, page: number, ttl: number, cursor?: string): Promise<string | null> => {
+        const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ version: 6, name, query, location, page, ...(cursor ? { cursorHash: crypto.createHash('sha256').update(cursor).digest('hex') } : {}), preferences,
           providerLimit: name === 'jobspipe' ? process.env.JOBSPIPE_LIMIT ?? '15' : name === 'adzuna' ? process.env.ADZUNA_RESULTS_PER_PAGE ?? '15' : null,
           ...(name === 'jobspipe' || name === 'adzuna' ? {country:countryCodeForLocation(location) ?? (name === 'jobspipe' ? process.env.JOBSPIPE_COUNTRY ?? 'IN' : process.env.ADZUNA_COUNTRY ?? 'in')} : {}) })).digest('hex');
       const started = new Date().toISOString();
@@ -89,7 +89,7 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
       try {
         const cached = await pool.query('SELECT result_json,created_at FROM job_search_cache WHERE query_hash=$1', [cacheKey]);
         let result: ProviderSearchResult;
-        if (cached.rows[0] && Date.now() - new Date(cached.rows[0].created_at).getTime() < ttl) {
+        if (name !== 'jobspipe' && cached.rows[0] && Date.now() - new Date(cached.rows[0].created_at).getTime() < ttl) {
           const data = cached.rows[0].result_json;
           if (data && !Array.isArray(data) && Array.isArray(data.jobs) && typeof data.status === 'string') {
             result = data; cacheHit = true;
@@ -99,9 +99,9 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
           if (name === 'jooble' && !(await reserveDailyCall('jooble', Number(process.env.JOOBLE_CALL_BUDGET || 100)))) {
             result = { jobs: [], status: 'budgetLimited' };
           } else {
-            result = await provider.searchResult({ keywords: query, location, page, country: countryCodeForLocation(location) ?? undefined, seniorityHint: profile.seniority, daysPosted: preferences.daysPosted });
+            result = await provider.searchResult({ keywords: query, location, page, cursor, country: countryCodeForLocation(location) ?? undefined, seniorityHint: profile.seniority, daysPosted: preferences.daysPosted });
           }
-          await pool.query('INSERT INTO job_search_cache (query_hash,query_text,result_json,created_at) VALUES ($1,$2,$3,now()) ON CONFLICT (query_hash) DO UPDATE SET result_json=$3,created_at=now()', [cacheKey, `${name}:${query}`, JSON.stringify(result)]).catch(() => undefined);
+          if (name !== 'jobspipe') await pool.query('INSERT INTO job_search_cache (query_hash,query_text,result_json,created_at) VALUES ($1,$2,$3,now()) ON CONFLICT (query_hash) DO UPDATE SET result_json=$3,created_at=now()', [cacheKey, `${name}:${query}`, JSON.stringify(result)]).catch(() => undefined);
         }
         const jobs = result!.jobs;
         sources.push({ provider: name, status: result!.status, cacheHit, fetchedCount: jobs.length,
@@ -110,7 +110,8 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
           ...(result!.status === 'fallback' ? { fallbackSource: [...new Set(jobs.map(j => j.source))] } : {}),
           location, page, attemptedAt: started });
         all.push(...jobs);
-       } catch { sources.push({ ...sourceEnvelope(name,[],cacheHit,'error'), location,page,errorCode: 'PROVIDER_UNAVAILABLE', attemptedAt: started }); }
+        return result!.status === 'ok' && typeof result!.nextCursor === 'string' && result!.nextCursor ? result!.nextCursor : null;
+       } catch { sources.push({ ...sourceEnvelope(name,[],cacheHit,'error'), location,page,errorCode: 'PROVIDER_UNAVAILABLE', attemptedAt: started }); return null; }
     };
     const providers: Record<string,[JobProvider,number]> = {
       jooble:[new JoobleProvider(),3600000], jobspipe:[new JobsPipeProvider(),3600000],
@@ -118,11 +119,24 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
       arbeitnow:[new ArbeitnowProvider(),arbeitnowCacheHours() * 3600000],
     };
     const retrieval = retrievalPlan([...enabled], preferences.locations, queries.length ? queries : [primary]);
+    const cursors = new Map<string, string>();
+    const seenCursors = new Set<string>();
     for (const step of retrieval) {
+      if (step.provider === 'jobspipe' && step.page > 1 && !cursors.has(`${step.provider}:${step.keywords}`)) continue;
       // Eligibility, not raw count, determines whether further bounded retrieval is useful.
       if (deduplicateJobs(all).filter(job => eligibleJob(job,profile.seniority,preferences,profile).status !== 'ineligible').length >= 50) break;
       const entry = providers[step.provider];
-      if (entry) await runSearch(step.provider,entry[0],step.keywords,step.location,step.page,entry[1]);
+      if (entry) {
+        const key = `${step.provider}:${step.keywords}`;
+        const next = await runSearch(step.provider,entry[0],step.keywords,step.location,step.page,entry[1],step.provider === 'jobspipe' ? cursors.get(key) : undefined);
+        if (step.provider === 'jobspipe') {
+          cursors.delete(key);
+          if (next) {
+            const hash = crypto.createHash('sha256').update(next).digest('hex');
+            if (!seenCursors.has(hash)) { seenCursors.add(hash); cursors.set(key,next); }
+          }
+        }
+      }
     }
     const distinct = deduplicateJobs(all);
     const eligible = distinct.map((job) => ({ job, eligibility: eligibleJob(job,profile.seniority,preferences,profile) })).filter((entry) => entry.eligibility.status !== 'ineligible');

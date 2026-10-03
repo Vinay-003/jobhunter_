@@ -84,6 +84,14 @@ describe('structured parsing evidence', () => {
     expect(projects.map(project => project.title)).toEqual(['JobHunter', 'Portfolio']);
     expect(projects[0].description).toContain('with local embeddings');
   });
+  it('recognizes a long first project heading with a pipe-separated technology list', () => {
+    const body = `Projects\nStreamWorks Platform | TypeScript, PostgreSQL, Kubernetes, Redis, Kafka, Prometheus, Grafana, Docker, Terraform, AWS\n• Built a resilient streaming platform.\nAnother Project\n• Created an API.`;
+    const parsed = { ...doc, normalizedText: body, pages: [body], sections: { projects: body } };
+    expect(buildResumeProfile(parsed).projects?.map(project => project.title)).toEqual([
+      'StreamWorks Platform | TypeScript, PostgreSQL, Kubernetes, Redis, Kafka, Prometheus, Grafana, Docker, Terraform, AWS',
+      'Another Project',
+    ]);
+  });
   it('groups nested language lists as one alternative, bounded by next parent bullet and section', () => {
     const jd = parseJd(`# Junior Engineer\n## Required Skills\n- Proficiency in at least one programming language such as:\n  - Java\n  - C++\n  - Python\n  - JavaScript/TypeScript\n- Understanding of Object-Oriented Programming.\n## Preferred Skills\n- React or Django.\n## Benefits\n- Docker laptop provided.`);
     const required = jd.requirementGroups?.filter(group => group.required) ?? [];

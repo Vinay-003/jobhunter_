@@ -209,7 +209,7 @@ function hasMetric(text: string): boolean {
     /[$€£₹]\s*\d[\d,.]*\b/,
     /\b\d+(?:\.\d+)?\s*[xX]\b/,
     /\b\d+(?:\.\d+)?\s*(?:k|m|b|million|billion|thousand)\b/i,
-    /\b\d+(?:\.\d+)?\s*(?:users?|customers?|clients?|requests?|records?|transactions?|files?|formats?|languages?|providers?|categories?|batches?|items?|services?|endpoints?|teams?|members?|hours?|days?|weeks?|months?|minutes?|seconds?)\b/i,
+    /\b\d[\d,]*(?:\.\d+)?\+?\s*(?:(?:monthly|daily|weekly|annual)\s+)?(?:users?|customers?|clients?|requests?|records?|transactions?|files?|formats?|languages?|providers?|categories?|batches?|items?|services?|endpoints?|teams?|members?|developers?|hours?|days?|weeks?|months?|minutes?|seconds?)\b/i,
     /\b(?:from|to|by|under|over|within)\s+\d+(?:\.\d+)?\b/i,
   ];
   return patterns.some((r) => r.test(text));
@@ -231,7 +231,15 @@ function outcomeLed(text: string): boolean {
 }
 
 function extractBulletCandidates(parsedDoc: ParsedDocument): BulletCandidate[] {
-  return buildDocumentBlocks(parsedDoc).bullets
+  const blocks = buildDocumentBlocks(parsedDoc).bullets;
+  // Some PDF extractors flatten page text into one line while retaining line breaks in section bodies.
+  // Use those section bodies only when no visual bullets survived extraction.
+  const evidence = blocks.some(b => b.section === 'experience' || b.section === 'projects')
+    ? blocks
+    : Object.entries(parsedDoc.sections).filter(([name]) => /^(?:experience|projects?|work experience|professional experience)$/i.test(name))
+      .flatMap(([name, body]) => body.split('\n').filter(line => /^\s*[•◦▪▫‣⁃*\-–—]\s+\S/.test(line))
+        .map(line => ({ text: line, section: /project/i.test(name) ? 'projects' : 'experience' })));
+  return evidence
     .filter(b => b.section === 'experience' || b.section === 'projects')
     .map(b => {
       const text = normalizeLine(b.text);

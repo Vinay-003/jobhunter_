@@ -50,6 +50,17 @@ function profile(overrides: Partial<ResumeProfile> = {}): ResumeProfile {
 }
 
 describe('Resume Health v3', () => {
+  it('counts measurable scope in PDF-style experience bullets', () => {
+    const text = `PROFESSIONAL EXPERIENCE
+- Served 85,000+ monthly users through a backend service.
+- Built 20+ endpoints for reporting.
+- Reduced median load time by 31%.
+- Mentored four junior developers.`;
+    const result = scoreReadiness(doc(text, { sections: { experience: text } }), profile(), 'mid');
+    expect(result.metrics.bulletCount).toBe(4);
+    expect(result.metrics.quantifiedBulletCount).toBe(3);
+  });
+
   it('has an exact 100 point rubric and a bounded score', () => {
     const result = scoreReadiness(doc(), profile(), 'entry');
     expect(result.breakdown.reduce((sum, category) => sum + category.pointsPossible, 0)).toBe(100);

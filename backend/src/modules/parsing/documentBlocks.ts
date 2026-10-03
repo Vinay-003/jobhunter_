@@ -20,7 +20,9 @@ export function buildDocumentBlocks(doc: ParsedDocument): DocumentBlocks {
       const match = line.match(BULLET);
       if (match) {
         bullets.push({ text: match[1].trim(), section, page: pageIndex, startLine: index, endLine: index, source: 'visual' });
-      } else if (bullets.length && bullets.at(-1)?.page === pageIndex && bullets.at(-1)?.endLine === index - 1 && line.trim() && /^\s/.test(line) && !/\b(?:19|20)\d{2}\b/.test(line)) {
+      } else if (bullets.length && bullets.at(-1)?.page === pageIndex && bullets.at(-1)?.endLine === index - 1 && line.trim()
+        && (/^\s/.test(line) || !/[.!?:]$/.test(bullets.at(-1)!.text)) && !/\b(?:19|20)\d{2}\b/.test(line)
+        && !/\|/.test(line) && !/^[A-Z][A-Z\s/]+$/.test(line.trim())) {
         const bullet = bullets[bullets.length - 1];
         bullet.text += ` ${line.trim()}`;
         bullet.endLine = index;

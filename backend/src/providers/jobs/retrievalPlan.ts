@@ -4,7 +4,7 @@ export type RetrievalStep = { provider: string; keywords: string; location: stri
 /** Only Jooble and Adzuna expose documented numbered search pages here. */
 export const providerCapabilities: Record<string, { pages: number; locations: boolean }> = {
   jooble: { pages: 3, locations: true }, adzuna: { pages: 3, locations: true },
-  jobspipe: { pages: 1, locations: false }, remotive: { pages: 1, locations: false },
+  jobspipe: { pages: 3, locations: false }, remotive: { pages: 1, locations: false },
   arbeitnow: { pages: 1, locations: false },
 };
 

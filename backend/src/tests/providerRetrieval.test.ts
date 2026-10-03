@@ -7,7 +7,7 @@ test('bounded plan covers multiple locations and supported pages toward target',
   expect(plan.some(p => p.location === 'Berlin, Germany')).toBe(true);
   expect(plan.some(p => p.provider === 'jooble' && p.page === 2)).toBe(true);
   expect(plan.some(p => p.provider === 'adzuna' && p.page === 2)).toBe(true);
-  expect(plan.filter(p => p.provider === 'jobspipe')).toHaveLength(1);
+  expect(plan.filter(p => p.provider === 'jobspipe').map(p => p.page)).toEqual([1, 2, 3]);
   expect(plan.filter(p => p.provider === 'remotive')).toHaveLength(1);
   expect(plan.length).toBeLessThanOrEqual(18);
 });

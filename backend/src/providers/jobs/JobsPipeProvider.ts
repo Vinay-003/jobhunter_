@@ -8,7 +8,7 @@ import { reserveMonthlyCredits, reconcileMonthlyCredits } from './providerBudget
  * JobsPipe provider — unified 30+ source API (Greenhouse, Lever, Ashby,
  * LinkedIn, Indeed, ...). POST https://api.jobspipe.dev/v1/jobs/search
  * with Bearer key. Billing is per job returned (1 credit/job), so we issue
- * ONE call per recommendation run with a tight limit and enforce
+ * bounded cursor pages with a tight per-page limit and enforce
  * JOBSPIPE_MONTHLY_BUDGET (default 1000, = free tier).
  * Env: JOBSPIPE_API_KEY, JOBSPIPE_COUNTRY (default 'IN'),
  *      JOBSPIPE_LIMIT (default 15), JOBSPIPE_MONTHLY_BUDGET (default 1000).
@@ -73,6 +73,7 @@ export class JobsPipeProvider implements JobProvider {
        const country = query.country || this.country;
        if (country) body.job_country_code_or = [country.toUpperCase()];
       if (words.length > 3) body.description_or = words.slice(3, 6);
+      if (query.cursor) body.cursor = query.cursor;
       // Junior candidates drown in senior postings — bias toward entry/mid.
       // include_unknown keeps the ~90% of postings with no seniority label.
       if (query.seniorityHint === 'junior') {
@@ -80,7 +81,7 @@ export class JobsPipeProvider implements JobProvider {
         body.include_unknown = ['seniority'];
       }
        console.log(`[JobsPipeProvider] searching title="${body.job_title_or}" country=${country} limit=${limit}`);
-      const resp = await axios.post<{ data?: JobsPipeJob[]; metadata?: { credits_charged?: number } }>(
+      const resp = await axios.post<{ data?: JobsPipeJob[]; metadata?: { credits_charged?: number; next_cursor?: string | null } }>(
         'https://api.jobspipe.dev/v1/jobs/search',
         body,
         { timeout: TIMEOUT_MS, headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' } },
@@ -91,9 +92,10 @@ export class JobsPipeProvider implements JobProvider {
        await reconcileMonthlyCredits('jobspipe', limit, charged);
       await storeJobsToDb(jobs).catch(() => {});
        if (!jobs.length) return this.fallbackResult(query, 'empty');
-      return { jobs, status: 'ok' };
+      return { jobs, status: 'ok', nextCursor: resp.data?.metadata?.next_cursor ?? null };
     } catch (err) {
-      console.warn('[JobsPipeProvider] request failed, falling back to DB:', (err as Error).message);
+      // A transport failure may occur after the provider charged credits; retain the reservation.
+      console.warn('[JobsPipeProvider] request failed, falling back to DB');
        return this.fallbackResult(query, 'error');
     }
   }
