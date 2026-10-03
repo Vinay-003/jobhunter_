@@ -15,6 +15,8 @@ export type LayoutSignals = {
   avgCharsPerPage: number;
   hasImages: boolean;
   textDensity: number;
+  pageCharCounts?: number[];
+  imageDetectionAvailable?: boolean;
 };
 
 export type ParsedDocument = {
@@ -26,6 +28,7 @@ export type ParsedDocument = {
   detectedAsScanned: boolean;
   sha256: string;
   charCount: number;
+  lineSpans?: Array<{ page: number; text: string; x: number | null; y: number | null; width: number | null }>;
 };
 
 const SECTION_HEADINGS = [
@@ -33,6 +36,24 @@ const SECTION_HEADINGS = [
   'skills', 'technical skills', 'projects', 'project', 'certifications', 'certificates', 'awards', 'achievements',
   'publications', 'languages', 'interests', 'references', 'leadership', 'activities', 'volunteer',
 ];
+
+const SECTION_ALIASES: Record<string, string> = {
+  'technical skills': 'skills', 'key skills': 'skills', 'core skills': 'skills',
+  'work experience': 'experience', 'professional experience': 'experience',
+  'employment history': 'experience', employment: 'experience', 'work history': 'experience',
+  project: 'projects', 'personal projects': 'projects', activities: 'leadership', volunteering: 'leadership',
+  'volunteer experience': 'leadership', 'professional summary': 'summary',
+};
+/** Normalize whole section bodies, not just their keys; never combine different section families. */
+export function canonicalizeSections(sections: Record<string, string>): Record<string, string> {
+  const canonical: Record<string, string> = {};
+  for (const [key, body] of Object.entries(sections)) {
+    const name = SECTION_ALIASES[key.toLowerCase()] ?? key.toLowerCase();
+    if (canonical[name] === body || canonical[name]?.includes(body)) continue;
+    canonical[name] = [canonical[name], body].filter(Boolean).join('\n');
+  }
+  return canonical;
+}
 
 function isPdfMagic(b: Buffer): boolean {
   return b.length >= 4 && b.subarray(0, 4).toString() === '%PDF';
@@ -62,6 +83,10 @@ function detectSections(normalizedText: string): Record<string, string> {
   const sections: Record<string, string> = {};
   const synonymMap: Record<string, string> = {
     'work history': 'experience',
+    'technical skills': 'skills',
+    'work experience': 'experience',
+    employment: 'experience',
+    project: 'projects',
     'professional experience': 'experience',
     'employment history': 'experience',
     'key skills': 'skills',
@@ -113,26 +138,14 @@ function detectSections(normalizedText: string): Record<string, string> {
     offset += rawLine.length + 1;
   }
 
-  const seen = new Set<string>();
-  const unique = candidates.filter((candidate) => {
-    if (seen.has(candidate.heading)) return false;
-    seen.add(candidate.heading);
-    return true;
-  });
-
-  for (let i = 0; i < unique.length; i++) {
-    const start = unique[i].index;
-    const end = i + 1 < unique.length ? unique[i + 1].index : normalizedText.length;
-    sections[unique[i].heading] = normalizedText.slice(start, end).trim().slice(0, 8000);
+  for (let i = 0; i < candidates.length; i++) {
+    const start = candidates[i].index;
+    const end = i + 1 < candidates.length ? candidates[i + 1].index : normalizedText.length;
+    const heading = candidates[i].heading;
+    sections[heading] = [sections[heading], normalizedText.slice(start, end).trim()].filter(Boolean).join('\n').slice(0, 8000);
   }
 
-  if (sections['technical skills'] && !sections.skills) sections.skills = sections['technical skills'];
-  if (sections.project && !sections.projects) sections.projects = sections.project;
-  if (sections['work experience'] && !sections.experience) sections.experience = sections['work experience'];
-  if (sections.employment && !sections.experience) sections.experience = sections.employment;
-  if (sections['employment history'] && !sections.experience) sections.experience = sections['employment history'];
-
-  return sections;
+  return canonicalizeSections(sections);
 }
 
 function computeLayoutSignals(pages: string[]): LayoutSignals {
@@ -165,10 +178,13 @@ function computeLayoutSignals(pages: string[]): LayoutSignals {
     avgCharsPerPage,
     hasImages: false,
     textDensity: avgCharsPerPage,
+    pageCharCounts: pages.map(page => page.length),
+    imageDetectionAvailable: false,
   };
 }
 
-async function extractWithPdfJs(buffer: Buffer): Promise<string[] | null> {
+type PdfJsExtraction = { pages: string[]; lineSpans: NonNullable<ParsedDocument['lineSpans']>; hasImages: boolean };
+async function extractWithPdfJs(buffer: Buffer): Promise<PdfJsExtraction | null> {
   try {
     const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs').catch(async () => {
       // @ts-ignore optional fallback for package layout differences
@@ -184,9 +200,13 @@ async function extractWithPdfJs(buffer: Buffer): Promise<string[] | null> {
     }).promise;
 
     const pages: string[] = [];
+    const lineSpans: PdfJsExtraction['lineSpans'] = [];
+    let hasImages = false;
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
       const page = await doc.getPage(pageNumber);
       const textContent = await page.getTextContent();
+      const operators = await page.getOperatorList();
+      hasImages ||= operators.fnArray.some((operator: number) => [pdfjs.OPS?.paintImageXObject, pdfjs.OPS?.paintInlineImageXObject, pdfjs.OPS?.paintImageMaskXObject, pdfjs.OPS?.paintJpegXObject].includes(operator));
 
       let lastY: number | null = null;
       let lastRight: number | null = null;
@@ -207,6 +227,7 @@ async function extractWithPdfJs(buffer: Buffer): Promise<string[] | null> {
         }
 
         text += str;
+        if (str.trim()) lineSpans.push({ page: pageNumber - 1, text: str, x: typeof x === 'number' ? x : null, y: typeof y === 'number' ? y : null, width });
         if (y !== undefined) lastY = y;
         if (x !== undefined) lastRight = x + width;
       }
@@ -214,7 +235,7 @@ async function extractWithPdfJs(buffer: Buffer): Promise<string[] | null> {
       pages.push(cleanText(text));
     }
 
-    if (pages.length && pages.join('').trim().length > 100) return pages;
+    if (pages.length && pages.join('').trim().length > 100) return { pages, lineSpans, hasImages };
     return null;
   } catch {
     return null;
@@ -246,7 +267,8 @@ export async function parsePdfBuffer(buffer: Buffer): Promise<ParsedDocument> {
   if (!isPdfMagic(buffer)) throw new Error('Invalid PDF: missing %PDF magic bytes');
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
 
-  let pages = await extractWithPdfJs(buffer);
+  const pdfjsResult = await extractWithPdfJs(buffer);
+  let pages = pdfjsResult?.pages ?? null;
   let method: 'pdfjs' | 'pdf-parse' | 'fallback' = 'pdfjs';
 
   if (!pages) {
@@ -299,6 +321,10 @@ export async function parsePdfBuffer(buffer: Buffer): Promise<ParsedDocument> {
 
   const sections = detectSections(normalizedText);
   const layoutSignals = computeLayoutSignals(pages);
+  if (pdfjsResult) {
+    layoutSignals.hasImages = pdfjsResult.hasImages;
+    layoutSignals.imageDetectionAvailable = true;
+  }
   const charCount = normalizedText.length;
 
   let confidence = method === 'pdfjs' ? 0.92 : method === 'pdf-parse' ? 0.84 : 0.5;
@@ -319,6 +345,7 @@ export async function parsePdfBuffer(buffer: Buffer): Promise<ParsedDocument> {
     detectedAsScanned,
     sha256,
     charCount,
+    lineSpans: pdfjsResult?.lineSpans,
   };
 }
 

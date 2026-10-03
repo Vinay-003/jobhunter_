@@ -1,217 +1,139 @@
-import type { ParsedDocument } from './pdfParser.js';
-import { normalizeSkill, CANONICAL_SKILL_ALIASES } from './skillNormalizer.js';
+import { canonicalizeSections, type ParsedDocument } from './pdfParser.js';
+import { normalizeSkill } from './skillNormalizer.js';
+import { extractSkills } from './skillExtractor.js';
+import { buildDocumentBlocks, type DocumentBullet } from './documentBlocks.js';
 
 export type ExperienceEntry = {
-  title: string | null;
-  company: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  isCurrent: boolean;
-  description: string | null;
+  title: string | null; company: string | null; startDate: string | null; endDate: string | null;
+  isCurrent: boolean; description: string | null;
+  kind?: 'employment' | 'internship' | 'leadership' | 'project';
+  bullets?: DocumentBullet[];
 };
-
 export type EducationEntry = {
-  degree: string | null;
-  institution: string | null;
-  year: string | null;
-  raw: string;
+  degree: string | null; institution: string | null; year: string | null; raw: string;
+  field?: string | null; completionDate?: string | null; completed?: boolean | null;
 };
-
 export type ResumeProfile = {
-  skills: string[];
-  skillsNormalized: string[];
-  education: EducationEntry[];
-  experience: ExperienceEntry[];
-  totalExperienceYears: number | null;
-  seniority: 'junior' | 'mid' | 'senior' | 'lead' | null;
-  contactSignals: {
-    hasEmail: boolean;
-    hasPhone: boolean;
-    hasLinkedIn: boolean;
-    hasGithub: boolean;
-  };
-  summary: string | null;
-  languages: string[];
+  skills: string[]; skillsNormalized: string[]; education: EducationEntry[]; experience: ExperienceEntry[];
+  totalExperienceYears: number | null; seniority: 'junior' | 'mid' | 'senior' | 'lead' | null;
+  contactSignals: { hasEmail: boolean; hasPhone: boolean; hasLinkedIn: boolean; hasGithub: boolean };
+  summary: string | null; languages: string[];
+  projects?: ExperienceEntry[]; leadership?: ExperienceEntry[];
+  employmentYears?: number | null; internshipYears?: number | null;
 };
 
-const DEGREE_KEYWORDS = [
-  'bachelor', "bachelor's", 'b.sc', 'btech', 'b.tech', 'be ', 'master', "master's", 'm.sc', 'mtech', 'm.tech', 'mba', 'phd', 'ph.d', 'doctorate',
-  'associate', 'diploma', 'bca', 'mca', 'bsc', 'msc',
-];
-
-const DATE_REGEX = /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{4}|\b\d{4}\s*[-–—]\s*(?:\d{4}|present|current|now)\b|\b\d{4}\b/gi;
-const DATE_RANGE_REGEX = /(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{4}|\b\d{4}\b)\s*[-–—]\s*(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{4}|\b\d{4}\b|present|current|now)/gi;
-
-function extractSkills(normalizedText: string): string[] {
-  const lower = normalizedText.toLowerCase();
-  const found: string[] = [];
-  // Check each alias key as word boundary match; longest keys first
-  const keys = Object.keys(CANONICAL_SKILL_ALIASES).sort((a, b) => b.length - a.length);
-  for (const key of keys) {
-    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`\\b${escaped}\\b`, 'i');
-    if (re.test(lower)) {
-      found.push(normalizeSkill(key));
-    }
+const MONTHS: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+const DATE = '(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+)?(?:19|20)\\d{2}';
+const RANGE = new RegExp(`(${DATE})\\s*(?:[-–—]|\\bto\\b)\\s*(${DATE}|present|current|now)`, 'i');
+export function parseMonth(value: string | null, evaluationDate: Date, end = false): number | null {
+  if (!value) return null;
+  if (/^(present|current|now)$/i.test(value)) return evaluationDate.getUTCFullYear() * 12 + evaluationDate.getUTCMonth();
+  const year = value.match(/(?:19|20)\d{2}/)?.[0];
+  if (!year) return null;
+  const month = value.match(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i)?.[0].slice(0, 3).toLowerCase();
+  return Number(year) * 12 + (month ? MONTHS[month] : end ? 11 : 0);
+}
+/** Elapsed months: March–July is four; overlapping professional intervals count once. */
+export function unionMonths(entries: ExperienceEntry[], evaluationDate: Date): number | null {
+  const intervals = entries.map(entry => [parseMonth(entry.startDate, evaluationDate), parseMonth(entry.endDate, evaluationDate, true)] as const)
+    .filter((range): range is readonly [number, number] => range[0] !== null && range[1] !== null && range[1] >= range[0])
+    .sort((a, b) => a[0] - b[0]);
+  if (!intervals.length) return null;
+  let months = 0, start = intervals[0][0], end = intervals[0][1];
+  for (const [nextStart, nextEnd] of intervals.slice(1)) {
+    if (nextStart <= end) end = Math.max(end, nextEnd);
+    else { months += end - start; start = nextStart; end = nextEnd; }
   }
-  // Dedupe
-  return [...new Set(found)];
+  return months + end - start;
 }
-
-function extractEducation(normalizedText: string): EducationEntry[] {
-  const entries: EducationEntry[] = [];
-  const lower = normalizedText.toLowerCase();
-  // Split into lines / sentences
-  const sentences = normalizedText.split(/[\n\.]+/).map((s) => s.trim()).filter(Boolean);
-  for (const s of sentences) {
-    const sl = s.toLowerCase();
-    const hasDegree = DEGREE_KEYWORDS.some((k) => sl.includes(k));
-    if (!hasDegree) continue;
-    const yearMatch = s.match(/\b(19|20)\d{2}\b/);
-    entries.push({
-      degree: s.slice(0, 120),
-      institution: null,
-      year: yearMatch ? yearMatch[0] : null,
-      raw: s.slice(0, 300),
-    });
-    if (entries.length >= 5) break;
+function extractEducation(body: string, evaluationDate: Date): EducationEntry[] {
+  const lines = body.split('\n').map(s => s.trim()).filter(Boolean).filter(s => !/^education$/i.test(s));
+  const result: EducationEntry[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const degree = line.match(/\b(?:bachelor(?:'s)?(?: of (?:technology|science|engineering|arts))?|b\.?tech|b\.?sc|b\.?e\.?|bca|master(?:'s)?(?: of (?:technology|science|arts))?|m\.?tech|m\.?sc|mca|mba|ph\.?d|doctorate|diploma)\b/i);
+    if (!degree) continue;
+    const context = [lines[index - 1], line, lines[index + 1]].filter(Boolean).join(' | ');
+    const period = context.match(RANGE);
+    const date = period?.[2] ?? context.match(new RegExp(DATE, 'i'))?.[0] ?? null;
+    const institution = line.split(/\s*[|,]\s*/).find(part => /\b(?:university|institute|college|school)\b/i.test(part))
+      ?? (lines[index - 1] && /\b(?:university|institute|college)\b/i.test(lines[index - 1]) ? lines[index - 1] : null);
+    const field = line.match(/\b(?:in|of)\s+(computer science(?: engineering)?|information technology|electrical engineering|mechanical engineering|software engineering|mathematics)\b/i)?.[1] ?? null;
+    const completion = date ? parseMonth(date, evaluationDate) : null;
+    const today = evaluationDate.getUTCFullYear() * 12 + evaluationDate.getUTCMonth();
+    result.push({ degree: degree[0], institution, field, year: date?.match(/\d{4}/)?.[0] ?? null, completionDate: date, completed: completion === null ? null : completion <= today, raw: context });
+    if (result.length >= 5) break;
   }
-  return entries;
+  return result;
 }
-
-function parseYear(str: string): number | null {
-  const m = str.match(/\b(19|20)\d{2}\b/);
-  if (!m) return null;
-  return parseInt(m[0], 10);
-}
-
-function extractExperience(normalizedText: string): ExperienceEntry[] {
+function entriesFor(body: string, kind: ExperienceEntry['kind'], bullets: DocumentBullet[]): ExperienceEntry[] {
+  if (!body) return [];
+  const lines = body.split('\n').filter(line => line.trim());
   const entries: ExperienceEntry[] = [];
-  let match: RegExpExecArray | null;
-  const re = new RegExp(DATE_RANGE_REGEX.source, 'gi');
-  const EDU_KEYWORDS = /bachelor|master|b\.tech|m\.tech|school|class\s*xii|class\s*x|cpi|gpa|education/i;
-  const JOB_KEYWORDS = /intern|engineer|developer|manager|analyst|consultant|lead|architect|designer|secretary|coordinator|editorial/i;
-  while ((match = re.exec(normalizedText)) !== null) {
-    const start = match[1];
-    const end = match[2];
-    const isCurrent = /present|current|now/i.test(end);
-    const idx = match.index;
-    const before = normalizedText.slice(Math.max(0, idx - 300), idx).trim();
-    const after = normalizedText.slice(idx + match[0].length, idx + match[0].length + 300).trim();
-    // Skip if immediate title before looks like education (check last segment only, not 150 chars of mixed history)
-    // Education vs work: check after text for degree keywords (more reliable than before which may contain previous section's edu)
-    if (EDU_KEYWORDS.test(after.slice(0, 120))) continue;
-    const immediateBefore = before.slice(-80);
-    if (EDU_KEYWORDS.test(immediateBefore) && !/experience|intern|engineer/i.test(immediateBefore)) continue;
-    const context = (before.slice(-200) + ' ' + after.slice(0, 200)).toLowerCase();
-    if (!JOB_KEYWORDS.test(context) && !/aarogya|ad factory|shopify|software development intern/i.test(context)) continue;
-    const beforeLines = before.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
-    const title = beforeLines.length ? beforeLines[beforeLines.length - 1].slice(0, 120) : null;
-    entries.push({
-      title,
-      company: null,
-      startDate: start,
-      endDate: end,
-      isCurrent,
-      description: after.slice(0, 400) || null,
-    });
-    if (entries.length >= 10) break;
+  let current: ExperienceEntry | null = null;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (/^(?:experience|work experience|employment|projects?|leadership|activities|volunteer(?:ing)?)\s*:?$/i.test(line)) continue;
+    if (/^[•◦▪▫‣⁃*\-–—]\s/.test(line)) {
+      if (current) current.description = [current.description, line.replace(/^[•◦▪▫‣⁃*\-–—]\s*/, '')].filter(Boolean).join(' ');
+      continue;
+    }
+    const range = line.match(RANGE);
+    const role = /\b(?:intern|engineer|developer|analyst|architect|designer|consultant|manager|lead|secretary|coordinator|editor)\b/i;
+    const projectTitle = kind === 'project' && !current && line.length < 100 && !/[.!?:]$/.test(line);
+    const projectNextTitle = kind === 'project' && !!current && line.length < 75 && !/[.!?:]$/.test(line)
+      && !/^\s/.test(rawLine) && !/\b(?:built|developed|created|designed|implemented|integrated|deployed|maintained|optimized|using|with)\b/i.test(line);
+    if (range || projectTitle || projectNextTitle) {
+      const withoutDate = line.replace(RANGE, '').replace(/\s*[|,;–—-]\s*$/, '').trim();
+      const parts = withoutDate.split(/\s*[|,;]\s*/).filter(Boolean);
+      const rolePart = parts.find(part => role.test(part));
+      const company = kind === 'project' ? null : parts.find(part => part !== rolePart) ?? (rolePart ? null : parts[0] ?? null);
+      const title = kind === 'project' ? withoutDate : rolePart ?? null;
+      current = { title, company, startDate: range?.[1] ?? null, endDate: range?.[2] ?? null, isCurrent: /^(present|current|now)$/i.test(range?.[2] ?? ''), description: null, kind: kind === 'employment' && /intern/i.test(title ?? '') ? 'internship' : kind, bullets: [] };
+      entries.push(current);
+    } else if (current && role.test(line) && !current.title && kind !== 'project') {
+      current.title = line;
+      current.kind = kind === 'employment' && /intern/i.test(line) ? 'internship' : kind;
+    } else if (current && !/^\w+(?:\s+\w+){0,3}:/.test(line)) {
+      current.description = [current.description, line].filter(Boolean).join(' ');
+    }
   }
-  // Fallback: if no ranges, look for single year mentions near job keywords
-  if (entries.length === 0) {
-    const jobKeywords = /(engineer|developer|manager|analyst|intern|consultant|lead|architect|designer)/i;
-    if (jobKeywords.test(normalizedText)) {
-      const year = normalizedText.match(/\b(19|20)\d{2}\b/);
-      if (year) {
-        entries.push({
-          title: normalizedText.slice(0, 100),
-          company: null,
-          startDate: year[0],
-          endDate: null,
-          isCurrent: false,
-          description: null,
-        });
-      }
+  if (!entries.length && bullets.length) entries.push({ title: null, company: null, startDate: null, endDate: null, isCurrent: false, description: bullets.map(b => b.text).join(' '), kind, bullets });
+  for (const entry of entries) {
+    entry.bullets = bullets.filter(b => entry.description?.includes(b.text.slice(0, 20)));
+    if (entry.bullets.length) {
+      const prose = (entry.description ?? '').split(/(?=[•◦▪▫‣⁃*]\s)/)[0].trim();
+      entry.description = [prose, ...entry.bullets.map(b => b.text).filter(b => !prose.includes(b))].filter(Boolean).join(' ');
     }
   }
   return entries;
 }
-
-function computeTotalYears(experience: ExperienceEntry[]): number | null {
-  if (experience.length === 0) return null;
-  const nowYear = new Date().getFullYear();
-  let totalMonths = 0;
-  for (const e of experience) {
-    const sy = e.startDate ? parseYear(e.startDate) : null;
-    let ey: number | null = e.isCurrent ? nowYear : (e.endDate ? parseYear(e.endDate) : null);
-    if (sy && ey && ey >= sy) {
-      totalMonths += (ey - sy) * 12;
-    } else if (sy && !ey) {
-      // single year, assume 1 year
-      totalMonths += 12;
-    }
-  }
-  if (totalMonths === 0) return null;
-  return Math.round((totalMonths / 12) * 10) / 10;
-}
-
-function inferSeniority(totalYears: number | null, normalizedText: string): ResumeProfile['seniority'] {
-  const lower = normalizedText.toLowerCase();
-  // Only treat explicit lead titles, not "Leadership" section
-  if ((lower.includes('tech lead') || lower.includes('staff engineer') || lower.includes('principal engineer') || lower.includes('architect')) && (totalYears ?? 0) >= 6) return 'lead';
-  if (totalYears === null) {
-    if (/\bsenior\b/.test(lower) && !lower.includes('senior secondary')) return 'senior';
-    if (/\bjunior\b/.test(lower) || /\bentry\b/.test(lower)) return 'junior';
-    return 'junior'; // default for entry-level resumes with no clear years
-  }
-  if (totalYears < 2) return 'junior';
-  if (totalYears < 5) return 'mid';
-  if (totalYears < 8) return 'senior';
-  return 'lead';
-}
-
-export function buildResumeProfile(parsedDoc: ParsedDocument): ResumeProfile {
+export function buildResumeProfile(parsedDoc: ParsedDocument, evaluationDate = new Date()): ResumeProfile {
   const text = parsedDoc.normalizedText;
+  const sections = canonicalizeSections(parsedDoc.sections);
+  const bullets = buildDocumentBlocks(parsedDoc).bullets;
+  const experience = entriesFor(sections.experience ?? sections['work experience'] ?? sections.employment ?? '', 'employment', bullets.filter(b => b.section === 'experience'));
+  const leadership = entriesFor(sections.leadership ?? sections.activities ?? '', 'leadership', bullets.filter(b => b.section === 'leadership'));
+  const projects = entriesFor(sections.projects ?? sections.project ?? '', 'project', bullets.filter(b => b.section === 'projects'));
+  const months = unionMonths(experience, evaluationDate);
+  const years = months === null ? null : Math.round(months / 12 * 100) / 100;
+  const fullTime = unionMonths(experience.filter(e => e.kind === 'employment'), evaluationDate);
+  const internship = unionMonths(experience.filter(e => e.kind === 'internship'), evaluationDate);
+  const seniority: ResumeProfile['seniority'] = years === null || years < 2 ? 'junior' : years < 5 ? 'mid' : years < 8 ? 'senior' : 'lead';
+  const summary = (sections.summary ?? sections.objective ?? sections.profile)
+    ?.replace(/^(?:summary|objective|profile)\s*:?\s*/i, '')
+    .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '[email]')
+    .replace(/(?:\+?\d[\d\s().-]{8,}\d)/g, '[phone]')
+    .replace(/https?:\/\/\S+/gi, '[link]').trim() ?? null;
   const skills = extractSkills(text);
-  const education = extractEducation(text);
-  const experience = extractExperience(text);
-  const totalExperienceYears = computeTotalYears(experience);
-  const seniority = inferSeniority(totalExperienceYears, text);
-
   const lower = text.toLowerCase();
-  const contactSignals = {
-    hasEmail: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(text),
-    // Indian +91 5+5 and US formats
-    hasPhone: /(\+91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}|(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i.test(text),
-    hasLinkedIn: lower.includes('linkedin.com') || lower.includes('linkedin'),
-    hasGithub: lower.includes('github.com') || lower.includes('github'),
-  };
-
-  // Summary: first 500 chars or summary section
-  let summary: string | null = null;
-  if (parsedDoc.sections['summary'] || parsedDoc.sections['objective']) {
-    summary = (parsedDoc.sections['summary'] ?? parsedDoc.sections['objective']).slice(0, 500);
-  } else {
-    summary = text.slice(0, 500) || null;
-  }
-
-  const languages: string[] = [];
-  const langMatch = text.match(/languages?\s*[:\-]\s*([^\n]+)/i);
-  if (langMatch) {
-    languages.push(...langMatch[1].split(/[,;]+/).map((s) => s.trim()).filter(Boolean).slice(0, 10));
-  }
-
+  const langMatch = sections.languages?.match(/languages?\s*[:\-]?\s*([^\n]+)/i);
   return {
-    skills,
-    skillsNormalized: skills.map((s) => normalizeSkill(s)),
-    education,
-    experience,
-    totalExperienceYears,
-    seniority,
-    contactSignals,
-    summary,
-    languages,
+    skills, skillsNormalized: skills.map(normalizeSkill), education: extractEducation(sections.education ?? '', evaluationDate),
+    experience, projects, leadership, totalExperienceYears: years, employmentYears: fullTime === null ? null : Math.round(fullTime / 12 * 100) / 100,
+    internshipYears: internship === null ? null : Math.round(internship / 12 * 100) / 100, seniority,
+    contactSignals: { hasEmail: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(text), hasPhone: /(\+91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}|(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i.test(text), hasLinkedIn: lower.includes('linkedin'), hasGithub: lower.includes('github') },
+    summary: summary || null, languages: langMatch ? langMatch[1].split(/[,;]+/).map(s => s.trim()).filter(Boolean) : [],
   };
 }
-
 export default buildResumeProfile;

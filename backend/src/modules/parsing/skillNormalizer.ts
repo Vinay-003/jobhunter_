@@ -40,6 +40,10 @@ export const CANONICAL_SKILL_ALIASES: Record<string, string> = {
   'data structures': 'Data Structures and Algorithms',
   dsa: 'Data Structures and Algorithms',
   oop: 'OOP', dbms: 'DBMS',
+  'object-oriented programming': 'OOP', 'object oriented programming': 'OOP',
+  'operating systems': 'Operating Systems', 'computer networks': 'Computer Networks',
+  'system design': 'System Design', 'distributed systems': 'Distributed Systems',
+  'ci/cd': 'CI/CD', '.net': '.NET', 'spring boot': 'Spring Boot',
 };
 
 const aliasLowerMap = new Map<string, string>();

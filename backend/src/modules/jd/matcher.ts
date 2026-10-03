@@ -26,6 +26,8 @@ export type JdMatchResult = {
   partialMatches: Array<{ jdSkill: string; resumeSkill: string; family: string }>;
   strengths: string[];
   warnings: string[];
+  requiredGroups?: Array<{ group: string[]; present: boolean; matched: string[] }>;
+  preferredGroups?: Array<{ group: string[]; present: boolean; matched: string[] }>;
 };
 
 // Skill families for partial credit hints (display only — scoring stays strict).
@@ -64,6 +66,18 @@ function normalizeSet(skills: string[]): Set<string> {
 export function matchJd(profile: ResumeProfile, jd: ParsedJobDescription): JdMatchResult {
   const profileSkills = profile.skillsNormalized.length ? profile.skillsNormalized : profile.skills;
   const profileSet = normalizeSet(profileSkills);
+  const groups = jd.requirementGroups ?? [
+    ...jd.requiredSkills.map(skill => ({ allOf: [skill], anyOf: [], required: true })),
+    ...jd.preferredSkills.map(skill => ({ allOf: [skill], anyOf: [], required: false })),
+  ];
+  const evaluate = (required: boolean) => groups.filter(group => group.required === required).map(group => {
+    const all = group.allOf.map(normalizeSkill);
+    const any = group.anyOf.map(normalizeSkill);
+    const matched = [...all, ...any].filter(skill => profileSet.has(skill.toLowerCase()));
+    return { group: [...all, ...any], present: all.every(skill => profileSet.has(skill.toLowerCase())) && (!any.length || any.some(skill => profileSet.has(skill.toLowerCase()))), matched };
+  });
+  const requiredGroups = evaluate(true);
+  const preferredGroups = evaluate(false);
   // For display, keep original canonical names but matching via lower normalized
   const requiredMatches: SkillMatch[] = jd.requiredSkills.map((skill) => {
     const norm = normalizeSkill(skill).toLowerCase();
@@ -78,8 +92,8 @@ export function matchJd(profile: ResumeProfile, jd: ParsedJobDescription): JdMat
   const requiredPresent = requiredMatches.filter((m) => m.present).length;
   const preferredPresent = preferredMatches.filter((m) => m.present).length;
 
-  const requiredCoverage = jd.requiredSkills.length ? requiredPresent / jd.requiredSkills.length : 1;
-  const preferredCoverage = jd.preferredSkills.length ? preferredPresent / jd.preferredSkills.length : 1;
+  const requiredCoverage = requiredGroups.length ? requiredGroups.filter(group => group.present).length / requiredGroups.length : 1;
+  const preferredCoverage = preferredGroups.length ? preferredGroups.filter(group => group.present).length / preferredGroups.length : 1;
 
   // Scoring: 70% required, 30% preferred; if no preferred then 100% required
   let overallScore: number;
@@ -95,9 +109,10 @@ export function matchJd(profile: ResumeProfile, jd: ParsedJobDescription): JdMat
 
   // Also factor seniority mismatch as warning not score (explicit strict skill only)
   const matchedRequired = requiredMatches.filter((m) => m.present).map((m) => m.skill);
-  const missingRequired = requiredMatches.filter((m) => !m.present).map((m) => m.skill);
+  const missingRequired = requiredGroups.filter(group => !group.present).flatMap(group => group.group.filter(skill => !profileSet.has(skill.toLowerCase())));
+  // A satisfied OR group cannot turn its other alternatives into missing must-haves.
   const matchedPreferred = preferredMatches.filter((m) => m.present).map((m) => m.skill);
-  const missingPreferred = preferredMatches.filter((m) => !m.present).map((m) => m.skill);
+  const missingPreferred = preferredGroups.filter(group => !group.present).flatMap(group => group.group.filter(skill => !profileSet.has(skill.toLowerCase())));
 
   // Partial / family hints: JD skill missing exactly but resume has same-family skill.
   // Display-only — does not change score.
@@ -155,6 +170,8 @@ export function matchJd(profile: ResumeProfile, jd: ParsedJobDescription): JdMat
     partialMatches,
     strengths,
     warnings,
+    requiredGroups,
+    preferredGroups,
   };
 }
 

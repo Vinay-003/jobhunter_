@@ -1,5 +1,7 @@
 import type { ParsedDocument } from '../parsing/pdfParser.js';
 import type { ResumeProfile } from '../parsing/resumeProfile.js';
+import { buildDocumentBlocks } from '../parsing/documentBlocks.js';
+import { extractSkills } from '../parsing/skillExtractor.js';
 
 /**
  * Resume Health / ATS Readiness Scorer v3
@@ -22,7 +24,7 @@ import type { ResumeProfile } from '../parsing/resumeProfile.js';
  *   5 Consistency & hygiene
  */
 
-export const VERSION = '3.0.0';
+export const VERSION = '4.0.0';
 
 export type RuleStatus = 'pass' | 'warn' | 'fail';
 export type Priority = 'high' | 'medium' | 'low';
@@ -119,7 +121,7 @@ const ACTION_VERBS = new Set([
   'implemented', 'improved', 'increased', 'launched', 'led', 'managed', 'migrated', 'optimized', 'owned',
   'reduced', 'refactored', 'resolved', 'saved', 'scaled', 'shipped', 'simplified', 'spearheaded', 'streamlined',
   'tested', 'trained', 'transformed', 'upgraded', 'wrote', 'analyzed', 'coordinated', 'integrated', 'deployed',
-  'maintained', 'mentored', 'negotiated', 'planned', 'produced', 'restructured', 'secured', 'standardized',
+  'maintained', 'maintain', 'mentored', 'negotiated', 'planned', 'produced', 'restructured', 'secured', 'standardized',
 ]);
 
 const OUTCOME_TERMS = [
@@ -203,11 +205,11 @@ function normalizeLine(line: string): string {
 
 function hasMetric(text: string): boolean {
   const patterns = [
-    /\b\d+(?:\.\d+)?\s*%\b/,
+    /\b\d+(?:\.\d+)?\s*%(?!\w)/,
     /[$€£₹]\s*\d[\d,.]*\b/,
     /\b\d+(?:\.\d+)?\s*[xX]\b/,
     /\b\d+(?:\.\d+)?\s*(?:k|m|b|million|billion|thousand)\b/i,
-    /\b\d+(?:\.\d+)?\s*(?:users?|customers?|clients?|requests?|records?|transactions?|files?|services?|endpoints?|teams?|members?|hours?|days?|weeks?|months?|minutes?|seconds?)\b/i,
+    /\b\d+(?:\.\d+)?\s*(?:users?|customers?|clients?|requests?|records?|transactions?|files?|formats?|languages?|providers?|categories?|batches?|items?|services?|endpoints?|teams?|members?|hours?|days?|weeks?|months?|minutes?|seconds?)\b/i,
     /\b(?:from|to|by|under|over|within)\s+\d+(?:\.\d+)?\b/i,
   ];
   return patterns.some((r) => r.test(text));
@@ -229,43 +231,14 @@ function outcomeLed(text: string): boolean {
 }
 
 function extractBulletCandidates(parsedDoc: ParsedDocument): BulletCandidate[] {
-  const candidates: BulletCandidate[] = [];
-  const seen = new Set<string>();
-
-  const add = (raw: string, source: BulletCandidate['source']) => {
-    const text = normalizeLine(raw);
-    if (text.length < 25 || text.length > 360) return;
-    const key = text.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    const verb = leadVerb(text);
-    candidates.push({
-      text,
-      source,
-      quantified: hasMetric(text),
-      actionLed: !!verb,
-      outcomeLed: outcomeLed(text),
-      weakPhraseHits: weakHits(text),
-      leadVerb: verb,
-    });
-  };
-
-  // First preference: real visual lines retained by the parser.
-  for (const page of parsedDoc.pages) {
-    for (const line of page.split(/\n+/)) {
-      if (/^\s*[•◦▪▫‣⁃*\-–—]\s+/.test(line)) add(line, 'other');
-    }
-  }
-
-  // Section fallback catches resumes exported without bullet glyphs.
-  for (const [heading, body] of Object.entries(parsedDoc.sections)) {
-    const source: BulletCandidate['source'] = heading.includes('project') ? 'projects' : heading.includes('experience') || heading.includes('employment') ? 'experience' : 'other';
-    if (source === 'other') continue;
-    const lines = body.split(/\n+|(?<=[.;])\s+(?=[A-Z])/).map((s) => s.trim()).filter(Boolean);
-    for (const line of lines) add(line, source);
-  }
-
-  return candidates.slice(0, 80);
+  return buildDocumentBlocks(parsedDoc).bullets
+    .filter(b => b.section === 'experience' || b.section === 'projects')
+    .map(b => {
+      const text = normalizeLine(b.text);
+      const verb = leadVerb(text);
+      return { text, source: b.section as 'experience' | 'projects', quantified: hasMetric(text),
+        actionLed: !!verb, outcomeLed: outcomeLed(text), weakPhraseHits: weakHits(text), leadVerb: verb };
+    }).slice(0, 80);
 }
 
 function sectionPresent(parsedDoc: ParsedDocument, names: string[]): boolean {
@@ -303,19 +276,10 @@ function countRepeatedLeadVerbs(bullets: BulletCandidate[]): number {
 }
 
 function skillEvidenceCount(parsedDoc: ParsedDocument, profile: ResumeProfile): number {
-  if (!profile.skillsNormalized.length) return 0;
-  const evidenceText = [
-    parsedDoc.sections['experience'] || '',
-    parsedDoc.sections['work experience'] || '',
-    parsedDoc.sections['employment'] || '',
-    parsedDoc.sections['projects'] || '',
-    parsedDoc.sections['project'] || '',
-  ].join(' ').toLowerCase();
-  if (!evidenceText.trim()) return 0;
-  return profile.skillsNormalized.filter((skill) => {
-    const token = skill.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`\\b${token}\\b`, 'i').test(evidenceText);
-  }).length;
+  const evidence = buildDocumentBlocks(parsedDoc).bullets
+    .filter(b => b.section === 'experience' || b.section === 'projects').map(b => b.text).join(' ');
+  const present = new Set(extractSkills(evidence).map(skill => skill.toLowerCase()));
+  return profile.skillsNormalized.filter(skill => present.has(skill.toLowerCase())).length;
 }
 
 function category(category: string, label: string, rules: RuleResult[], summary: string): CategoryBreakdown {
@@ -359,16 +323,16 @@ export function scoreReadiness(
   const quantified = bullets.filter((b) => b.quantified);
   const actionLed = bullets.filter((b) => b.actionLed);
   const outcomeBullets = bullets.filter((b) => b.outcomeLed);
-  const weakPhraseHits = bullets.reduce((sum, b) => sum + b.weakPhraseHits, 0) + weakHits(text.slice(0, 2500));
+  const weakPhraseHits = bullets.reduce((sum, b) => sum + b.weakPhraseHits, 0);
   const repeatedLeadVerbCount = countRepeatedLeadVerbs(bullets);
   const dateTokens = countDateTokens(text);
-  const standardSectionCount = Object.keys(parsedDoc.sections).filter((h) => STANDARD_HEADINGS.has(h.toLowerCase())).length;
+  const standardSectionCount = new Set(Object.keys(parsedDoc.sections).filter(h => STANDARD_HEADINGS.has(h.toLowerCase())).map(h => h === 'technical skills' ? 'skills' : h === 'project' ? 'projects' : h === 'work experience' || h === 'employment' ? 'experience' : h)).size;
   const skillsEvidence = skillEvidenceCount(parsedDoc, profile);
 
   const metrics: ResumeHealthMetrics = {
     pageCount: parsedDoc.layoutSignals.pageCount,
     wordCount,
-    sectionCount: Object.keys(parsedDoc.sections).length,
+    sectionCount: standardSectionCount,
     skillsCount: profile.skills.length,
     bulletCount: bullets.length,
     quantifiedBulletCount: quantified.length,
@@ -479,11 +443,11 @@ export function scoreReadiness(
   }
   breakdown.push(category('completeness', 'Core completeness', completeRules, 'Are the essential sections and contact signals present without forcing optional sections?'));
 
-  // 3) Impact & measurable evidence — 20 (STRICT: ResumeWorded 74 benchmark)
+  // 3) Impact & measurable evidence — 20 (visible rubric)
   const impactRules: RuleResult[] = [];
   {
     const ratio = bullets.length ? quantified.length / bullets.length : 0;
-    // Stricter: was 0.5->10, now 0.6->10, and 0.2->5 becomes 0.15->3
+    // Threshold: was 0.5->10, now 0.6->10, and 0.2->5 becomes 0.15->3
     const pts = bullets.length === 0 ? 0 : ratio >= 0.6 ? 10 : ratio >= 0.4 ? 7 : ratio >= 0.25 ? 4 : ratio >= 0.12 ? 2 : quantified.length >= 1 ? 1 : 0;
     impactRules.push(rule('impact_metrics', 'impact', 'Quantified achievements', pts, 10,
       bullets.length ? `${quantified.length} of ${bullets.length} evidence bullets contain a measurable result or scope signal.` : 'No reliable experience/project bullets were detected.', {
@@ -494,7 +458,7 @@ export function scoreReadiness(
   }
   {
     const ratio = bullets.length ? outcomeBullets.length / bullets.length : 0;
-    // Stricter: 0.5->6 becomes 0.6->6, and 0.15->3 becomes 0.2->2
+    // Threshold: 0.5->6 becomes 0.6->6, and 0.15->3 becomes 0.2->2
     const pts = bullets.length === 0 ? 0 : ratio >= 0.6 ? 6 : ratio >= 0.4 ? 4 : ratio >= 0.25 ? 2 : outcomeBullets.length >= 1 ? 1 : 0;
     impactRules.push(rule('impact_outcomes', 'impact', 'Outcome-oriented bullets', pts, 6,
       bullets.length ? `${outcomeBullets.length} bullet${outcomeBullets.length === 1 ? '' : 's'} communicate an outcome or improvement.` : 'No outcome evidence was detected.', {
@@ -579,9 +543,9 @@ export function scoreReadiness(
       }));
   }
   {
-    const n = profile.skillsNormalized.length;
+    const n = extractSkills(parsedDoc.sections.skills ?? parsedDoc.sections['technical skills'] ?? '').length;
     let pts = 0;
-    // Stricter: 12-20 ideal, not 8-24; 23 is now 2 not 3 (ResumeWorded would flag 23 as borderline high)
+    // Threshold: 12-20 ideal, not 8-24; 23 is now 2 not 3 (ResumeWorded would flag 23 as borderline high)
     if (n >= 12 && n <= 20) pts = 3;
     else if (n >= 8 && n < 12) pts = 2.5;
     else if (n > 20 && n <= 28) pts = 1.5;
@@ -600,7 +564,7 @@ export function scoreReadiness(
   {
     const n = profile.skillsNormalized.length;
     const ratio = n ? skillsEvidence / n : 0;
-    // Stricter: 0.5->4 becomes 0.6->4
+    // Threshold: 0.5->4 becomes 0.6->4
     const pts = n === 0 ? 0 : ratio >= 0.6 ? 4 : ratio >= 0.4 ? 2.5 : ratio >= 0.2 ? 1 : skillsEvidence >= 1 ? 0.5 : 0;
     skillRules.push(rule('skills_evidence', 'skills', 'Skills backed by evidence', pts, 4,
       `${skillsEvidence} detected skill${skillsEvidence === 1 ? '' : 's'} also appear in experience/project evidence.`, {
@@ -615,7 +579,7 @@ export function scoreReadiness(
   const writingRules: RuleResult[] = [];
   {
     const ratio = bullets.length ? actionLed.length / bullets.length : 0;
-    // Stricter: 0.75->4 becomes 0.8->4
+    // Threshold: 0.75->4 becomes 0.8->4
     const pts = bullets.length === 0 ? 0 : ratio >= 0.8 ? 4 : ratio >= 0.6 ? 2.5 : ratio >= 0.4 ? 1.5 : actionLed.length >= 1 ? 0.5 : 0;
     writingRules.push(rule('writing_action_verbs', 'writing', 'Action-led bullets', pts, 4,
       bullets.length ? `${actionLed.length} of ${bullets.length} bullets begin with a strong action verb.` : 'No reliable bullets were detected.', {
@@ -701,19 +665,7 @@ export function scoreReadiness(
   if (totalPossible !== 100) {
     throw new Error(`Resume readiness rubric misconfigured: expected 100 points, found ${totalPossible}`);
   }
-  let score = round1(rawTotal);
-  // Strictness to match commercial checkers (ResumeWorded 74 for Vinay): penalize missing summary and single-work entry-level
-  const hasSummary = sectionPresent(parsedDoc, ['summary', 'objective', 'profile']);
-  const workCount = profile.experience.filter(e => {
-    const t = String(e.title||'').toLowerCase();
-    return !t.includes('leadership') && !t.includes('editorial') && !t.includes('secretary');
-  }).length;
-  if (!hasSummary) score = Math.max(0, score - 4);
-  if (workCount === 1) score = Math.max(0, score - 5);
-  if (workCount === 0) score = Math.max(0, score - 10);
-  if (metrics.quantifiedBulletRatio < 10) score = Math.max(0, score - 3);
-  if (score > 80 && workCount <= 1) score = 75;
-  score = round1(Math.max(0, Math.min(100, score)));
+  const score = round1(rawTotal);
   const label = labelForScore(score);
 
   const priorityActions = rules
