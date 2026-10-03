@@ -9,6 +9,9 @@ import { validateVectors } from '../../providers/embeddings/validateVectors.js';
 import { MockEmbeddingProvider } from '../../providers/embeddings/MockEmbeddingProvider.js';
 import { AwsSageMakerEmbeddingProvider } from '../../providers/embeddings/AwsSageMakerEmbeddingProvider.js';
 import { getLocalEmbeddingProvider } from '../../providers/embeddings/LocalEmbeddingProvider.js';
+import { embedCached } from '../../providers/embeddings/embeddingCache.js';
+import type { EmbeddingProvider } from '../../providers/embeddings/EmbeddingProvider.js';
+import pool from '../../config/database.js';
 import { env } from '../../config/env.js';
 
 export const VERSION = '3.0.0';
@@ -26,7 +29,7 @@ export function roleFamily(title: string): 'software' | 'data' | 'other' {
  * Embedding: SageMaker (aws) or Local when EMBEDDING_PROVIDER set; Mock ONLY as fallback — never default.
  */
 
-function getRankingEmbeddingProvider(): { embed: (input: { texts: string[]; purpose: 'resume'|'job'|'jd' }) => Promise<{ vectors: number[][]; modelId: string; dimension: number }> } {
+function getRankingEmbeddingProvider(): EmbeddingProvider & { modelId?: string; modelRevision?: string | null } {
   const p = (env.EMBEDDING_PROVIDER || 'auto').toLowerCase();
   if (p === 'local' || process.env.USE_LOCAL_EMBEDDINGS === 'true') return getLocalEmbeddingProvider();
   if (p === 'aws' || (process.env.AWS_SAGEMAKER_ENDPOINT_NAME && process.env.AWS_ACCESS_KEY_ID)) return new AwsSageMakerEmbeddingProvider();
@@ -125,7 +128,7 @@ export async function rankJob(profile: ResumeProfile, job: NormalizedJob, opts?:
 export function rankJobsSync(
   profile: ResumeProfile,
   jobs: NormalizedJob[],
-  opts?: { preferences?: { locations?: string[] | null } },
+  opts?: { preferences?: { locations?: string[] | null }; ownerId?: string },
 ): Promise<RankResult[]> {
   return rankJobsBatch(profile, jobs, opts);
 }
@@ -140,7 +143,7 @@ export function rankJobsSync(
 export async function rankJobsBatch(
   profile: ResumeProfile,
   jobs: NormalizedJob[],
-  opts?: { preferences?: { locations?: string[] | null } },
+  opts?: { preferences?: { locations?: string[] | null }; ownerId?: string },
 ): Promise<(RankResult & { embeddingModelId: string; usedMock: boolean })[]> {
   // Resume side mirrors jd-match: skills line + experience chunks, best-match wins.
   // A single short summary vector is too noisy (ranks "Java SWE II" above a
@@ -167,11 +170,23 @@ export async function rankJobsBatch(
   let usedMock = false;
   if (uniq.length) {
     try {
-      const resp = await provider.embed({ texts: uniq, purpose: 'job' });
-      modelId = resp.modelId;
+       const identity = 'modelRevision' in provider && typeof provider.modelRevision === 'string' && provider.modelRevision
+         ? { modelId: String(provider.modelId), modelRevision: provider.modelRevision } : null;
+       // Without an authenticated owner, never persist or read private resume vectors.
+       const resp = opts?.ownerId ? await embedCached(pool, provider, [
+         { purpose: 'resume', ownerId: opts.ownerId, texts: [...new Set(resumeChunks.map(t => t.trim()).filter(Boolean))] },
+         { purpose: 'job', texts: [...new Set(perJobTexts.flatMap(t => [t.jobDesc, t.combined, t.title]).map(t => t.trim()).filter(Boolean))] },
+       ], identity) : null;
+       const direct = resp ? null : await provider.embed({ texts: uniq, purpose: 'job' });
+       const embedded = resp ? new Map<string, number[]>([
+         ...[...new Set(resumeChunks.map(t => t.trim()).filter(Boolean))].map((text, i) => [text, resp.groups[0][i]] as const),
+         ...[...new Set(perJobTexts.flatMap(t => [t.jobDesc, t.combined, t.title]).map(t => t.trim()).filter(Boolean))].map((text, i) => [text, resp.groups[1][i]] as const),
+       ]) : null;
+       const result = direct ?? { vectors: uniq.map(text => embedded!.get(text)!), modelId: resp!.modelId, dimension: resp!.dimension };
+       modelId = result.modelId;
       usedMock = modelId.includes('mock');
-      validateVectors(resp.vectors, uniq.length, resp.dimension);
-      if (!usedMock) uniq.forEach((t, i) => vec.set(t, resp.vectors[i]));
+       validateVectors(result.vectors, uniq.length, result.dimension);
+       if (!usedMock) uniq.forEach((t, i) => vec.set(t, result.vectors[i]));
       console.log(`[ranking] batch embed provider=${providerName} model=${modelId}${usedMock ? ' (mock fallback)' : ''} jobs=${jobs.length} texts=${uniq.length} ms=${Date.now() - t0}`);
     } catch (e: any) {
       console.warn(`[ranking] batch embed failed provider=${providerName}: ${e?.name || ''} ${e?.message || e} — scoring with keyword-only fallback`);

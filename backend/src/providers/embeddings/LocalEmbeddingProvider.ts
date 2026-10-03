@@ -34,6 +34,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   private queue: Promise<unknown> = Promise.resolve();
   private queued = 0;
   private revision: string | null = null;
+  get modelRevision(): string | null { return this.revision; }
   private cache = new Map<string, number[]>();
 
   constructor(opts?: { modelId?: string }) { this.modelId = opts?.modelId || process.env.LOCAL_EMBEDDING_MODEL || process.env.EMBEDDING_MODEL_ID || MODEL; }

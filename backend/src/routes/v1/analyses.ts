@@ -14,6 +14,7 @@ import { MockEmbeddingProvider } from '../../providers/embeddings/MockEmbeddingP
 import { AwsSageMakerEmbeddingProvider } from '../../providers/embeddings/AwsSageMakerEmbeddingProvider.js';
 import { getLocalEmbeddingProvider } from '../../providers/embeddings/LocalEmbeddingProvider.js';
 import { validateVectors } from '../../providers/embeddings/validateVectors.js';
+import { embedCached } from '../../providers/embeddings/embeddingCache.js';
 import { professionalEvidence } from '../../modules/matching/evidenceBuilder.js';
 import { scoreJdRubric, JD_RUBRIC_VERSION } from '../../modules/analysis/jdRubric.js';
 import { analysisSnapshot, REPORT_SCHEMA_VERSION, type ReportSnapshot } from '../../modules/analysis/reportSchema.js';
@@ -153,12 +154,19 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     let embeddingStatus: 'real' | 'mock' | 'unavailable' = 'unavailable';
     if (uniq.length && jdChunks.length) {
       try {
-        const resp = await provider.embed({ texts: uniq, purpose:'jd' });
-        validateVectors(resp.vectors, uniq.length, resp.dimension);
-        vectors = resp.vectors;
+        const identity = 'modelRevision' in provider && typeof provider.modelRevision === 'string' && provider.modelRevision
+          ? { modelId: provider.modelId, modelRevision: provider.modelRevision } : null;
+        const resp = await embedCached(pool, provider, [
+          { purpose: 'resume', ownerId: userId, texts: resumeChunks.map(t => t.trim()).filter(Boolean) },
+          { purpose: 'jd', texts: jdChunks.map(t => t.trim()).filter(Boolean) },
+        ], identity);
+        const byText = new Map<string, number[]>();
+        [...resumeChunks, ...jdChunks].forEach((text, i) => byText.set(text.trim(), resp.groups.flat()[i]));
+        vectors = uniq.map(text => byText.get(text)!);
+        validateVectors(vectors, uniq.length, resp.dimension);
         modelId = resp.modelId;
         dimension = resp.dimension;
-        modelRevision = 'modelRevision' in resp ? (resp.modelRevision as string | null) : null;
+        modelRevision = resp.modelRevision;
         embeddingStatus = resp.modelId.includes('mock') ? 'mock' : 'real';
       } catch (e) {
         console.warn('[jd-match] embedding unavailable:', (e as Error).message);

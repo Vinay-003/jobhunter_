@@ -1,0 +1,5 @@
+{"schemaVersion":1,"candidateId":"synthetic-a","employerId":"fictional-alpha","jobId":"feed-1","groupId":"req-1","eligibility":"eligible","relevance":3,"skillEvidence":"supported","responsibilitySupport":"supported","score":90}
+{"schemaVersion":1,"candidateId":"synthetic-a","employerId":"fictional-alpha","jobId":"feed-2","groupId":"req-1","eligibility":"eligible","relevance":3,"skillEvidence":"supported","responsibilitySupport":"supported","score":85}
+{"schemaVersion":1,"candidateId":"synthetic-a","employerId":"fictional-beta","jobId":"feed-3","groupId":"req-2","eligibility":"ineligible","relevance":null,"skillEvidence":"partial","responsibilitySupport":"unknown","score":80}
+{"schemaVersion":1,"candidateId":"synthetic-a","employerId":"fictional-gamma","jobId":"feed-4","groupId":"req-3","eligibility":"eligible","relevance":1,"skillEvidence":"partial","responsibilitySupport":"partial","score":70}
+{"schemaVersion":1,"candidateId":"synthetic-b","employerId":"fictional-delta","jobId":"feed-5","groupId":"req-4","eligibility":"unknown","relevance":null,"skillEvidence":"unknown","responsibilitySupport":"unknown","score":55}

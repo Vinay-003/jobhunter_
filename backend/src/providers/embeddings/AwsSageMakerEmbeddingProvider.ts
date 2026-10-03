@@ -18,6 +18,7 @@ const TIMEOUT_MS = 260000;
 export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
   readonly modelId: string;
   readonly dimension: number;
+  readonly modelRevision: string | null = process.env.EMBEDDING_MODEL_REVISION || null;
   private mock = new MockEmbeddingProvider();
 
   constructor(opts?: { modelId?: string; dimension?: number }) {
@@ -29,7 +30,7 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
     return Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY && env.AWS_SAGEMAKER_ENDPOINT_NAME && env.AWS_REGION);
   }
 
-  async embed(input: { texts: string[]; purpose: 'resume' | 'job' | 'jd' }): Promise<{ vectors: number[][]; modelId: string; dimension: number }> {
+  async embed(input: { texts: string[]; purpose: 'resume' | 'job' | 'jd' }): Promise<{ vectors: number[][]; modelId: string; dimension: number; modelRevision?: string | null }> {
     // Truncate texts to limit
     const truncated = input.texts.map((t) => (t.length > MAX_CHARS ? t.slice(0, MAX_CHARS) : t));
 
@@ -48,10 +49,10 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
         actualDimension = res.dimension;
         allVectors.push(...res.vectors);
       }
-      return { vectors: allVectors, modelId: actualModelId!, dimension: actualDimension! };
+      return { vectors: allVectors, modelId: actualModelId!, dimension: actualDimension!, modelRevision: this.modelRevision };
     }
 
-    return this.embedChunk(truncated, input.purpose);
+    return { ...await this.embedChunk(truncated, input.purpose), modelRevision: this.modelRevision };
   }
 
   private async embedChunk(texts: string[], purpose: string): Promise<{ vectors: number[][]; modelId: string; dimension: number }> {

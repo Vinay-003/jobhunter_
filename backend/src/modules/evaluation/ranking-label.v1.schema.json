@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jobhunter.invalid/schemas/ranking-label.v1.schema.json",
+  "title": "Ranking judgment v1 (one JSONL row)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "candidateId", "employerId", "jobId", "groupId", "eligibility", "relevance", "skillEvidence", "responsibilitySupport", "score"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "candidateId": { "type": "string", "minLength": 1 },
+    "employerId": { "type": "string", "minLength": 1 },
+    "jobId": { "type": "string", "minLength": 1 },
+    "groupId": { "type": "string", "minLength": 1 },
+    "eligibility": { "enum": ["eligible", "ineligible", "unknown"] },
+    "relevance": { "type": ["integer", "null"], "minimum": 0, "maximum": 3 },
+    "skillEvidence": { "enum": ["supported", "partial", "unsupported", "unknown"] },
+    "responsibilitySupport": { "enum": ["supported", "partial", "unsupported", "unknown"] },
+    "score": { "type": "number", "minimum": 0, "maximum": 100 }
+  },
+  "allOf": [
+    { "if": { "properties": { "eligibility": { "const": "eligible" } } }, "then": {}, "else": { "properties": { "relevance": { "type": "null" } } } }
+  ]
+}
