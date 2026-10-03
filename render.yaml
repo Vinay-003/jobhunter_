@@ -24,7 +24,9 @@ services:
     # Alternative health path (also served): /api/v1/health
     envVars:
       - key: NODE_VERSION
-        value: 20.11.0
+        # @supabase/supabase-js >=2.117 requires native WebSocket (Node 22+);
+        # on Node 20 createClient() throws and uploads fell back to disk (Issue 1).
+        value: 22.14.0
       - key: NODE_ENV
         value: production
       - key: PORT
