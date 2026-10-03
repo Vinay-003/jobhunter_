@@ -22,11 +22,20 @@ export type JobSearchQuery = {
   keywords: string;
   location?: string;
   page?: number;
+  /** Opaque cursor only when a provider explicitly supports one; do not infer from page. */
+  cursor?: string;
   /** Candidate level ('junior' | 'mid' | ...) — providers with a seniority filter use it. */
   seniorityHint?: string | null;
   daysPosted?: number;
   country?: string;
   limit?: number;
+};
+
+export type ProviderSearchResult = {
+  jobs: NormalizedJob[];
+  status: 'ok' | 'empty' | 'fallback' | 'error' | 'budgetLimited';
+  nextCursor?: string | null;
+  errorCode?: string;
 };
 
 export interface JobProvider {

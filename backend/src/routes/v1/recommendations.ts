@@ -14,6 +14,7 @@ import { rankJobsBatch, VERSION as rankerVersion } from '../../modules/jobs/rank
 import { deduplicateJobs, upsertJob } from '../../providers/jobs/jobStore.js';
 import { reserveDailyCall } from '../../providers/jobs/providerBudgets.js';
 import type { NormalizedJob, JobProvider } from '../../providers/jobs/JobProvider.js';
+import { retrievalPlan, sourceEnvelope } from '../../providers/jobs/retrievalPlan.js';
 import { effectivePreferences, eligibleJob, countryCodeForLocation } from '../../modules/jobs/eligibility.js';
 import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
 import { buildResumeProfile } from '../../modules/parsing/resumeProfile.js';
@@ -79,9 +80,8 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
     const enabled = new Set((process.env.JOB_PROVIDERS || 'jooble,jobspipe,adzuna,remotive,arbeitnow').split(',').map((s) => s.trim().toLowerCase()));
     const sources: any[] = [];
     const all: NormalizedJob[] = [];
-    const runSearch = async (name: string, provider: JobProvider, query: string, ttl: number) => {
-      const location = preferences.locations[0] || '';
-        const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ version: 3, name, query, location, preferences,
+    const runSearch = async (name: string, provider: JobProvider, query: string, location: string, page: number, ttl: number) => {
+        const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ version: 4, name, query, location, page, preferences,
           providerLimit: name === 'jobspipe' ? process.env.JOBSPIPE_LIMIT ?? '15' : name === 'adzuna' ? process.env.ADZUNA_RESULTS_PER_PAGE ?? '15' : null,
           ...(name === 'jobspipe' || name === 'adzuna' ? {country:countryCodeForLocation(location) ?? (name === 'jobspipe' ? process.env.JOBSPIPE_COUNTRY ?? 'IN' : process.env.ADZUNA_COUNTRY ?? 'in')} : {}) })).digest('hex');
       const started = new Date().toISOString();
@@ -94,24 +94,33 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
           if (name === 'jooble' && !(await reserveDailyCall('jooble', Number(process.env.JOOBLE_CALL_BUDGET || 100)))) {
             sources.push({ provider:name,status:'budgetLimited',cacheHit:false,fetchedCount:0,attemptedAt:started }); return;
           }
-          jobs = await provider.search({ keywords: query, location, country: countryCodeForLocation(location) ?? undefined, seniorityHint: profile.seniority, daysPosted: preferences.daysPosted });
+           jobs = await provider.search({ keywords: query, location, page, country: countryCodeForLocation(location) ?? undefined, seniorityHint: profile.seniority, daysPosted: preferences.daysPosted });
           // Adapter DB fallback keeps original source IDs; never call it a live result of this provider.
-          if (jobs.some((j) => j.retrieval?.status === 'fallback' || j.source !== name)) sources.push({ provider: name, status: 'fallback', fallbackSource: [...new Set(jobs.map((j) => j.source))], cacheHit: false, fetchedCount: jobs.length, attemptedAt: started });
-          else {
+           if (jobs.some((j) => j.retrieval?.status === 'fallback' || j.source !== name)) sources.push({ ...sourceEnvelope(name,jobs,false), location,page,attemptedAt:started });
+           else {
             await pool.query('INSERT INTO job_search_cache (query_hash,query_text,result_json,created_at) VALUES ($1,$2,$3,now()) ON CONFLICT (query_hash) DO UPDATE SET result_json=$3,created_at=now()', [cacheKey, `${name}:${query}`, JSON.stringify(jobs)]);
-            sources.push({ provider: name, status: jobs.length ? 'ok' : 'empty', cacheHit: false, fetchedCount: jobs.length, attemptedAt: started });
+             sources.push({ ...sourceEnvelope(name,jobs,false), location,page,attemptedAt:started });
           }
         }
-        if (cacheHit) sources.push({ provider: name, status: 'cached', cacheHit: true, fetchedCount: jobs.length, attemptedAt: started });
+         if (cacheHit) sources.push({ ...sourceEnvelope(name,jobs,true), location,page,attemptedAt:started });
         all.push(...jobs);
-      } catch { sources.push({ provider: name, status: 'error', cacheHit, fetchedCount: 0, errorCode: 'PROVIDER_UNAVAILABLE', attemptedAt: started }); }
+       } catch { sources.push({ ...sourceEnvelope(name,[],cacheHit,'error'), location,page,errorCode: 'PROVIDER_UNAVAILABLE', attemptedAt: started }); }
     };
-    if (enabled.has('jooble')) for (const q of queries) await runSearch('jooble', new JoobleProvider(), q, 3600000);
-    const extras: Array<[string,JobProvider,number]> = [ ['jobspipe',new JobsPipeProvider(),3600000], ['adzuna',new AdzunaProvider(),3600000], ['remotive',new RemotiveProvider(),3600000], ['arbeitnow',new ArbeitnowProvider(),arbeitnowCacheHours() * 3600000] ];
-    for (const [name,provider,ttl] of extras) if (enabled.has(name)) await runSearch(name,provider,primary,ttl);
+    const providers: Record<string,[JobProvider,number]> = {
+      jooble:[new JoobleProvider(),3600000], jobspipe:[new JobsPipeProvider(),3600000],
+      adzuna:[new AdzunaProvider(),3600000], remotive:[new RemotiveProvider(),3600000],
+      arbeitnow:[new ArbeitnowProvider(),arbeitnowCacheHours() * 3600000],
+    };
+    const retrieval = retrievalPlan([...enabled], preferences.locations, queries.length ? queries : [primary]);
+    for (const step of retrieval) {
+      // Eligibility, not raw count, determines whether further bounded retrieval is useful.
+      if (deduplicateJobs(all).filter(job => eligibleJob(job,profile.seniority,preferences,profile).status !== 'ineligible').length >= 50) break;
+      const entry = providers[step.provider];
+      if (entry) await runSearch(step.provider,entry[0],step.keywords,step.location,step.page,entry[1]);
+    }
     const distinct = deduplicateJobs(all);
     const eligible = distinct.map((job) => ({ job, eligibility: eligibleJob(job,profile.seniority,preferences,profile) })).filter((entry) => entry.eligibility.status !== 'ineligible');
-    const scored = await rankJobsBatch(profile, eligible.map((entry) => entry.job), { preferences: { locations: preferences.locations } });
+    const scored = await rankJobsBatch(profile, eligible.map((entry) => entry.job), { preferences: { locations: preferences.locations }, ownerId: userId });
     const ranked = eligible.map(({ job, eligibility }, i) => ({ ...job, eligibility, ...scored[i], confidence: (scored[i] as any).confidence ?? 'Low' }))
       .sort((a,b) => (a.eligibility.status === 'eligible' ? 0 : 1) - (b.eligibility.status === 'eligible' ? 0 : 1) || b.fitScore-a.fitScore || `${a.source}:${a.externalId}`.localeCompare(`${b.source}:${b.externalId}`))
       .slice(0, 200);

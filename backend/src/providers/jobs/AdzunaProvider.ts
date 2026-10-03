@@ -54,7 +54,7 @@ export class AdzunaProvider implements JobProvider {
     try {
       const country = query.country || this.country;
       const url = `https://api.adzuna.com/v1/api/jobs/${encodeURIComponent(country)}/search/${Math.max(1, Math.min(10, query.page ?? 1))}`;
-      console.log(`[AdzunaProvider] searching keywords="${query.keywords}" location="${query.location ?? ''}" country=${this.country}`);
+      console.log(`[AdzunaProvider] searching keywords="${query.keywords}" location="${query.location ?? ''}" country=${country} page=${query.page ?? 1}`);
       const resp = await axios.get<{ results?: AdzunaJob[] }>(url, {
         timeout: TIMEOUT_MS,
         headers: { Accept: 'application/json' },
