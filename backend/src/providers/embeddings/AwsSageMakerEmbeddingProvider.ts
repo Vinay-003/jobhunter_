@@ -1,6 +1,7 @@
 import type { EmbeddingProvider } from './EmbeddingProvider.js';
 import { MockEmbeddingProvider } from './MockEmbeddingProvider.js';
 import { env } from '../../config/env.js';
+import { validateVectors } from './validateVectors.js';
 
 /**
  * SageMaker embedding provider stub.
@@ -36,12 +37,18 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
     if (truncated.length > MAX_TEXTS) {
       // Batch into chunks of MAX_TEXTS
       const allVectors: number[][] = [];
+      let actualModelId: string | null = null;
+      let actualDimension: number | null = null;
       for (let i = 0; i < truncated.length; i += MAX_TEXTS) {
         const chunk = truncated.slice(i, i + MAX_TEXTS);
         const res = await this.embedChunk(chunk, input.purpose);
+        validateVectors(res.vectors, chunk.length, res.dimension);
+        if (actualModelId !== null && (actualModelId !== res.modelId || actualDimension !== res.dimension)) throw new Error('Embedding batches have different models or dimensions');
+        actualModelId = res.modelId;
+        actualDimension = res.dimension;
         allVectors.push(...res.vectors);
       }
-      return { vectors: allVectors, modelId: this.modelId, dimension: this.dimension };
+      return { vectors: allVectors, modelId: actualModelId!, dimension: actualDimension! };
     }
 
     return this.embedChunk(truncated, input.purpose);
@@ -101,12 +108,12 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
       }
 
       const dim = vectors[0]?.length ?? this.dimension;
+      validateVectors(vectors, texts.length, dim);
       return { vectors, modelId: this.modelId, dimension: dim };
     } catch (err: any) {
       // Log name + message: SDK throttling/validation errors otherwise surface as bare "UnknownError".
-      console.warn(`[AwsSageMakerEmbeddingProvider] fallback to mock due to error: ${err?.name || 'Error'}: ${err?.message || err} (texts=${texts.length})`);
-      const res = await this.mock.embed({ texts, purpose: purpose as 'resume' | 'job' | 'jd' });
-      return { vectors: res.vectors, modelId: res.modelId, dimension: res.dimension };
+      console.warn(`[AwsSageMakerEmbeddingProvider] embedding unavailable: ${err?.name || 'Error'} (texts=${texts.length})`);
+      throw new Error('Configured SageMaker embedding unavailable');
     }
   }
 }
