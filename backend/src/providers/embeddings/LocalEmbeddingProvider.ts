@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 
 const MODEL = 'anass1209/resume-job-matcher-all-MiniLM-L6-v2';
 const ADJACENT_SCRIPT = fileURLToPath(new URL('./local_embedding_worker.py', import.meta.url));
-const SCRIPT = fs.existsSync(ADJACENT_SCRIPT) ? ADJACENT_SCRIPT : path.resolve(process.cwd(), 'src/providers/embeddings/local_embedding_worker.py');
+const SCRIPT = fs.existsSync(ADJACENT_SCRIPT) ? ADJACENT_SCRIPT : fileURLToPath(new URL('../../../src/providers/embeddings/local_embedding_worker.py', import.meta.url));
 const MAX_BATCH = 32;
 const TIMEOUT = 120_000;
 
