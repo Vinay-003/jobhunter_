@@ -52,7 +52,11 @@ router.get('/jobs', authenticateToken, async (req, res) => {
     const filters: any = {};
     if (location) filters.location = location as string;
     if (keywords) filters.keywords = keywords as string;
-    if (days_posted) filters.days_posted = parseInt(days_posted as string);
+    if (days_posted) {
+      const days = Number(days_posted);
+      if (!Number.isInteger(days) || days < 1 || days > 365) return res.status(400).json({success:false,message:'Invalid days_posted'});
+      filters.days_posted = days;
+    }
 
     const jobs = await jobRecommendationService.getJobs(filters);
 
@@ -97,152 +101,16 @@ router.post('/jobs/refresh', authenticateToken, async (req, res) => {
  * GET /api/jobs/recommendations
  * Get job recommendations based on user's resume analysis
  */
-router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user?.id;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not authenticated'
-      });
-    }
-
-    const { location, keywords, days_posted, min_match_score } = req.query;
-
-    // Get user's latest resume
-    const resume = await resumeModel.getLatestResume(userId);
-
-    if (!resume) {
-      return res.status(404).json({
-        success: false,
-        message: 'No resume found. Please upload a resume first.'
-      });
-    }
-
-    // Check if resume has been analyzed
-    if (!resume.analysis_data) {
-      return res.status(400).json({
-        success: false,
-        message: 'Resume has not been analyzed yet. Please analyze your resume first at /api/analyze'
-      });
-    }
-
-    // Check if analysis is outdated (old version with limited data extraction)
-    // Old version indicators:
-    // 1. extractedInfo.skills has less than 10 items (old: 3, new: 36+)
-    // 2. Missing new fields like 'name', 'linkedin', 'github', 'projects', 'education'
-    const hasLimitedSkills = resume.analysis_data.extractedInfo?.skills 
-      && Array.isArray(resume.analysis_data.extractedInfo.skills) 
-      && resume.analysis_data.extractedInfo.skills.length < 10;
-    
-    const missingNewFields = !resume.analysis_data.extractedInfo?.name 
-      || !resume.analysis_data.extractedInfo?.projects
-      || !resume.analysis_data.extractedInfo?.education;
-    
-    console.log('🔍 AUTO-REANALYSIS CHECK:', {
-      hasLimitedSkills,
-      skillsCount: resume.analysis_data.extractedInfo?.skills?.length || 0,
-      hasName: !!resume.analysis_data.extractedInfo?.name,
-      hasProjects: !!resume.analysis_data.extractedInfo?.projects,
-      hasEducation: !!resume.analysis_data.extractedInfo?.education,
-      missingNewFields,
-      willReanalyze: true  // FORCED TO TRUE - Always reanalyze for now
-    });
-    
-    console.log('📊 FULL extractedInfo.skills ARRAY:', JSON.stringify(resume.analysis_data.extractedInfo?.skills || [], null, 2));
-    console.log('📚 EDUCATION:', JSON.stringify(resume.analysis_data.extractedInfo?.education || 'none', null, 2));
-    console.log('🚀 PROJECTS:', JSON.stringify(resume.analysis_data.extractedInfo?.projects || 'none', null, 2));
-    
-    const needsReanalysis = true;  // FORCED TO TRUE - Always reanalyze for now
-
-    if (needsReanalysis) {
-      console.log('⚠️  Detected outdated analysis. Re-analyzing resume with enhanced parser...');
-      console.log(`   - Limited skills: ${hasLimitedSkills} (${resume.analysis_data.extractedInfo?.skills?.length || 0} skills found)`);
-      console.log(`   - Missing new fields: ${missingNewFields}`);
-      
-      // Get target level from stored analysis data or default to entry
-      const targetLevel = resume.analysis_data?.targetLevel || 'entry';
-      
-      const analysisService = (await import('../services/analysisService.js')).default;
-      const freshAnalysis = await analysisService.analyzeResume(resume.file_path, targetLevel);
-      
-      if (freshAnalysis.success) {
-        // Update the database with fresh analysis
-        await resumeModel.updateResumeStatus(resume.id, 'processed', freshAnalysis);
-        // Use fresh analysis for job matching
-        resume.analysis_data = freshAnalysis;
-        console.log('✅ Resume re-analyzed successfully!');
-        console.log(`   - Skills extracted: ${(freshAnalysis as any).extractedInfo?.skills?.length || 0}`);
-        console.log(`   - Projects found: ${(freshAnalysis as any).extractedInfo?.projects?.length || 0}`);
-        console.log(`   - Education entries: ${(freshAnalysis as any).extractedInfo?.education?.length || 0}`);
-      }
-    }
-
-    // Prepare filters
-    const filters: any = {};
-    if (location) filters.location = location as string;
-    if (keywords) filters.keywords = keywords as string;
-    if (days_posted) filters.days_posted = parseInt(days_posted as string);
-    if (min_match_score) filters.min_match_score = parseFloat(min_match_score as string);
-
-    console.log(`Generating recommendations for user ${userId} with filters:`, filters);
-    console.log(`Resume analysis structure:`, {
-      hasSkills: !!(resume.analysis_data.skills || resume.analysis_data.extractedInfo?.skills),
-      hasExtractedInfo: !!resume.analysis_data.extractedInfo,
-      extractedInfoSkills: resume.analysis_data.extractedInfo?.skills || 'none',  // Show ALL skills, not just first 3
-      extractedInfoSkillsCount: resume.analysis_data.extractedInfo?.skills?.length || 0,
-      topLevelKeys: Object.keys(resume.analysis_data)
-    });
-
-    // Get recommendations from Jooble
-    const recommendations = await joobleService.getRecommendedJobs(
-      userId,
-      resume.analysis_data,
-      filters
-    );
-
-    if (!recommendations.success) {
-      return res.status(400).json({
-        success: false,
-        message: recommendations.error || 'Failed to generate recommendations',
-        atsScore: recommendations.atsScore || 0,
-        totalJobs: 0,
-        recommendedJobs: 0,
-        recommendations: []
-      });
-    }
-
-    // Store recommendations in database
-    if (recommendations.recommendations && recommendations.recommendations.length > 0) {
-      await jobRecommendationService.storeRecommendations(
-        userId,
-        resume.id,
-        recommendations.recommendations
-      );
-    }
-
-    console.log(`\n📤 SENDING TO FRONTEND:`);
-    console.log(`   Total jobs found: ${recommendations.totalJobs}`);
-    console.log(`   Recommended jobs: ${recommendations.recommendedJobs}`);
-    console.log(`   Top 5 match scores: ${recommendations.recommendations.slice(0, 5).map((r: any) => r.matchScore).join(', ')}`);
-    
-    res.status(200).json({
-      success: true,
-      atsScore: recommendations.atsScore,
-      totalJobs: recommendations.totalJobs,
-      recommendedJobs: recommendations.recommendedJobs,
-      recommendations: recommendations.recommendations,
-      apiCallsUsed: recommendations.apiCallsUsed,
-      apiCallsRemaining: recommendations.apiCallsRemaining
-    });
-  } catch (error: any) {
-    console.error('Error getting recommendations:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error generating recommendations: ' + (error.message || 'Unknown error')
-    });
-  }
+router.get('/jobs/recommendations', authenticateToken, (_req, res) => {
+  // Legacy JWT/analysis scoring is deliberately retired: it cannot share the
+  // revocable v1 session boundary or persisted recommendation snapshots.
+  return res.status(410).json({
+    success: false,
+    code: 'RECOMMENDATIONS_MOVED',
+    message: 'Recommendations moved to /api/v1/recommendations. Sign in with a v1 session and create a persisted run.',
+    migrationPath: '/api/v1/recommendations',
+    recommendations: [],
+  });
 });
 
 /**
@@ -250,35 +118,7 @@ router.get('/jobs/recommendations', authenticateToken, async (req, res) => {
  * Get stored recommendations for user from database
  */
 router.get('/jobs/recommendations/stored', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user?.id;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not authenticated'
-      });
-    }
-
-    const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
-
-    const recommendations = await jobRecommendationService.getUserRecommendations(
-      userId,
-      limit
-    );
-
-    res.status(200).json({
-      success: true,
-      count: recommendations.length,
-      recommendations
-    });
-  } catch (error: any) {
-    console.error('Error fetching stored recommendations:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching recommendations: ' + (error.message || 'Unknown error')
-    });
-  }
+  return res.status(410).json({success:false,code:'RECOMMENDATIONS_MOVED',migrationPath:'/api/v1/recommendations',message:'Read persisted recommendations via /api/v1/recommendations/:id/results',recommendations:[]});
 });
 
 export default router;

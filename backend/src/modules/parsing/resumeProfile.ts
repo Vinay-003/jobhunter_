@@ -2,6 +2,9 @@ import { canonicalizeSections, type ParsedDocument } from './pdfParser.js';
 import { normalizeSkill } from './skillNormalizer.js';
 import { extractSkills } from './skillExtractor.js';
 import { buildDocumentBlocks, type DocumentBullet } from './documentBlocks.js';
+import { detectSeniority, type CanonicalSeniority } from '../jobs/seniority.js';
+
+export const PROFILE_VERSION = '5.1.0';
 
 export type ExperienceEntry = {
   title: string | null; company: string | null; startDate: string | null; endDate: string | null;
@@ -15,7 +18,8 @@ export type EducationEntry = {
 };
 export type ResumeProfile = {
   skills: string[]; skillsNormalized: string[]; education: EducationEntry[]; experience: ExperienceEntry[];
-  totalExperienceYears: number | null; seniority: 'junior' | 'mid' | 'senior' | 'lead' | null;
+  totalExperienceYears: number | null; seniority: CanonicalSeniority | 'junior' | 'lead' | null;
+  declaredSkills?: string[]; demonstratedSkills?: string[];
   contactSignals: { hasEmail: boolean; hasPhone: boolean; hasLinkedIn: boolean; hasGithub: boolean };
   summary: string | null; languages: string[];
   projects?: ExperienceEntry[]; leadership?: ExperienceEntry[];
@@ -120,18 +124,19 @@ export function buildResumeProfile(parsedDoc: ParsedDocument, evaluationDate = n
   const fullTime = unionMonths(experience.filter(e => e.kind === 'employment'), evaluationDate);
   const internship = unionMonths(experience.filter(e => e.kind === 'internship'), evaluationDate);
   // Tenure alone does not confer leadership scope; senior titles remain senior.
-  const seniority: ResumeProfile['seniority'] = years === null || years < 2 ? 'junior' : years < 5 ? 'mid'
-    : experience.some(entry => /\b(?:tech(?:nical)? lead|lead (?:software |platform )?engineer|engineering manager)\b/i.test(entry.title ?? '')) ? 'lead' : 'senior';
+  const seniority: ResumeProfile['seniority'] = [...experience].sort((a,b) => Number(b.isCurrent)-Number(a.isCurrent) || (parseMonth(b.endDate,evaluationDate) ?? 0) - (parseMonth(a.endDate,evaluationDate) ?? 0)).map(entry => detectSeniority(entry.title)).find(Boolean)
+    ?? (years === null || years < 2 ? (experience.some(entry => entry.kind === 'internship') ? 'intern' : 'entry') : years < 5 ? 'mid' : 'senior');
   const summary = (sections.summary ?? sections.objective ?? sections.profile)
     ?.replace(/^(?:summary|objective|profile)\s*:?\s*/i, '')
     .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '[email]')
     .replace(/(?:\+?\d[\d\s().-]{8,}\d)/g, '[phone]')
     .replace(/https?:\/\/\S+/gi, '[link]').trim() ?? null;
-  const skills = extractSkills(text);
+  const declaredSkills = extractSkills(Object.entries(sections).filter(([name]) => /^(?:skills|technical proficiencies|frameworks|tools|technologies|tech stack|expertise|key competencies)$/.test(name)).map(([, body]) => body).join('\n'));
+  const demonstratedSkills = extractSkills([...experience.map(entry => entry.description ?? ''), ...projects.map(entry => [entry.title, entry.description].filter(Boolean).join(' '))].join('\n'));
   const lower = text.toLowerCase();
   const langMatch = sections.languages?.match(/languages?\s*[:\-]?\s*([^\n]+)/i);
   return {
-    skills, skillsNormalized: skills.map(normalizeSkill), education: extractEducation(sections.education ?? '', evaluationDate),
+    skills: [...new Set([...declaredSkills, ...demonstratedSkills])], skillsNormalized: [...new Set([...declaredSkills, ...demonstratedSkills])].map(normalizeSkill), declaredSkills, demonstratedSkills, education: extractEducation(sections.education ?? '', evaluationDate),
     experience, projects, leadership, totalExperienceYears: years, employmentYears: fullTime === null ? null : Math.round(fullTime / 12 * 100) / 100,
     internshipYears: internship === null ? null : Math.round(internship / 12 * 100) / 100, seniority,
     contactSignals: { hasEmail: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(text), hasPhone: /(\+91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}|(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/i.test(text), hasLinkedIn: lower.includes('linkedin'), hasGithub: lower.includes('github') },

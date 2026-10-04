@@ -33,15 +33,15 @@ export type ParsedDocument = {
 
 const SECTION_HEADINGS = [
   'summary', 'objective', 'profile', 'education', 'experience', 'work experience', 'employment', 'employment history',
-  'skills', 'technical skills', 'projects', 'project', 'certifications', 'certificates', 'awards', 'achievements',
+  'skills', 'technical skills', 'technical proficiencies', 'frameworks', 'frameworks & databases', 'automation & cloud', 'platforms & apis', 'core cs', 'tools', 'technologies', 'tools and technologies', 'frameworks & libraries', 'technical toolkit', 'projects', 'project', 'selected projects', 'certifications', 'certificates', 'awards', 'achievements',
   'publications', 'languages', 'interests', 'references', 'leadership', 'activities', 'volunteer',
 ];
 
 const SECTION_ALIASES: Record<string, string> = {
-  'technical skills': 'skills', 'key skills': 'skills', 'core skills': 'skills',
+  'technical skills': 'skills', 'technical proficiencies': 'skills', 'frameworks': 'skills', 'frameworks & databases': 'skills', 'automation & cloud': 'skills', 'platforms & apis': 'skills', 'core cs': 'skills', tools: 'skills', technologies: 'skills', 'tools and technologies': 'skills', 'frameworks & libraries': 'skills', 'technical toolkit': 'skills', 'key skills': 'skills', 'core skills': 'skills',
   'work experience': 'experience', 'professional experience': 'experience',
   'employment history': 'experience', employment: 'experience', 'work history': 'experience',
-  project: 'projects', 'personal projects': 'projects', activities: 'leadership', volunteering: 'leadership',
+  project: 'projects', 'selected projects': 'projects', 'personal projects': 'projects', activities: 'leadership', volunteering: 'leadership',
   'volunteer experience': 'leadership', 'professional summary': 'summary',
 };
 /** Normalize whole section bodies, not just their keys; never combine different section families. */
@@ -79,11 +79,13 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function detectSections(normalizedText: string): Record<string, string> {
+export function detectSections(normalizedText: string): Record<string, string> {
   const sections: Record<string, string> = {};
   const synonymMap: Record<string, string> = {
     'work history': 'experience',
     'technical skills': 'skills',
+    'technical proficiencies': 'skills', frameworks: 'skills', 'frameworks & databases': 'skills', 'automation & cloud': 'skills', 'platforms & apis': 'skills', 'core cs': 'skills', tools: 'skills',
+    'selected projects': 'projects',
     'work experience': 'experience',
     employment: 'experience',
     project: 'projects',
@@ -133,7 +135,11 @@ function detectSections(normalizedText: string): Record<string, string> {
         }
       }
 
-      if (matched) candidates.push({ heading: matched, index: offset });
+       if (matched === 'languages' && candidates.at(-1)?.heading === 'skills') {
+         const remainder = line.replace(/^languages\s*:/i, '').trim();
+         if (/(?:python|java(?:script)?|typescript|c\+\+|c#|\bsql\b|ruby|php|golang|kotlin|swift|rust)/i.test(remainder)) matched = 'skills';
+       }
+       if (matched) candidates.push({ heading: matched, index: offset });
     }
     offset += rawLine.length + 1;
   }

@@ -38,7 +38,7 @@ describe('structured parsing evidence', () => {
   });
   it('uses bounded JD sections and treats at-least-one as a single OR requirement', () => {
     const jd = parseJd(`# Junior Developer\n## Role Overview\nCollaborate with senior engineers.\n## Responsibilities\n- Build reliable APIs.\n- Maintain services.\n## Required Qualifications\n- At least one of Python, Java or C++.\n## Preferred Qualifications\n- React is a plus.\n## Benefits\n- Free lunch.`);
-    expect(jd.seniority).toBe('junior');
+    expect(jd.seniority).toBe('entry');
     expect(jd.responsibilities).toEqual(['Build reliable APIs.', 'Maintain services.']);
     expect(jd.requirementGroups?.filter(g => g.required)).toHaveLength(1);
     expect(matchJd({ ...buildResumeProfile(doc), skillsNormalized: ['C++'], skills: ['C++'] }, jd).missingRequired).toEqual([]);

@@ -6,7 +6,7 @@ import { requireSession } from '../../middleware/requireSession.js';
 import { z } from 'zod';
 import { validate } from '../../middleware/validate.js';
 import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
-import { buildResumeProfile } from '../../modules/parsing/resumeProfile.js';
+import { buildResumeProfile, PROFILE_VERSION } from '../../modules/parsing/resumeProfile.js';
 import { uploadFile, deleteFile, downloadFile } from '../../modules/storage/supabaseStorage.js';
 
 const router = Router();
@@ -37,7 +37,7 @@ router.post('/', requireSession, upload.single('resume'), async (req:any,res)=>{
     catch { return res.status(422).json({ success:false, message:'Unreadable PDF document' }); }
     if (parsed.detectedAsScanned || !parsed.normalizedText?.trim()) return res.status(422).json({ success:false, message:'PDF has no readable text' });
     const pageCount = parsed.pages.length || 1;
-    const parserVersion = '4.0.0';
+    const parserVersion = PROFILE_VERSION;
 
     const storage = await uploadFile(userId, resumeId, buf, req.file.originalname);
 

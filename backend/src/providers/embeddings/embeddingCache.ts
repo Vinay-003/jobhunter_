@@ -7,6 +7,15 @@ export const EVIDENCE_BUILDER_VERSION = 'professional-evidence-v1';
 
 type Purpose = 'resume' | 'job' | 'jd';
 type Query = { query(sql: string, params: unknown[]): Promise<{ rows: any[] }> };
+// A recommendation run may contain hundreds of chunks. Never enqueue one
+// database connection request per chunk at once.
+async function boundedMap<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let start = 0; start < items.length; start += 4) {
+    out.push(...await Promise.all(items.slice(start, start + 4).map(fn)));
+  }
+  return out;
+}
 export type CacheIdentity = {
   purpose: Purpose; ownerId?: string; modelId: string; modelRevision: string;
   chunkerVersion?: string; evidenceBuilderVersion?: string;
@@ -45,7 +54,7 @@ export function embeddingCache(db: Query) {
       DO NOTHING`, [...params, vector.length, JSON.stringify(vector)]);
   }
   async function batch(items: CacheItem[]): Promise<(number[] | null)[]> {
-    return Promise.all(items.map(get));
+    return boundedMap(items, get);
   }
   return { get, set, batch };
 }
@@ -56,7 +65,18 @@ export async function embedCached(
   identity: { modelId: string; modelRevision: string } | null,
 ): Promise<{ groups: number[][][]; modelId: string; modelRevision: string | null; dimension: number }> {
   groups.forEach(validateScope);
-  const cache = embeddingCache(db);
+  let cacheAvailable = true;
+  const cache = embeddingCache({ query: async (sql, params) => {
+    if (!cacheAvailable) return { rows: [] };
+    try { return await db.query(sql, params); }
+    catch {
+      // Cache I/O is optional. Model identity/scope/vector validation above and
+      // below remains mandatory, and required result writes use the real DB.
+      if (cacheAvailable) console.warn('[embedding-cache] Database cache unavailable; using validated model inference');
+      cacheAvailable = false;
+      return { rows: [] };
+    }
+  } });
   const items = groups.flatMap(group => group.texts.map(text => ({ ...group, text, modelId: identity?.modelId ?? '', modelRevision: identity?.modelRevision ?? '' })));
   // Never look up an unpinned revision: an old vector might refer to a replaced model.
   const hits = identity ? await cache.batch(items) : items.map(() => null);
@@ -87,7 +107,7 @@ export async function embedCached(
     }
     // Persist only when the provider reports an immutable revision, never a guessed one.
     if (modelRevision) {
-      await Promise.all(missing.map(({ item, index }) => cache.set({ ...item, modelId, modelRevision: modelRevision! }, hits[index]!)));
+      await boundedMap(missing, ({ item, index }) => cache.set({ ...item, modelId, modelRevision: modelRevision! }, hits[index]!));
     }
   }
   const vectors = hits as number[][];

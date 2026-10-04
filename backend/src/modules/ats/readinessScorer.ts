@@ -24,7 +24,7 @@ import { extractSkills } from '../parsing/skillExtractor.js';
  *   5 Consistency & hygiene
  */
 
-export const VERSION = '4.0.0';
+export const VERSION = '4.1.0';
 
 export type RuleStatus = 'pass' | 'warn' | 'fail';
 export type Priority = 'high' | 'medium' | 'low';

@@ -21,6 +21,7 @@ export function professionalEvidence(profile: ResumeProfile): string[] {
     // Bullets are structured records, not strings. Preserve each evidence unit.
     const parts = entry.bullets?.length ? entry.bullets.map(b => b.text) : [entry.description ?? ''];
     for (const part of parts) {
+      if (!part.trim()) continue;
       const safe = redactProfessionalText(`${title} ${part}`).slice(0, 2000);
       if (safe && !/^(?:\[email removed\]|\[phone removed\]|\[profile link removed\]\s*)+$/i.test(safe)) chunks.push(safe);
     }

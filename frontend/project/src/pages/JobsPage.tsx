@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../lib/api';
+import { displayValue, safeText } from '../lib/display';
 import {
   ArrowUpRight,
   Briefcase,
@@ -21,6 +22,17 @@ import {
 } from 'lucide-react';
 
 type BreakdownItem = { label: string; value: number };
+type ScoreDetails = {
+  relevanceScore?: number;
+  seniorityPenalty?: number;
+  candidateSeniority?: string | null;
+  jobSeniority?: string | null;
+  semanticStatus?: 'embedded' | 'keyword-only';
+  scoreCap?: number | null;
+  scoreCapReasons?: string[];
+  skillEvidence?: Array<{ skill: string; source: 'demonstrated' | 'declared' | 'unverified' }>;
+  responsibilityMatches?: Array<{ responsibility: string; evidence: string | null; similarity?: number; rawCosine?: number; supported?: boolean }>;
+};
 
 type Job = {
   id?: string | number;
@@ -30,7 +42,9 @@ type Job = {
   location?: string;
   snippet?: string;
   description?: string;
-  salary?: string;
+  descriptionQuality?: 'full' | 'snippet' | 'unknown';
+  source?: string;
+  salary?: unknown;
   type?: string;
   link?: string;
   url?: string;
@@ -49,6 +63,7 @@ type Job = {
   eligibility?: { status: string; reasons?: string[] };
   workMode?: string;
   postedAt?: string;
+  scoreDetails?: ScoreDetails | null;
 };
 
 type Resume = { id: string; fileName?: string; file_name?: string };
@@ -65,32 +80,14 @@ type RawRecommendation = Partial<Job> & {
   matchEvidence?: string[]; work_mode?: string; posted_at?: string;
   reasons?: string[];
   breakdown?: BreakdownItem[] | Record<string, number>;
+  scoreDetails?: ScoreDetails | null;
 };
 type RecommendationResponse = {
   recommendations?: RawRecommendation[]; results?: RawRecommendation[];
   runId?: string; nextOffset?: number | null; returnedCount?: number;
+  sources?: Array<{ provider?: unknown; status?: unknown; cacheHit?: unknown; fetchedCount?: unknown; fallbackReason?: unknown; errorCode?: unknown; location?: unknown; page?: unknown }>;
+  rejectedReasons?: Record<string, number>;
 };
-
-function safeText(value?: string): string {
-  if (!value) return '';
-  return value
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function displayValue(value: unknown): string {
-  if (typeof value === 'string') return safeText(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (value && typeof value === 'object') return safeText(JSON.stringify(value));
-  return '';
-}
 
 function safeExternalUrl(value?: string) {
   if (!value) return null;
@@ -103,7 +100,8 @@ function safeExternalUrl(value?: string) {
 }
 
 function scoreOf(job: Job): number {
-  const raw = job.fitScore ?? job.matchScore ?? 0;
+  const candidate = job.fitScore ?? job.matchScore ?? 0;
+  const raw = typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : 0;
   return Math.max(0, Math.min(100, Math.round(raw)));
 }
 
@@ -141,6 +139,7 @@ function mapRecommendation(raw: RawRecommendation): Job {
     workMode: raw.workMode ?? raw.work_mode,
     postedAt: raw.postedAt ?? raw.posted_at,
     recommendationReasons: raw.recommendationReasons ?? raw.reasons,
+    scoreDetails: raw.scoreDetails ?? null,
   };
 }
 
@@ -175,8 +174,8 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
 
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[10px] text-slate-600">
              {job.location && <span className="flex items-center gap-1"><MapPin size={11} /> {displayValue(job.location)}</span>}
-            {job.jobLevel && <span className="flex items-center gap-1"><Briefcase size={11} /> {job.jobLevel}</span>}
-            {job.confidence && <span className="flex items-center gap-1"><Target size={11} /> {job.confidence} confidence</span>}
+             {displayValue(job.jobLevel) && <span className="flex items-center gap-1"><Briefcase size={11} /> {displayValue(job.jobLevel)}</span>}
+            {displayValue(job.confidence) && <span className="flex items-center gap-1"><Target size={11} /> {displayValue(job.confidence)} confidence</span>}
             {job.eligibility && <span>{job.eligibility.status === 'eligible' ? 'No confirmed barrier' : job.eligibility.status === 'uncertain' ? 'Qualifications unverified' : 'Eligibility barrier'}</span>}
           </div>
 
@@ -211,9 +210,9 @@ function JobDetail({ job }: { job: Job }) {
              <p className="mt-1 text-sm text-slate-500">{displayValue(job.company) || 'Company not listed'}</p>
             <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-600">
                {job.location && <span className="jh-chip"><MapPin size={11} className="mr-1" />{displayValue(job.location)}</span>}
-              {job.type && <span className="jh-chip">{job.type}</span>}
-              {job.workMode && <span className="jh-chip">{job.workMode}</span>}
-              {job.salary && job.salary !== 'Not specified' && <span className="jh-chip">{job.salary}</span>}
+              {displayValue(job.type) && <span className="jh-chip">{displayValue(job.type)}</span>}
+              {displayValue(job.workMode) && <span className="jh-chip">{displayValue(job.workMode)}</span>}
+              {displayValue(job.salary) && displayValue(job.salary) !== 'Not specified' && <span className="jh-chip break-words">{displayValue(job.salary)}</span>}
             </div>
           </div>
         </div>
@@ -246,6 +245,21 @@ function JobDetail({ job }: { job: Job }) {
         </div>
       )}
 
+      {job.scoreDetails && (job.scoreDetails.seniorityPenalty !== undefined || job.scoreDetails.scoreCap !== null && job.scoreDetails.scoreCap !== undefined || job.scoreDetails.scoreCapReasons?.length || job.scoreDetails.semanticStatus === 'keyword-only') && (
+        <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-4">
+          <p className="text-[11px] font-semibold text-amber-200">Scoring safeguards</p>
+          <div className="mt-2 space-y-1 text-[11px] leading-5 text-stone-500">
+            {job.scoreDetails.seniorityPenalty !== undefined && job.scoreDetails.seniorityPenalty !== 0 ? <p>Seniority adjustment: −{job.scoreDetails.seniorityPenalty} points ({displayValue(job.scoreDetails.candidateSeniority) || 'unknown'} candidate → {displayValue(job.scoreDetails.jobSeniority) || 'unknown'} role).</p> : null}
+            {job.scoreDetails.scoreCap !== null && job.scoreDetails.scoreCap !== undefined ? <p>Score capped at {job.scoreDetails.scoreCap}%.</p> : null}
+            {job.scoreDetails.scoreCapReasons?.length ? <p>Cap reasons: {job.scoreDetails.scoreCapReasons.map(displayValue).join('; ')}</p> : null}
+            {job.scoreDetails.semanticStatus === 'keyword-only' ? <p>Semantic model unavailable; this fit score uses limited keyword evidence.</p> : null}
+          </div>
+        </div>
+      )}
+
+      {job.scoreDetails?.skillEvidence?.length ? <div className="rounded-xl border border-white/[0.055] bg-black/10 p-4"><p className="text-[11px] font-semibold text-slate-300">Skill evidence</p><div className="mt-2 space-y-1 text-[11px] text-slate-500">{job.scoreDetails.skillEvidence.map((item, index) => <p key={`${displayValue(item.skill)}-${index}`}><span className="text-slate-300">{displayValue(item.skill)}</span>: {displayValue(item.source) || 'unavailable'}</p>)}</div></div> : null}
+      {job.scoreDetails?.responsibilityMatches?.length ? <div className="rounded-xl border border-white/[0.055] bg-black/10 p-4"><p className="text-[11px] font-semibold text-slate-300">Responsibility evidence</p><div className="mt-2 space-y-2 text-[11px] text-slate-500">{job.scoreDetails.responsibilityMatches.map((item, index) => <p key={`${displayValue(item.responsibility)}-${index}`}><span className="text-slate-300">{displayValue(item.responsibility)}</span>: {item.supported === undefined ? 'support unavailable' : item.supported ? 'supported' : 'not supported'}{item.evidence ? ` — ${displayValue(item.evidence)}` : ''}{typeof item.rawCosine === 'number' ? ` (raw cosine ${item.rawCosine.toFixed(2)})` : typeof item.similarity === 'number' ? ` (similarity ${item.similarity.toFixed(2)})` : ''}</p>)}</div></div> : null}
+
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.03] p-4">
           <div className="flex items-center gap-2 text-[11px] font-semibold text-emerald-200"><Check size={13} /> Matched skills</div>
@@ -273,7 +287,8 @@ function JobDetail({ job }: { job: Job }) {
 
       {description && (
         <div>
-          <p className="text-xs font-semibold text-slate-300">Job summary</p>
+          <p className="text-xs font-semibold text-slate-300">{job.descriptionQuality === 'snippet' ? 'API-provided job snippet' : 'Provider job description'}</p>
+          <p className="mt-1 text-[11px] text-stone-500">{job.source ? `Source: ${displayValue(job.source)}. ` : ''}{job.descriptionQuality === 'snippet' ? 'This is only an excerpt; omitted requirements cannot be verified.' : 'Provider-supplied text, not independent verification of the original posting.'} This text is retained with the recommendation.</p>
           <p className="mt-2 text-xs leading-6 text-slate-500">{description}</p>
         </div>
       )}
@@ -297,6 +312,8 @@ export default function JobsPage() {
   const [runId, setRunId] = useState<string | null>(null);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
+  const [sources, setSources] = useState<NonNullable<RecommendationResponse['sources']>>([]);
+  const [rejectedReasons, setRejectedReasons] = useState<Record<string, number>>({});
   const [loadingMore, setLoadingMore] = useState(false);
   const requestSequence = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
@@ -336,7 +353,7 @@ export default function JobsPage() {
     const controller = new AbortController();
     activeRequest.current = controller;
     const sequence = ++requestSequence.current;
-    setJobs([]); setRunId(null); setNextOffset(null); setTotal(0); setSelectedIndex(0);
+    setJobs([]); setRunId(null); setNextOffset(null); setTotal(0); setSelectedIndex(0); setSources([]); setRejectedReasons({});
     setError('');
      if (isRefresh) setRefreshing(true);
      else setLoading(true);
@@ -359,7 +376,7 @@ export default function JobsPage() {
       setJobs(mapped);
        setRunId(result?.runId ?? null);
        setNextOffset(result?.nextOffset ?? null);
-       setTotal(result?.returnedCount ?? mapped.length);
+       setTotal(result?.returnedCount ?? mapped.length); setSources(result?.sources ?? []); setRejectedReasons(result?.rejectedReasons ?? {});
       setSelectedIndex(0);
     } catch (err) {
       if (sequence === requestSequence.current && !controller.signal.aborted) setError(getApiErrorMessage(err));
@@ -411,14 +428,14 @@ export default function JobsPage() {
   };
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className="min-w-0 space-y-6 pb-10 [overflow-wrap:anywhere]">
       <section className="flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
         <div>
           <p className="jh-eyebrow"><Sparkles size={13} /> Role discovery</p>
           <h1 className="jh-title mt-3">Job Matches</h1>
           <p className="jh-subtitle mt-3">A dedicated workspace for opportunities ranked by evidence in your resume—not by generic health.</p>
           <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-stone-700 bg-stone-900/60 px-2.5 py-1 text-[11px] text-stone-500">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> SageMaker embeddings when EMBEDDING_PROVIDER=aws — mock only on fallback
+             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /> {jobs[0]?.scoreDetails?.semanticStatus === 'embedded' ? 'Semantic evidence enabled' : jobs[0]?.scoreDetails?.semanticStatus === 'keyword-only' ? 'Keyword-only evidence' : 'Evidence status unavailable'}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -427,7 +444,7 @@ export default function JobsPage() {
         </div>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 [&>div]:min-w-0">
         <div className="jh-surface p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Matches shown</p><p className="mt-2 text-2xl font-semibold text-white">{visibleJobs.length}</p><p className="mt-1 text-[10px] text-slate-600">{jobs.length} loaded of {total} stored; minimum fit {prefs.minScore}%</p></div>
         <div className="jh-surface p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Strong matches</p><p className="mt-2 text-2xl font-semibold text-emerald-200">{topMatches}</p><p className="mt-1 text-[10px] text-slate-600">75% fit or higher</p></div>
         <div className="jh-surface p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Resume source</p><p className="mt-2 truncate text-sm font-semibold text-white">{selectedResumeName || 'No resume selected'}</p><p className="mt-1 text-[10px] text-slate-600">change it in filters</p></div>
@@ -436,7 +453,7 @@ export default function JobsPage() {
       {showFilters && (
         <section className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.04] p-4 md:p-5">
           <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-xs font-semibold text-stone-300"><Filter size={14} className="text-amber-300" /> Search profile</div><button onClick={() => setShowFilters(false)} className="rounded-lg p-1.5 text-stone-500 hover:bg-white/5 hover:text-white"><X size={14} /></button></div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 [&>div]:min-w-0">
             <div><label className="text-[10px] font-medium text-slate-600">Resume</label><select value={selectedResume} onChange={(event) => setSelectedResume(event.target.value)} className="jh-input mt-1.5">{resumes.map((resume) => <option key={resume.id} value={resume.id} className="bg-[#0d1019]">{resume.fileName ?? resume.file_name ?? resume.id.slice(0, 8)}</option>)}</select></div>
             <div><label className="text-[10px] font-medium text-slate-600">Target role</label><input value={prefs.targetRole} onChange={(event) => setPrefs((current) => ({ ...current, targetRole: event.target.value }))} className="jh-input mt-1.5" placeholder="e.g. Backend Engineer" /></div>
             <div><label className="text-[10px] font-medium text-slate-600">Location</label><input value={prefs.location} onChange={(event) => setPrefs((current) => ({ ...current, location: event.target.value }))} className="jh-input mt-1.5" placeholder="India, Bengaluru, Remote" /></div>
@@ -450,6 +467,7 @@ export default function JobsPage() {
       )}
 
       {error && <div className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] p-4 text-xs text-rose-200">{error}</div>}
+      {(jobs.length > 0 || sources.length > 0 || Object.keys(rejectedReasons).length > 0) && <div className="rounded-2xl border border-white/[0.055] bg-white/[0.02] p-4 text-[11px] text-slate-500"><p className="font-semibold text-slate-300">Recommendation evidence</p>{sources.length > 0 ? <div className="mt-1 space-y-1">{sources.map((source, index) => <p key={`${displayValue(source.provider)}-${index}`} className="break-words"><span className="text-slate-300">{displayValue(source.provider) || 'Provider unavailable'}</span>: {displayValue(source.status) || 'status unavailable'} · {source.cacheHit === undefined ? 'cache unknown' : `cache ${displayValue(source.cacheHit)}`} · fetched {source.fetchedCount === undefined ? 'unknown' : displayValue(source.fetchedCount)}{displayValue(source.location) ? ` · ${displayValue(source.location)}` : ''}{displayValue(source.page) ? ` · page ${displayValue(source.page)}` : ''}{displayValue(source.fallbackReason) ? ` · fallback: ${displayValue(source.fallbackReason)}` : ''}{displayValue(source.errorCode) ? ` · error: ${displayValue(source.errorCode)}` : ''}</p>)}</div> : <p className="mt-1">Sources unavailable.</p>}{Object.keys(rejectedReasons).length > 0 && <p className="mt-1">Rejected: {Object.entries(rejectedReasons).map(([reason, count]) => `${displayValue(reason)} (${count})`).join(', ')}</p>}</div>}
 
       {loading ? (
         // Ranking can run 25–50 s behind provider scrapes + embeds — show a
@@ -479,11 +497,11 @@ export default function JobsPage() {
           <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-stone-800 text-stone-500"><Search size={23} /></span>
           <h2 className="mt-4 text-lg font-semibold text-white">No matches above your threshold</h2>
           <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-slate-500">Lower the minimum fit score, broaden the target role/location, or refresh the provider cache.</p>
-          <button onClick={() => setShowFilters(true)} className="jh-button-ghost mt-5">Adjust preferences</button>
+           <div className="mt-5 flex flex-wrap justify-center gap-2"><button onClick={() => setShowFilters(true)} className="jh-button-ghost">Adjust preferences</button>{nextOffset !== null && <button className="jh-button-ghost" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Loading…' : `Load more (${jobs.length} of ${total})`}</button>}</div>
         </div>
       ) : (
-        <section className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
-          <div className="jh-surface-strong p-3 xl:max-h-[calc(100vh-150px)] xl:overflow-y-auto jh-scrollbar">
+        <section className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+          <div className="jh-surface-strong min-w-0 p-3 xl:max-h-[calc(100vh-150px)] xl:overflow-y-auto jh-scrollbar">
              <div className="sticky top-0 z-10 mb-2 flex items-center justify-between rounded-xl bg-[#10131f]/95 px-2 py-2 backdrop-blur"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-600">Ranked opportunities</p><button onClick={copyMatches} className="flex items-center gap-1 text-[10px] text-amber-300 hover:text-amber-200" title="Copy match report as Markdown"><Copy size={12} /> Copy report</button></div>
             <div className="space-y-2.5">{visibleJobs.map((job, index) => <JobCard key={String(job.id ?? job.jobId ?? `${job.title}-${job.company}-${index}`)} job={job} active={index === selectedIndex} onSelect={() => setSelectedIndex(index)} />)}</div>
             {nextOffset !== null && <button className="jh-button-ghost mt-4 w-full" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Loading…' : `Load more (${jobs.length} of ${total})`}</button>}

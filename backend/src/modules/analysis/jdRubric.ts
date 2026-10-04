@@ -1,8 +1,9 @@
 import type { ResumeProfile } from '../parsing/resumeProfile.js';
 import type { ParsedJobDescription } from '../jd/jdParser.js';
 import type { JdMatchResult } from '../jd/matcher.js';
+import { normalizeSeniority, seniorityPenalty } from '../jobs/seniority.js';
 
-export const JD_RUBRIC_VERSION = '3.0.0';
+export const JD_RUBRIC_VERSION = '3.1.0';
 const round = (n: number) => Math.round(n);
 const tokenize = (s: string) => (s.toLowerCase().match(/[a-z][a-z+#.]*/g) ?? []);
 const roleFamily = (s: string) => {
@@ -49,7 +50,11 @@ export function scoreJdRubric(profile: ResumeProfile, jd: ParsedJobDescription, 
   const education = educationPossible && educationStatus === 'evidenced' ? 10 : 0;
   const minYears = jd.minYears ?? jd.yearsExperience;
   const years = profile.totalExperienceYears;
-  const seniorGap = (jd.seniority === 'senior' || jd.seniority === 'lead') && profile.seniority === 'junior';
+  const candidateLevel = normalizeSeniority(profile.seniority);
+  const jobLevel = normalizeSeniority(jd.seniority);
+  // Internship evidence can qualify for entry roles; title alone is not a
+  // barrier for that transition. Explicit advanced scope is a separate check.
+  const seniorGap = ['intern', 'entry'].includes(candidateLevel ?? '') && ['mid', 'senior', 'principal'].includes(jobLevel ?? '');
   const experienceGap = typeof minYears === 'number' && typeof years === 'number' && years < minYears;
   const missingQualification = (typeof minYears === 'number' && years === null) || (degreeRequested && educationStatus !== 'evidenced') || requiredCoverage === null || requiredCoverage < 1;
   const eligibility = experienceGap || seniorGap ? 'ineligible' : missingQualification ? 'uncertain' : 'eligible';
@@ -62,8 +67,13 @@ export function scoreJdRubric(profile: ResumeProfile, jd: ParsedJobDescription, 
     roleAlignment: !!rolePossible, domain: !!domainPossible, education: !!educationPossible };
   const pointsPossible = explicitPossible + responsibilityPossible + rolePossible + domainPossible + educationPossible;
   const rawScore = Object.values(breakdown).reduce((sum, n) => sum + n, 0);
-  const score = pointsPossible ? round(rawScore / pointsPossible * 100) : null;
-  return { score, rawScore, pointsPossible, weights, applicability, breakdown, eligibility,
+  // A title or generic role label is not substantive qualification evidence.
+  // Keep the score unavailable/limited rather than manufacturing 100/100.
+  const substantiveEvidence = Boolean(jd.requiredSkills.length || jd.preferredSkills.length || responsibilityCoverage.length || degreeRequested || domains.length);
+  const relevanceScore = pointsPossible && substantiveEvidence ? round(rawScore / pointsPossible * 100) : null;
+  const penalty = seniorityPenalty(candidateLevel, jobLevel);
+  const score = relevanceScore === null ? null : Math.max(0, relevanceScore - penalty);
+  return { score, rawScore, relevanceScore, seniorityPenalty: penalty, pointsPossible, weights, applicability, breakdown, eligibility,
     eligibilityChecks: { minimumProfessionalYears: { required: minYears ?? null, observed: years ?? null, status: experienceGap ? 'fail' : minYears == null ? 'not_applicable' : years == null ? 'uncertain' : 'pass' }, seniorScope: { required: jd.seniority, observed: profile.seniority, status: seniorGap ? 'fail' : jd.seniority == null ? 'uncertain' : jd.seniority === profile.seniority ? 'pass' : 'uncertain' }, education: educationStatus },
     qualificationReasons: reasons, evidenceCoverage, requiredCoverage, preferredCoverage, rubricVersion: JD_RUBRIC_VERSION };
 }

@@ -89,6 +89,8 @@ type Readiness = {
 
 type JdMatch = {
   score?: number | null;
+  relevanceScore?: number | null;
+  seniorityPenalty?: number;
   rawScore?: number;
   pointsPossible?: number;
   eligibility?: string;
@@ -300,6 +302,7 @@ function buildReportMarkdown(view: ViewModel): string {
     lines.push(`- JD title: ${j.jd?.title || 'n/a'}`);
     lines.push(`- Qualification: ${j.eligibility || 'unknown'}; ${j.qualificationReasons?.join('; ') || 'Requires independent verification'}`);
     lines.push(`- Raw points: ${j.rawScore ?? 'n/a'}/${j.pointsPossible ?? 'n/a'} applicable; rubric: ${view.versions?.rubricVersion || 'legacy'}`);
+    if (j.seniorityPenalty) lines.push(`- Seniority adjustment: -${j.seniorityPenalty}; pre-adjustment fit: ${j.relevanceScore ?? 'n/a'}`);
     lines.push(`- Confidence reasons: ${view.confidenceReasons?.join('; ') || '(none recorded)'}`);
     if (j.applicability) lines.push(`- Applicable components: ${Object.entries(j.applicability).filter(([, v]) => v).map(([k]) => k).sort().join(', ')}`);
   lines.push(`- Required coverage: ${d?.requiredCoverage !== undefined ? `${Math.round(d.requiredCoverage * 100)}%` : 'n/a'} | Explicit score: ${j.breakdown?.explicitMustHave ?? 'n/a'} | Semantic: ${j.breakdown?.responsibilitySemantic ?? 'n/a'}`);
@@ -583,6 +586,8 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
             <p className="mt-1 text-xs leading-5 text-stone-400">Technology similarity does not establish professional tenure, degree completion or senior engineering scope.</p>
             {!!view.jdMatch.qualificationReasons?.length && <ul className="mt-2 space-y-1 text-xs text-stone-300">{view.jdMatch.qualificationReasons.map(reason => <li key={reason}>• {reason}</li>)}</ul>}
             {view.jdMatch.pointsPossible !== undefined && <p className="mt-2 text-xs text-stone-400">{view.jdMatch.rawScore ?? '—'} / {view.jdMatch.pointsPossible} applicable points, normalized to a 100-point fit index.</p>}
+            {view.jdMatch.seniorityPenalty ? <p className="mt-2 text-xs text-amber-200">Seniority adjustment: −{view.jdMatch.seniorityPenalty} points from {view.jdMatch.relevanceScore ?? '—'} pre-adjustment fit. This index is not a hiring probability.</p> : null}
+            {view.jdMatch.score == null && <p className="mt-2 text-xs text-stone-400">Insufficient substantive requirement or responsibility evidence to calculate fit.</p>}
           </div>
           <p className="mt-3 text-[11px] text-slate-600">Embedding model: <span className="text-slate-300">{view.versions?.embeddingModelId || 'unknown'}</span>{view.versions?.embeddingStatus === 'real' ? ' (real embeddings)' : ' (semantic evidence unavailable)'} • Exact skill match is strict (PostgreSQL ≠ MySQL); family hints below are not scored.</p>
           {view.jdMatch.deterministic && (

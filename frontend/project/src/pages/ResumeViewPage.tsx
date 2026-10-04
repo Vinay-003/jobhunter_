@@ -64,9 +64,9 @@ function ResumeContextBar({
     <div className="flex flex-wrap items-center justify-between gap-3">
       <Link to="/app/resumes" className="jh-button-ghost"><ArrowLeft size={14} /> All resumes</Link>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="jh-chip" title={resume.sha256 ? `sha256 ${resume.sha256.slice(0, 12)}…` : undefined}>
+        <span className="jh-chip min-w-0 max-w-full" title={resume.sha256 ? `sha256 ${resume.sha256.slice(0, 12)}…` : undefined}>
           <FileText size={12} className="mr-1" />
-          {resume.fileName || 'resume'}{typeof resume.pageCount === 'number' ? ` • ${resume.pageCount} page${resume.pageCount === 1 ? '' : 's'}` : ''}
+           <span className="min-w-0 break-words">{resume.fileName || 'resume'}</span>{typeof resume.pageCount === 'number' ? ` • ${resume.pageCount} page${resume.pageCount === 1 ? '' : 's'}` : ''}
         </span>
         <button onClick={onDownload} disabled={downloading} className="jh-button-ghost disabled:opacity-50">
           {downloading ? <><Loader2 size={14} className="animate-spin" /> Preparing…</> : <><Download size={14} /> Download PDF</>}
@@ -194,7 +194,7 @@ export default function ResumeViewPage() {
         <div className="pointer-events-none absolute -left-20 -top-24 h-72 w-72 rounded-full bg-amber-500/10 blur-3xl" />
         <div className="relative">
           <p className="jh-eyebrow"><Sparkles size={13} /> Saved resume</p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-[-0.035em] text-white md:text-3xl">{resume.fileName || 'Your resume'}</h1>
+           <h1 className="mt-3 min-w-0 break-words text-2xl font-semibold tracking-[-0.035em] text-white md:text-3xl">{resume.fileName || 'Your resume'}</h1>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             {resume.uploadDate && <span className="jh-chip">Uploaded {new Date(resume.uploadDate).toLocaleString()}</span>}
             {resume.status && <span className="jh-chip">{resume.status}</span>}

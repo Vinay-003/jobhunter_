@@ -1,7 +1,8 @@
 import { extractSkills } from '../parsing/skillExtractor.js';
+import { detectSeniority, type CanonicalSeniority } from '../jobs/seniority.js';
 export type RequirementGroup = { allOf: string[]; anyOf: string[]; required: boolean; confidence: number; evidence: string; start: number; end: number };
 export type ParsedJobDescription = {
-  title: string | null; seniority: 'junior' | 'mid' | 'senior' | 'lead' | null;
+  title: string | null; seniority: CanonicalSeniority | 'junior' | 'lead' | null;
   requiredSkills: string[]; preferredSkills: string[]; responsibilities: string[];
   yearsExperience: number | null; minYears?: number | null; maxYears?: number | null;
   requirementGroups?: RequirementGroup[]; responsibilityEvidence?: Array<{ text: string; start: number; end: number; confidence: number }>;
@@ -9,10 +10,11 @@ export type ParsedJobDescription = {
 };
 const DOMAINS = ['fintech', 'healthcare', 'e-commerce', 'ecommerce', 'saas', 'cloud', 'ai', 'ml', 'machine learning', 'data', 'security', 'devops', 'blockchain', 'gaming', 'edtech'];
 const HEADINGS: Array<[RegExp, 'required' | 'preferred' | 'responsibilities' | 'other']> = [
-  [/^(?:key )?(?:responsibilities|duties|what you(?:'|’)?ll do|what you will do|the role|your role)$/i, 'responsibilities'],
+  [/^(?:key |job |primary )?(?:responsibilities|duties|what you(?:'|’)?ll do|what you will do|the role|your role|day.to.day|what you will be doing)$/i, 'responsibilities'],
   [/^(?:required|minimum|must.have|essential)(?: skills| qualifications| requirements| experience)?$/i, 'required'],
-  [/^(?:requirements|qualifications|technical skills)$/i, 'required'],
-  [/^(?:preferred|desired|nice.to.have|bonus)(?: skills| qualifications| requirements)?$/i, 'preferred'],
+  [/^core requirements(?: skills| qualifications| experience)?$/i, 'required'],
+  [/^(?:requirements|qualifications(?:\s*&\s*experience)?|qualifications\s+and\s+experience|technical skills|what you bring|who you are|your qualifications|what we(?:'|’)?re looking for)$/i, 'required'],
+  [/^(?:preferred|desired|nice.to.have|bonus|good to have|plus)(?: skills| qualifications| requirements)?$/i, 'preferred'],
 ];
 function heading(line: string): 'required' | 'preferred' | 'responsibilities' | 'other' | null {
   const normalized = line.trim().replace(/^#{1,6}\s*/, '').replace(/[:\s]+$/, '');
@@ -22,9 +24,21 @@ function heading(line: string): 'required' | 'preferred' | 'responsibilities' | 
   return null;
 }
 function yearRequirement(text: string): { min: number | null; max: number | null } {
-  const range = text.match(/\b(\d{1,2})\s*[-–—]\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\b/i);
+  // Only professional-tenure labels are evidence. Do not interpret company age,
+  // product age, or arbitrary "3-6 months" durations as candidate experience.
+  if (!/\b(?:experience|exp\.?|professional|industry|engineering)\b/i.test(text) || /\b(?:company|business|founded|established|since)\b/i.test(text)) return { min: null, max: null };
+  const bare = text.match(/\b(?:exp\.?|experience)\s*[:=-]?\s*(\d{1,2})\s*(?:[-–—]|to)\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\b/i)
+    ?? text.match(/\b(?:exp\.?|experience)\s*[:=-]?\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\b/i);
+  if (bare) {
+    const isRange = /(?:[-–—]|to)/i.test(bare[0]);
+    return { min: Number(bare[1]), max: isRange ? (bare[3] ? null : Number(bare[2])) : (bare[2] ? null : Number(bare[1])) };
+  }
+  const simpleRange = text.match(/\b(\d{1,2})\s*(?:[-–—]|to)\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\s*(?:of\s+)?(?:professional\s+)?(?:[a-z]+\s+){0,4}experience\b/i);
+  if (simpleRange) return { min: Number(simpleRange[1]), max: simpleRange[3] ? null : Number(simpleRange[2]) };
+  const range = text.match(/\b(\d{1,2})\s*[-–—]\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:[a-z]+\s+){0,5}experience\b/i);
   if (range) return { min: Number(range[1]), max: range[3] ? null : Number(range[2]) };
-  const single = text.match(/\b(\d{1,2})(\+)?\s*(?:years?|yrs?)\b(?:.{0,75}?\bexperience\b)?/i);
+  const single = text.match(/\b(\d{1,2})(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:[a-z]+\s+){0,5}(?:experience|engineering|software development)\b/i)
+    ?? text.match(/\b(\d{1,2})(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?experience\s+(?:in|with|as)\b/i);
   return single ? { min: Number(single[1]), max: single[2] ? null : Number(single[1]) } : { min: null, max: null };
 }
 export function parseJd(jdText: string): ParsedJobDescription {
@@ -33,7 +47,7 @@ export function parseJd(jdText: string): ParsedJobDescription {
   const first = lines[0]?.raw.replace(/^#+\s*/, '').trim() ?? '';
   const title = (explicit?.[1] ?? (first.length <= 100 && !/[.!?]\s/.test(first) ? first : '')).trim().slice(0, 120) || null;
   const levelText = title ?? '';
-  let seniority: ParsedJobDescription['seniority'] = /\b(?:staff|principal|lead|director|vp|avp)\b/i.test(levelText) ? 'lead' : /\bsenior\b/i.test(levelText) ? 'senior' : /\b(?:junior|entry(?:-level)?|graduate|intern|fresher)\b/i.test(levelText) ? 'junior' : /\b(?:mid|intermediate)\b/i.test(levelText) ? 'mid' : null;
+  const seniority: ParsedJobDescription['seniority'] = detectSeniority(levelText, jdText);
   let section: 'required' | 'preferred' | 'responsibilities' | 'other' = 'other';
   let explicitSections = false;
   const groups: RequirementGroup[] = [];
@@ -42,11 +56,11 @@ export function parseJd(jdText: string): ParsedJobDescription {
     const line = lines[index];
     const nextSection = heading(line.raw);
     if (nextSection) { section = nextSection; explicitSections = true; continue; }
-    const inline = line.raw.match(/^\s*(required|preferred)\s*:\s*(.+)$/i);
-    if (inline) section = inline[1].toLowerCase() as 'required' | 'preferred';
+    const inline = line.raw.match(/^\s*(required|must.have|minimum|essential|preferred|desired|nice.to.have|good.to.have|bonus)\s*:\s*(.+)$/i);
+    if (inline) section = /preferred|desired|nice|good|bonus/i.test(inline[1]) ? 'preferred' : 'required';
     const content = (inline?.[2] ?? line.raw).replace(/^\s*(?:[-*•◦▪]\s+|\d+[.)]\s+)/, '').trim();
     const isBullet = /^\s*(?:[-*•◦▪]\s+|\d+[.)]\s+)/.test(line.raw);
-    if (section === 'responsibilities' && isBullet && content.length > 10) {
+    if ((section === 'responsibilities' && (isBullet || /^(?:you will|design|build|develop|maintain|implement|collaborate|own)\b/i.test(content)) || /^(?:you will|you(?:'|’)ll|responsible for|in this role,? you will)\b/i.test(content)) && content.length > 10) {
       responsibilityEvidence.push({ text: content, start: line.start, end: line.end, confidence: 1 });
     }
     if (section !== 'required' && section !== 'preferred') continue;
@@ -62,10 +76,14 @@ export function parseJd(jdText: string): ParsedJobDescription {
       }
     }
     const groupedContent = [content, ...childLines.map(child => child.raw.replace(/^\s*(?:[-*•◦▪]\s+|\d+[.)]\s+)/, '').trim())].join('\n');
-    const skills = extractSkills(groupedContent);
-    if (!skills.length) continue;
-    const alternative = /\b(?:at least one(?: of)?|one or more|one of|either|any of|such as)\b/i.test(content) || (skills.length > 1 && /\s+or\s+/i.test(content));
-    groups.push({ allOf: alternative ? [] : skills, anyOf: alternative ? skills : [], required: section === 'required', confidence: isBullet || inline ? 1 : .7, evidence: groupedContent, start: line.start, end: childLines.at(-1)?.end ?? line.end });
+    const units = childLines.length ? [groupedContent] : groupedContent.split(/\s*;\s*|(?<=[.!?])\s+(?=[A-Z])/).filter(Boolean);
+    for (const unit of units) {
+      const found = [...new Set([...extractSkills(unit.replace(/\b(?:no|not|without|don't need|not required)\s+[\w.+#-]+(?:\s+required)?/gi, '')),
+        ...(['Chroma', 'Qdrant', 'Pinecone', 'pgvector'].filter(skill => new RegExp(`\\b${skill}\\b`, 'i').test(unit)) )])];
+      if (!found.length) continue;
+      const or = /\b(?:at least one(?: of)?|one or more|one of|either|any of|such as)\b/i.test(unit) || (found.length > 1 && /\s+or\s+/i.test(unit));
+      groups.push({ allOf: or ? [] : found, anyOf: or ? found : [], required: section === 'required', confidence: isBullet || inline ? 1 : .7, evidence: unit, start: line.start, end: childLines.at(-1)?.end ?? line.end });
+    }
     index += childLines.length;
   }
   if (!explicitSections && !groups.length) {
@@ -74,7 +92,8 @@ export function parseJd(jdText: string): ParsedJobDescription {
   }
   const requiredSkills = [...new Set(groups.filter(group => group.required).flatMap(group => [...group.allOf, ...group.anyOf]))];
   const preferredSkills = [...new Set(groups.filter(group => !group.required).flatMap(group => [...group.allOf, ...group.anyOf]))];
-  const years = yearRequirement(jdText);
+  const years = lines.filter(line => !/^\s*(?:preferred|desired|nice|bonus)/i.test(line.raw)).map(line => yearRequirement(line.raw)).find(year => year.min !== null)
+    ?? { min: null, max: null };
   return { title, seniority, requiredSkills, preferredSkills, responsibilities: responsibilityEvidence.map(item => item.text),
     responsibilityEvidence, requirementGroups: groups, yearsExperience: years.min, minYears: years.min, maxYears: years.max,
     domainTerms: DOMAINS.filter(term => new RegExp(`(?<![a-z])${term}(?![a-z])`, 'i').test(jdText)), rawText: jdText };

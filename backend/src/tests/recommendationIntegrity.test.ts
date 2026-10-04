@@ -23,9 +23,9 @@ describe('recommendation integrity', () => {
     expect(upsertJob(job(), { query: async () => ({ rows: [] }) })).rejects.toThrow('did not return an id');
   });
   test('title level ignores colleagues and school; role family excludes unrelated work', () => {
-    expect(detectJobSeniority('Junior Data Engineer', 'Work with senior managers leading teams')).toBe('junior');
+    expect(detectJobSeniority('Junior Data Engineer', 'Work with senior managers leading teams')).toBe('entry');
     expect(detectJobSeniority('Senior React Developer')).toBe('senior');
-    expect(detectJobSeniority('Software Engineer I', 'Senior Secondary School')).toBe('junior');
+    expect(detectJobSeniority('Software Engineer I', 'Senior Secondary School')).toBe('entry');
     expect(roleFamily('Remote Office Assistant')).toBe('other');
   });
   test('saved preferences merge with request and eligibility rejects explicit barriers', () => {

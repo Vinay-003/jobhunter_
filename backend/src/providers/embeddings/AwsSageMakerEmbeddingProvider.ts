@@ -27,7 +27,9 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
   }
 
   private hasAwsCreds(): boolean {
-    return Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY && env.AWS_SAGEMAKER_ENDPOINT_NAME && env.AWS_REGION);
+    // The SDK resolves environment, shared profiles and workload roles. Do not
+    // reject a valid CLI/workload identity merely because static keys are absent.
+    return Boolean(env.AWS_SAGEMAKER_ENDPOINT_NAME && env.AWS_REGION);
   }
 
   async embed(input: { texts: string[]; purpose: 'resume' | 'job' | 'jd' }): Promise<{ vectors: number[][]; modelId: string; dimension: number; modelRevision?: string | null }> {
@@ -71,16 +73,12 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
         throw new Error('AWS SDK not installed');
       }
       const { SageMakerRuntimeClient, InvokeEndpointCommand } = mod as {
-        SageMakerRuntimeClient: new (cfg: unknown) => { send: (cmd: unknown) => Promise<unknown> };
+        SageMakerRuntimeClient: new (cfg: unknown) => { send: (cmd: unknown, options?: { abortSignal: AbortSignal }) => Promise<unknown>; destroy: () => void };
         InvokeEndpointCommand: new (args: unknown) => unknown;
       };
 
       const client = new SageMakerRuntimeClient({
         region: env.AWS_REGION,
-        credentials: {
-          accessKeyId: env.AWS_ACCESS_KEY_ID!,
-          secretAccessKey: env.AWS_SECRET_ACCESS_KEY!,
-        },
       });
 
       const payload = JSON.stringify({ inputs: texts, purpose });
@@ -92,13 +90,11 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
         Body: Buffer.from(payload),
       });
 
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('SageMaker InvokeEndpoint timeout')), TIMEOUT_MS)
-      );
-
-      const resp = (await Promise.race([client.send(command), timeout])) as {
-        Body?: Uint8Array | Buffer;
-      };
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      let resp: { Body?: Uint8Array | Buffer };
+      try { resp = await client.send(command, { abortSignal: controller.signal }) as typeof resp; }
+      finally { clearTimeout(timeout); client.destroy(); }
 
       const bodyStr = Buffer.from(resp.Body as Uint8Array).toString('utf8');
       const parsed = JSON.parse(bodyStr) as { embeddings?: number[][]; vectors?: number[][]; dimension?: number };

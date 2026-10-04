@@ -26,7 +26,7 @@ export const CANONICAL_SKILL_ALIASES: Record<string, string> = {
   docker: 'Docker', kubernetes: 'Kubernetes', k8s: 'Kubernetes',
   aws: 'AWS', gcp: 'GCP', azure: 'Azure',
   git: 'Git', github: 'GitHub',
-  postman: 'Postman', linux: 'Linux',
+  postman: 'Postman', linux: 'Linux', supabase: 'Supabase', sagemaker: 'SageMaker', 'amazon sagemaker': 'SageMaker', drizzle: 'Drizzle', 'drizzle orm': 'Drizzle', oauth: 'OAuth', 'oauth 2.0': 'OAuth',
   playwright: 'Playwright', selenium: 'Selenium',
   // Web
   html: 'HTML', html5: 'HTML', css: 'CSS', css3: 'CSS',
@@ -44,6 +44,10 @@ export const CANONICAL_SKILL_ALIASES: Record<string, string> = {
   'operating systems': 'Operating Systems', 'computer networks': 'Computer Networks',
   'system design': 'System Design', 'distributed systems': 'Distributed Systems',
   'ci/cd': 'CI/CD', '.net': '.NET', 'spring boot': 'Spring Boot',
+  terraform: 'Terraform', kafka: 'Kafka', 'apache kafka': 'Kafka',
+  prometheus: 'Prometheus', grafana: 'Grafana', ansible: 'Ansible',
+  'github actions': 'GitHub Actions', 'gitlab ci': 'GitLab CI',
+  'pytorch': 'PyTorch', tensorflow: 'TensorFlow',
 };
 
 const aliasLowerMap = new Map<string, string>();

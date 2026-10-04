@@ -13,6 +13,27 @@ const identity = { modelId: 'model-a', modelRevision: 'revision-1' };
 const item = { purpose: 'resume' as const, ownerId: '9f110114-77f0-467a-80e0-56c6b32b64f7', text: 'project evidence', ...identity };
 
 describe('persistent embedding cache', () => {
+  test('cache read/write outages do not disable validated inference', async () => {
+    const provider = { embed: async ({ texts }: { texts: string[]; purpose: 'resume' | 'job' | 'jd' }) => ({ vectors: texts.map(() => [0.6, 0.8]), dimension: 2, ...identity }) };
+    for (const failRead of [true, false]) {
+      let calls = 0;
+      const db = { query: async (sql: string) => {
+        calls++;
+        if (failRead || sql.startsWith('INSERT')) throw new Error('Connection terminated unexpectedly');
+        return { rows: [] };
+      } };
+      const result = await embedCached(db, provider, [{ purpose: 'resume', ownerId: item.ownerId, texts: [item.text] }], identity);
+      expect(result.groups).toEqual([[[0.6, 0.8]]]);
+      expect(result.modelRevision).toBe(identity.modelRevision);
+      expect(calls).toBeLessThanOrEqual(2);
+    }
+  });
+  test('large cache batches keep database concurrency bounded', async () => {
+    let active = 0, maximum = 0;
+    const db = { query: async () => { active++; maximum = Math.max(maximum, active); await new Promise(resolve => setTimeout(resolve, 1)); active--; return { rows: [] }; } };
+    await embeddingCache(db).batch(Array.from({ length: 50 }, (_, i) => ({ ...item, text: `evidence-${i}` })));
+    expect(maximum).toBeLessThanOrEqual(4);
+  });
   test('hit, owner isolation, and key invalidation', async () => {
     const cache = embeddingCache(memoryDb());
     expect(await cache.get(item)).toBeNull();

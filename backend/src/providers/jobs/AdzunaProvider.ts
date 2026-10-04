@@ -12,6 +12,7 @@ import { reserveDailyCall } from './providerBudgets.js';
  */
 
 const TIMEOUT_MS = 15000;
+const SUPPORTED_COUNTRIES = new Set(['at', 'au', 'be', 'br', 'ca', 'ch', 'de', 'es', 'fr', 'gb', 'in', 'it', 'mx', 'nl', 'nz', 'pl', 'sg', 'us', 'za']);
 
 type AdzunaJob = {
   id?: string;
@@ -37,7 +38,7 @@ export class AdzunaProvider implements JobProvider {
   constructor(opts?: { appId?: string; appKey?: string; country?: string }) {
     this.appId = opts?.appId ?? (env as any).ADZUNA_APP_ID;
     this.appKey = opts?.appKey ?? (env as any).ADZUNA_APP_KEY;
-    this.country = opts?.country ?? (env as any).ADZUNA_COUNTRY ?? 'in';
+    this.country = String(opts?.country ?? (env as any).ADZUNA_COUNTRY ?? 'in').trim().toLowerCase();
     this.perPage = Number((env as any).ADZUNA_RESULTS_PER_PAGE ?? 15);
     this.budget = Number((env as any).ADZUNA_CALL_BUDGET ?? 100);
   }
@@ -48,6 +49,11 @@ export class AdzunaProvider implements JobProvider {
 
   async searchResult(query: JobSearchQuery): Promise<ProviderSearchResult> {
 
+    const country = String(query.country ?? this.country).trim().toLowerCase();
+    if (!SUPPORTED_COUNTRIES.has(country)) {
+      return this.fallbackResult(query, 'error', 'ADZUNA_UNSUPPORTED_COUNTRY');
+    }
+
     if (!this.appId || !this.appKey) {
       console.warn('[AdzunaProvider] no creds — skipping (set ADZUNA_APP_ID/ADZUNA_APP_KEY)');
       return this.fallbackResult(query, 'unavailable');
@@ -57,7 +63,6 @@ export class AdzunaProvider implements JobProvider {
       return this.fallbackResult(query, 'budgetLimited');
     }
     try {
-      const country = query.country || this.country;
       const url = `https://api.adzuna.com/v1/api/jobs/${encodeURIComponent(country)}/search/${Math.max(1, Math.min(10, query.page ?? 1))}`;
       console.log(`[AdzunaProvider] searching keywords="${query.keywords}" location="${query.location ?? ''}" country=${country} page=${query.page ?? 1}`);
       const resp = await axios.get<{ results?: AdzunaJob[] }>(url, {
@@ -66,6 +71,7 @@ export class AdzunaProvider implements JobProvider {
         params: {
           app_id: this.appId,
           app_key: this.appKey,
+          'content-type': 'application/json',
           results_per_page: Math.max(1, Math.min(50, query.limit ?? this.perPage)),
           what: query.keywords,
           where: query.location ?? '',
@@ -75,17 +81,19 @@ export class AdzunaProvider implements JobProvider {
       const jobs = (resp.data?.results ?? []).map((j) => this.normalize(j)).filter((j): j is NormalizedJob => j !== null);
       console.log(`[AdzunaProvider] returned ${jobs.length} jobs for "${query.keywords}"`);
       await storeJobsToDb(jobs).catch(() => {});
-      if (!jobs.length) return this.fallbackResult(query, 'empty');
+      if (!jobs.length) return { jobs: [], status: 'empty', fallbackReason: 'empty' };
       return { jobs, status: 'ok' };
     } catch (err) {
-      console.warn('[AdzunaProvider] request failed, falling back to DB:', (err as Error).message);
-      return this.fallbackResult(query, 'error');
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      const errorCode = status ? `ADZUNA_HTTP_${status}` : 'ADZUNA_REQUEST_FAILED';
+      console.warn('[AdzunaProvider] request failed, falling back to DB');
+      return this.fallbackResult(query, 'error', errorCode);
     }
   }
 
-  private async fallbackResult(query: JobSearchQuery, reason: 'empty' | 'error' | 'budgetLimited' | 'unavailable'): Promise<ProviderSearchResult> {
+  private async fallbackResult(query: JobSearchQuery, reason: 'empty' | 'error' | 'budgetLimited' | 'unavailable', errorCode?: string): Promise<ProviderSearchResult> {
     const jobs = await searchJobsFromDb(query.keywords).then(rows => markFallback(rows, 'adzuna')).catch(() => [] as NormalizedJob[]);
-    return { jobs, status: jobs.length ? 'fallback' : reason, fallbackReason: reason, ...(['error', 'unavailable'].includes(reason) ? { errorCode: 'PROVIDER_UNAVAILABLE' } : {}) };
+    return { jobs, status: jobs.length ? 'fallback' : reason, fallbackReason: reason, ...(['error', 'unavailable'].includes(reason) ? { errorCode: errorCode ?? 'PROVIDER_UNAVAILABLE' } : {}) };
   }
 
   private normalize(j: AdzunaJob): NormalizedJob | null {
@@ -93,7 +101,7 @@ export class AdzunaProvider implements JobProvider {
     const company = j.company?.display_name?.trim();
     if (!title || !company) return null;
     const salary =
-      j.salary_min || j.salary_max
+      j.salary_min != null || j.salary_max != null
         ? { min: j.salary_min ?? null, max: j.salary_max ?? null, currency: j.salary_currency ?? null }
         : null;
     return {
@@ -107,7 +115,7 @@ export class AdzunaProvider implements JobProvider {
       salary,
       postedAt: j.created && Number.isFinite(new Date(j.created).getTime()) ? new Date(j.created).toISOString() : null,
       workMode: null,
-      descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
+      descriptionQuality: j.description ? 'snippet' : 'unknown',
       retrieval: { status: 'live', requestedProvider: 'adzuna' },
     };
   }

@@ -12,6 +12,7 @@ export type SkillMatch = {
   required: boolean;
   present: boolean;
 };
+export const JD_MATCHER_VERSION = '2.1.0';
 
 export type JdMatchResult = {
   overallScore: number; // 0-100
@@ -109,10 +110,10 @@ export function matchJd(profile: ResumeProfile, jd: ParsedJobDescription): JdMat
 
   // Also factor seniority mismatch as warning not score (explicit strict skill only)
   const matchedRequired = requiredMatches.filter((m) => m.present).map((m) => m.skill);
-  const missingRequired = requiredGroups.filter(group => !group.present).flatMap(group => group.group.filter(skill => !profileSet.has(skill.toLowerCase())));
+  const missingRequired = [...new Set(requiredGroups.filter(group => !group.present).flatMap(group => group.group.filter(skill => !profileSet.has(skill.toLowerCase())).map(normalizeSkill)))];
   // A satisfied OR group cannot turn its other alternatives into missing must-haves.
   const matchedPreferred = preferredMatches.filter((m) => m.present).map((m) => m.skill);
-  const missingPreferred = preferredGroups.filter(group => !group.present).flatMap(group => group.group.filter(skill => !profileSet.has(skill.toLowerCase())));
+  const missingPreferred = [...new Set(preferredGroups.filter(group => !group.present).flatMap(group => group.group.filter(skill => !profileSet.has(skill.toLowerCase())).map(normalizeSkill)))];
 
   // Partial / family hints: JD skill missing exactly but resume has same-family skill.
   // Display-only — does not change score.

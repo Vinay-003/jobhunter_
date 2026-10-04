@@ -29,10 +29,10 @@ describe('audit regressions: factual parsing and explainable scoring', () => {
     expect(parseJd('Developer\n3–5 years experience.').yearsExperience).toBe(3);
   });
   it('does not treat a manager or employer leading as candidate seniority', () => {
-    expect(detectJobSeniority('Junior Software Engineer', 'Join a leading company and collaborate with product managers.')).toBe('junior');
+    expect(detectJobSeniority('Junior Software Engineer', 'Join a leading company and collaborate with product managers.')).toBe('entry');
   });
   it('does not promote a junior job because it mentions senior coworkers', () => {
-    expect(parseJd('Junior Developer\nCollaborate with senior engineers.').seniority).toBe('junior');
+    expect(parseJd('Junior Developer\nCollaborate with senior engineers.').seniority).toBe('entry');
   });
   it('counts internship months, not the editorial club year', () => {
     const profile = buildResumeProfile(document());

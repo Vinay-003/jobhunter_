@@ -17,6 +17,8 @@ if (!connectionString) {
 // Enable SSL for hosted providers like Supabase (adjust if self-hosted)
 const pool = new Pool({
   connectionString,
+  connectionTimeoutMillis: 10000,
+  query_timeout: 30000,
   ssl: process.env.PG_SSL?.toLowerCase() === 'true' || connectionString.includes('supabase')
     ? { rejectUnauthorized: false }
     : undefined
@@ -24,12 +26,17 @@ const pool = new Pool({
 
 // Test the connection
 pool.connect()
-  .then(() => {
+  .then(client => {
+    client.release();
     console.log('Successfully connected to PostgreSQL database!');
   })
   .catch(err => {
     console.error('Error connecting to the database:', err);
     process.exit(1);
   });
+
+// Idle hosted connections may be closed by the pooler. Let pg replace them;
+// active query failures still propagate to their caller.
+pool.on('error', () => console.warn('[database] Idle connection closed; pool will reconnect'));
 
 export default pool;

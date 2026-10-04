@@ -1,6 +1,7 @@
 import type { ResumeProfile } from '../parsing/resumeProfile.js';
+import { normalizeSeniority } from './seniority.js';
 
-export const VERSION = '2.0.0';
+export const VERSION = '3.0.0';
 
 export type JobPreferences = {
   target_roles?: string[] | null;
@@ -38,12 +39,21 @@ export class JobQueryPlanner {
       this.normalizeList(preferences?.excluded_roles ?? preferences?.excludedRoles ?? null).map((s) => s.toLowerCase()),
     );
     const profileSkills = profile?.skills?.slice(0, 8) ?? [];
-    const fallbackRoles = ['Software Engineer', 'Developer'];
+    const professionalTitles = [...(profile?.experience ?? []), ...(profile?.projects ?? [])].map(entry => entry.title ?? '').join(' ');
+    const inferred = /\b(?:frontend|front.end|react|ui)\b/i.test(professionalTitles) ? 'Frontend Engineer'
+      : /\b(?:backend|back.end|api)\b/i.test(professionalTitles) ? 'Backend Engineer'
+      : /\b(?:data|machine learning|ml)\b/i.test(professionalTitles) ? 'Data Engineer'
+      : /\b(?:devops|platform|cloud)\b/i.test(professionalTitles) ? 'Platform Engineer'
+      : /\b(?:full.stack|fullstack)\b/i.test(professionalTitles) ? 'Full Stack Engineer'
+      : profileSkills.some(skill => /react|vue|angular/i.test(skill)) ? 'Frontend Engineer'
+      : profileSkills.some(skill => /node|express|java/i.test(skill)) ? 'Backend Engineer' : 'Software Engineer';
+    const fallbackRoles = [inferred, 'Software Engineer', 'Developer'];
 
     const baseRoles = targetRoles.length ? targetRoles : fallbackRoles;
     // Filter excluded
-    const filteredRoles = baseRoles.filter((r) => !excluded.has(r.toLowerCase()));
-    const roles = filteredRoles.length ? filteredRoles : fallbackRoles.filter((r) => !excluded.has(r.toLowerCase()));
+    const allowed = (role: string) => ![...excluded].some(term => role.toLowerCase().includes(term) || term.includes(role.toLowerCase()));
+    const filteredRoles = baseRoles.filter(allowed);
+    const roles = filteredRoles.length ? filteredRoles : fallbackRoles.filter(allowed);
     if (!roles.length) return [];
 
     // Build skill-augmented queries without concatenating all skills.
@@ -63,7 +73,8 @@ export class JobQueryPlanner {
     const skillB = skillPool[1];
     const skillC = skillPool[2];
 
-    const isJunior = profile?.seniority === 'junior';
+    const requestedSeniority = this.normalizeList(preferences?.seniority ?? null).map(normalizeSeniority);
+    const isJunior = requestedSeniority.includes('entry') || requestedSeniority.includes('intern') || (!requestedSeniority.length && ['entry', 'intern'].includes(normalizeSeniority(profile?.seniority) ?? ''));
     const queries: PlannedQuery[] = [];
 
     // Query 1: primary role alone (broad recall)
@@ -86,7 +97,7 @@ export class JobQueryPlanner {
     }
     // Query 4: fresher/entry variant for juniors, skill combo otherwise
     if (queries.length < 4 && isJunior && (skillB ?? skillA)) {
-      queries.push({ keywords: `Fresher ${skillB ?? skillA} Developer` });
+      queries.push({ keywords: `New Grad ${roles[0]} ${skillB ?? skillA}` });
     } else if (queries.length < 4 && skillC) {
       const role = roles.length > 1 ? roles[1] : roles[0] ?? 'Software Engineer';
       queries.push({ keywords: `${role} ${skillC}` });
@@ -112,20 +123,20 @@ export class JobQueryPlanner {
 
     // Ensure 3-4 queries: if fewer than 3, pad with variants
     while (deduped.length < 3) {
-      const extraSkill = skillPool[deduped.length] ?? 'Developer';
+      const extraSkill = skillPool[deduped.length] ?? '';
       const role = roles[deduped.length % roles.length] ?? 'Software Engineer';
-      const kw = `${role} ${extraSkill}`;
+      const kw = `${role} ${extraSkill || (isJunior ? 'Entry Level' : 'Jobs')}`;
       if (!seen.has(kw.toLowerCase())) {
         seen.add(kw.toLowerCase());
         deduped.push({ keywords: kw });
       } else {
-        deduped.push({ keywords: `${role} Engineer` });
+        deduped.push({ keywords: `${role} ${isJunior ? 'New Grad' : 'Jobs'}` });
         break;
       }
       if (deduped.length >= 4) break;
     }
 
-    return deduped.slice(0, 4);
+    return deduped.filter(q => ![...excluded].some(term => q.keywords.toLowerCase().includes(term))).slice(0, 4);
   }
 
   private normalizeList(arr: string[] | null | undefined): string[] {

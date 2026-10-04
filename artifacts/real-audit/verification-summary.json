@@ -1,0 +1,58 @@
+{
+  "checks": {
+    "round3": {
+      "passed": 31,
+      "failed": 0,
+      "browserErrors": 0
+    },
+    "final-aws": {
+      "passed": 31,
+      "failed": 0,
+      "browserErrors": 0
+    }
+  },
+  "jdComparisons": [
+    {
+      "case": 1,
+      "localScore": 71,
+      "awsScore": 71,
+      "sameBreakdown": true,
+      "sameQualification": true,
+      "awsModel": "anass1209/resume-job-matcher-all-MiniLM-L6-v2",
+      "awsStatus": "real",
+      "awsDimension": 384,
+      "awsUsedMock": false
+    },
+    {
+      "case": 4,
+      "localScore": 0,
+      "awsScore": 0,
+      "sameBreakdown": true,
+      "sameQualification": true,
+      "awsModel": "anass1209/resume-job-matcher-all-MiniLM-L6-v2",
+      "awsStatus": "real",
+      "awsDimension": 384,
+      "awsUsedMock": false
+    },
+    {
+      "case": 6,
+      "localScore": null,
+      "awsScore": null,
+      "sameBreakdown": true,
+      "sameQualification": true,
+      "awsModel": null,
+      "awsStatus": "unavailable",
+      "awsDimension": null,
+      "awsUsedMock": false
+    }
+  ],
+  "recommendationComparison": {
+    "localCount": 12,
+    "awsCount": 12,
+    "sameJobSet": true,
+    "scoreDeltas": []
+  },
+  "freshAwsRun": true,
+  "realSupabase": true,
+  "deployed": false
+}

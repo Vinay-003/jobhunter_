@@ -6,8 +6,10 @@ import type { NormalizedJob } from './JobProvider.js';
 export function stripHtml(html: string | null | undefined): string | null {
   if (!html) return null;
   return String(html)
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<li\b[^>]*>/gi, '\n- ')
+    .replace(/<\/(?:p|div|h[1-6]|li|ul|ol|section|article|tr)\s*>/gi, '\n')
     .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
@@ -15,7 +17,8 @@ export function stripHtml(html: string | null | undefined): string | null {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ *\n(?:\s*\n)* */g, '\n')
     .trim()
     .slice(0, 8000) || null;
 }
@@ -53,16 +56,23 @@ export function canonicalJobUrl(value: string | null | undefined): string | null
 export function deduplicateJobs(jobs: NormalizedJob[]): NormalizedJob[] {
   const byIdentity = new Map<string, NormalizedJob>();
   const bySignature = new Map<string,string>();
+  const normalized = (text: unknown) => String(text ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  const comparable = (job: NormalizedJob) => normalized(stripHtml(job.description));
   for (const job of jobs) {
     const url = canonicalJobUrl(job.url);
     const signature = [job.title,job.company,job.location].map((text) => String(text ?? '').toLowerCase().replace(/\s+/g,' ').trim()).join('|');
     const signatureKey = job.company && job.location && (job.description?.length ?? 0) > 100 ? `${signature}|${crypto.createHash('sha256').update(stripHtml(job.description) ?? '').digest('hex')}` : '';
-    const key = (signatureKey && bySignature.get(signatureKey)) || (url ? `url:${url}` : `${job.source}:${job.externalId}`);
+    const overlapping = [...byIdentity.entries()].find(([, prior]) => {
+      if (normalized(prior.title) !== normalized(job.title) || normalized(prior.company) !== normalized(job.company) || normalized(prior.location) !== normalized(job.location) || !normalized(job.location)) return false;
+      const a = comparable(prior), b = comparable(job);
+      return a.length >= 100 && b.length >= 100 && (a.includes(b) || b.includes(a));
+    })?.[0];
+    const key = (signatureKey && bySignature.get(signatureKey)) || overlapping || (url ? `url:${url}` : `${job.source}:${job.externalId}`);
     const existing = byIdentity.get(key);
     if (!existing) { byIdentity.set(key, { ...job, canonicalUrl: url, provenance: [{ source: job.source, externalId: job.externalId }] }); if (signatureKey) bySignature.set(signatureKey,key); continue; }
     const provenance = [...(existing.provenance ?? []), { source: job.source, externalId: job.externalId }];
     const richer = (job.description?.length ?? 0) > (existing.description?.length ?? 0) ? job : existing;
-    byIdentity.set(key, { ...richer, provenance, canonicalUrl: url });
+    byIdentity.set(key, { ...richer, provenance, canonicalUrl: canonicalJobUrl(richer.url) });
   }
   return [...byIdentity.values()];
 }
@@ -100,10 +110,10 @@ export async function searchJobsFromDb(keywords: string, limit = 20): Promise<No
   const like = `%${kw.split(/\s+/).join('%')}%`;
   const { rows } = await pool.query<{
     source: string; external_id: string; title: string; company: string; location: string | null;
-    description: string | null; url: string | null; salary: unknown;
+    description: string | null; description_quality: 'full' | 'snippet' | 'unknown' | null; url: string | null; salary: unknown;
     posted_at: string | null; work_mode: string | null;
   }>(
-    `SELECT source, external_id, title, company, location, description, url, salary, posted_at, work_mode
+    `SELECT source, external_id, title, company, location, description, description_quality, url, salary, posted_at, work_mode
      FROM jobs WHERE title ILIKE $1 OR description ILIKE $1 ORDER BY fetched_at DESC LIMIT $2`,
     [like, limit],
   );
@@ -114,6 +124,7 @@ export async function searchJobsFromDb(keywords: string, limit = 20): Promise<No
     company: r.company,
     location: r.location,
     description: r.description,
+    descriptionQuality: r.description_quality ?? 'unknown',
     url: r.url,
     salary: r.salary,
     postedAt: r.posted_at,

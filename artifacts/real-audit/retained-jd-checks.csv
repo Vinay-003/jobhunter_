@@ -1,0 +1,16 @@
+rank,title,source,description_quality,characters,exact_snapshot_match,normalized_jobs_table_match,exact_provider_cache_match,review
+1,AI / GenAI Software Engineer (Junior / Associate),jobspipe,full,1872,true,true,not_available,Substantive provider responsibilities and requirements retained
+2,Junior Software Developer - .NET Core / C#,jobspipe,full,3760,true,true,not_available,Substantive provider requirements retained; full eligibility not independently confirmed
+3,Software Developer (Bosch Group),jobspipe,full,1625,true,true,not_available,Bare 4 to 8 has no units; Embedded C/Autosar specialization needs manual review
+4,Software Engineer (Navtech),adzuna,snippet,500,true,true,true,Mostly company introduction; omitted qualifications unavailable; uncertain
+5,HCL Commerce Developer,jooble,snippet,295,true,true,true,Excerpt only; original posting unverified; uncertain
+6,Software Engineer - Java/APIGateway(Apigee),jooble,snippet,297,true,true,true,Mostly company introduction; qualifications unavailable; uncertain
+7,Software Engineer - Java Spring Boot,jooble,snippet,297,true,true,true,Excerpt only; original posting unverified; uncertain
+8,Software Engineer(Intern)- Backend,jooble,snippet,295,true,true,true,Some responsibilities retained but qualifications incomplete; uncertain
+9,Software Developer (Bosch),jobspipe,full,1699,true,true,not_available,Bare 4 to 8 has no units; Embedded C/Autosar specialization and location need manual review
+10,Software Engineer (Fortanix),adzuna,snippet,500,true,true,true,Company introduction omits role requirements; uncertain
+11,Software Engineer I,jooble,snippet,295,true,true,true,Excerpt only; original posting unverified; uncertain
+12,Software Engineer I,jooble,snippet,294,true,true,true,Excerpt only; original posting unverified; uncertain
+13,Software Engineer - 1,jooble,snippet,292,true,true,true,Excerpt only; original posting unverified; uncertain
+14,AI Engineer,jooble,snippet,343,true,true,true,Excerpt only; original posting unverified; uncertain
+15,Software Engineer - Intern (Frontend),jooble,snippet,297,true,true,true,One-year internship duration is not a professional-tenure requirement; incomplete qualifications; uncertain

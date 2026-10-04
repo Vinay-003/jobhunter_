@@ -5,7 +5,7 @@ import pool from '../../config/database.js';
 import { validate } from '../../middleware/validate.js';
 import { requireSession as authenticateAny } from '../../middleware/requireSession.js';
 import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
-import { buildResumeProfile } from '../../modules/parsing/resumeProfile.js';
+import { buildResumeProfile, PROFILE_VERSION } from '../../modules/parsing/resumeProfile.js';
 import { scoreReadiness, VERSION as SCORER_VERSION } from '../../modules/ats/readinessScorer.js';
 import { parseJd } from '../../modules/jd/jdParser.js';
 import { matchJd } from '../../modules/jd/matcher.js';
@@ -21,7 +21,7 @@ import { analysisSnapshot, REPORT_SCHEMA_VERSION, type ReportSnapshot } from '..
 
 const router = Router();
 
-const PARSER_VERSION='4.0.0';
+const PARSER_VERSION=PROFILE_VERSION;
 const JD_MATCHER_VERSION=JD_RUBRIC_VERSION;
 function hashProfile(profile: unknown) { return crypto.createHash('sha256').update(JSON.stringify(profile)).digest('hex'); }
 function saveSnapshot(snapshot: ReportSnapshot) { return JSON.stringify(snapshot); }
@@ -137,7 +137,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     const jd = parseJd(jobDescription);
     // deterministic match
     const deterministic = matchJd(profile, jd);
-    const resumeChunks = professionalEvidence(profile);
+    const resumeChunks = professionalEvidence({ ...profile, skills: [] });
     const jdChunks = [...jd.responsibilities.map((s: string) => s.slice(0, 400))];
     if (!resumeChunks.length || !jdChunks.length) {
       // A missing evidence source is not permission to embed contact/header text.
@@ -194,7 +194,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
         if (s>best){ best=s; bestChunk=rc; }
       }
       const score = Math.max(0, Math.min(1, best));
-      return { responsibility: resp, matchScore: Number(score.toFixed(3)), candidateEvidence: bestChunk ? bestChunk.slice(0,200) : null };
+      return { responsibility: resp, matchScore: Number(score.toFixed(3)), candidateEvidence: bestChunk && score >= 0.45 ? bestChunk.slice(0,200) : null };
     });
     const rubric = scoreJdRubric(profile, jd, deterministic, responsibilityCoverage);
     const confidenceReasons = [embeddingStatus !== 'real' ? 'Semantic model unavailable; responsibility score is not inferred' : null,

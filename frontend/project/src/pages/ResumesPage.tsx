@@ -113,7 +113,7 @@ export default function ResumesPage() {
                     <FileText size={16} className="text-amber-300" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-stone-100 truncate">{name}</p>
+                     <p className="min-w-0 break-words text-sm font-medium text-stone-100">{name}</p>
                     <p className="text-xs text-stone-500">
                       {date ? new Date(date).toLocaleString() : ''} {r.status ? `• ${r.status}` : ''}
                     </p>
