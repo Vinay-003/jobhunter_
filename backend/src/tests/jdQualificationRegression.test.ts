@@ -31,7 +31,7 @@ describe('JD qualification regressions', () => {
     const j = job('Software Engineer: Workday Integration Tech Dev', 'Exp:6+ Years');
     expect(eligibleJob(j, 'intern', prefs, { totalExperienceYears: .33 }).status).toBe('ineligible');
     const thin = job('Software Engineer', 'A team building enterprise integrations.');
-    expect(eligibleJob(thin, 'intern', prefs, candidate).status).toBe('uncertain');
+    expect(eligibleJob(thin, 'intern', {...prefs,includeUnknownDates:true}, candidate).status).toBe('uncertain');
     expect(matchJd(candidate, parseJd(`Job title: ${thin.title}\n${thin.description}`)).missingRequired).toEqual([]);
     const jd = parseJd(`Role: Software Engineer\nExp:6+ Years`);
     expect(scoreJdRubric(candidate, jd, matchJd(candidate, jd), []).score).toBeNull();

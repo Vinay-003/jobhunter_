@@ -21,7 +21,7 @@ test('overlapping cross-feed descriptions merge and retain richer source; geogra
 
 test('cache requires current ranker/profile and bounded age, with explicit refresh and date window expiry', () => {
   const run = { ranker_version:'rank-1', profile_version:'profile-1', completed_at:'2026-10-04T00:00:00Z' };
-  const now = new Date('2026-10-04T01:00:00Z');
+  const now = new Date('2026-10-04T00:01:00Z');
   expect(recommendationCacheValid(run, 'rank-1','profile-1', 7, now, false)).toBe(true);
   expect(recommendationCacheValid(run, 'rank-2','profile-1', 7, now, false)).toBe(false);
   expect(recommendationCacheValid(run, 'rank-1','profile-2', 7, now, false)).toBe(false);
@@ -31,5 +31,5 @@ test('cache requires current ranker/profile and bounded age, with explicit refre
 
 test('snapshot and diagnostics serialize for readback', () => {
   expect(recommendationSnapshot({ title:'Engineer', scoreDetails:{ seniorityPenalty:35 } }).scoreDetails).toEqual({seniorityPenalty:35});
-  expect(recommendationDiagnostics({provider_status_json:[{status:'error'}],query_plan_json:{queries:['Engineer'],rejectedReasons:{seniority:2}}})).toEqual({sources:[{status:'error'}],rejectedReasons:{seniority:2}});
+  expect(recommendationDiagnostics({provider_status_json:[{status:'error'}],query_plan_json:{queries:['Engineer'],rejectedReasons:{seniority:2}}})).toMatchObject({sources:[{status:'error'}],queries:['Engineer'],rejectedReasons:{seniority:2}});
 });

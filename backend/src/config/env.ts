@@ -17,6 +17,8 @@ const envSchema = z.object({
   JOOBLE_MAX_QUERIES_PER_REFRESH: z.coerce.number().default(4),
   JOOBLE_CALL_BUDGET: z.coerce.number().default(450),
   JOB_PROVIDERS: z.string().default('jooble,jobspipe,adzuna,remotive,arbeitnow'),
+  APINEX_API_KEY: z.string().optional(),
+  APINEX_ROLE_MODEL: z.literal('free/gpt-6-luna').default('free/gpt-6-luna'),
   ADZUNA_APP_ID: z.string().optional(),
   ADZUNA_APP_KEY: z.string().optional(),
   ADZUNA_COUNTRY: z.string().default('in'),

@@ -72,7 +72,7 @@ export function deduplicateJobs(jobs: NormalizedJob[]): NormalizedJob[] {
     if (!existing) { byIdentity.set(key, { ...job, canonicalUrl: url, provenance: [{ source: job.source, externalId: job.externalId }] }); if (signatureKey) bySignature.set(signatureKey,key); continue; }
     const provenance = [...(existing.provenance ?? []), { source: job.source, externalId: job.externalId }];
     const richer = (job.description?.length ?? 0) > (existing.description?.length ?? 0) ? job : existing;
-    byIdentity.set(key, { ...richer, provenance, canonicalUrl: canonicalJobUrl(richer.url) });
+    byIdentity.set(key, { ...richer, provenance: [...new Map(provenance.map(p => [`${p.source}:${p.externalId}`, p])).values()], foundByTitles: [...new Set([...(existing.foundByTitles ?? []), ...(job.foundByTitles ?? [])])], canonicalUrl: canonicalJobUrl(richer.url) });
   }
   return [...byIdentity.values()];
 }
@@ -111,9 +111,9 @@ export async function searchJobsFromDb(keywords: string, limit = 20): Promise<No
   const { rows } = await pool.query<{
     source: string; external_id: string; title: string; company: string; location: string | null;
     description: string | null; description_quality: 'full' | 'snippet' | 'unknown' | null; url: string | null; salary: unknown;
-    posted_at: string | null; work_mode: string | null;
+    posted_at: string | null; work_mode: string | null; fetched_at?: string;
   }>(
-    `SELECT source, external_id, title, company, location, description, description_quality, url, salary, posted_at, work_mode
+    `SELECT source, external_id, title, company, location, description, description_quality, url, salary, posted_at, work_mode, fetched_at
      FROM jobs WHERE title ILIKE $1 OR description ILIKE $1 ORDER BY fetched_at DESC LIMIT $2`,
     [like, limit],
   );
@@ -127,7 +127,10 @@ export async function searchJobsFromDb(keywords: string, limit = 20): Promise<No
     descriptionQuality: r.description_quality ?? 'unknown',
     url: r.url,
     salary: r.salary,
-    postedAt: r.posted_at,
+    postedAt: r.source === 'jooble' ? null : r.posted_at,
+    updatedAt: r.source === 'jooble' ? r.posted_at : null,
+    dateSource: r.source === 'jooble' ? 'updated' : r.posted_at ? 'posted' : 'unknown',
+    lastFetchedAt: r.fetched_at ?? null,
     workMode: r.work_mode,
   }));
 }

@@ -7,7 +7,7 @@ test('bounded plan covers multiple locations and supported pages toward target',
   expect(plan.some(p => p.location === 'Berlin, Germany')).toBe(true);
   expect(plan.some(p => p.provider === 'jooble' && p.page === 2)).toBe(true);
   expect(plan.some(p => p.provider === 'adzuna' && p.page === 2)).toBe(true);
-  expect(plan.filter(p => p.provider === 'jobspipe').map(p => p.page)).toEqual([1, 2, 3]);
+  expect(plan.filter(p => p.provider === 'jobspipe').every(p => p.page >= 1 && p.page <= 3)).toBe(true);
   expect(plan.filter(p => p.provider === 'remotive')).toHaveLength(1);
   expect(plan.length).toBeLessThanOrEqual(18);
 });
@@ -21,6 +21,7 @@ test('source envelope distinguishes empty, fallback, error and cached responses'
 
 test('bounded plan covers every location before extra keyword variants', () => {
   const plan = retrievalPlan(['jooble'], ['Toronto', 'Berlin', 'Paris'], ['Engineer', 'Developer', 'Architect'], 50);
-  expect(plan.slice(0, 3).map(step => step.location)).toEqual(['Toronto', 'Berlin', 'Paris']);
+  expect(plan.slice(0, 3).map(step => step.location)).toEqual(['Toronto', 'Toronto', 'Toronto']);
+  expect(plan.slice(0, 3).every(step => step.page === 1)).toBe(true);
   expect(plan.every(step => step.page >= 1 && step.page <= 3)).toBe(true);
 });

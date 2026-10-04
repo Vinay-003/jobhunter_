@@ -91,7 +91,10 @@ export class JoobleProvider implements JobProvider {
       description: j.snippet ? String(j.snippet) : null,
       url: j.link ? String(j.link) : null,
       salary: j.salary ? { raw: String(j.salary) } : null,
-       postedAt: j.updated && Number.isFinite(new Date(String(j.updated)).getTime()) ? new Date(String(j.updated)).toISOString() : null,
+        // Jooble's `updated` is feed freshness, not the employer's posting date.
+        postedAt: null,
+        updatedAt: j.updated && Number.isFinite(new Date(String(j.updated)).getTime()) ? new Date(String(j.updated)).toISOString() : null,
+        dateSource: 'unknown',
        workMode: j.type && /\b(remote|hybrid|onsite|on-site)\b/i.test(String(j.type)) ? String(j.type).toLowerCase() : null,
        descriptionQuality: 'snippet',
        retrieval: { status: 'live', requestedProvider: 'jooble' },

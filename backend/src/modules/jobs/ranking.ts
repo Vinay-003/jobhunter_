@@ -15,8 +15,9 @@ import pool from '../../config/database.js';
 import { env } from '../../config/env.js';
 import { detectSeniority, normalizeSeniority, seniorityPenalty } from './seniority.js';
 import { inferCountry, normalizePlace } from './geography.js';
+import { roleArea, profileRoleAreas } from './roleDiscovery.js';
 
-export const VERSION = '4.1.0';
+export const VERSION = '5.0.0';
 
 export function roleFamily(title: string): 'software' | 'data' | 'other' {
   if (/\b(?:software|developer|frontend|front.end|backend|back.end|full.stack|web|react|javascript|typescript|swe|sde|programmer|devops)\b/i.test(title)) return 'software';
@@ -57,7 +58,7 @@ export type RankResult = {
   matchedSkills?: string[];
   missingSkills?: string[];
   confidence?: string;
-  scoreDetails?: { relevanceScore: number; seniorityPenalty: number; candidateSeniority: string | null; jobSeniority: string | null; semanticStatus: 'embedded' | 'keyword-only'; responsibilityMatches: Array<{ responsibility: string; evidence: string | null; similarity: number; rawCosine: number; supported: boolean }>; scoreCap: number | null; scoreCapReasons: string[]; skillEvidence: Array<{skill:string;source:'demonstrated'|'declared'|'unverified'}> };
+  scoreDetails?: { relevanceScore: number; seniorityPenalty: number; candidateSeniority: string | null; jobSeniority: string | null; semanticStatus: 'embedded' | 'keyword-only'; responsibilityMatches: Array<{ responsibility: string; evidence: string | null; similarity: number; rawCosine: number; supported: boolean }>; scoreCap: number | null; scoreCapReasons: string[]; skillEvidence: Array<{skill:string;source:'demonstrated'|'declared'|'unverified'}>; components: Array<{key:string;label:string;points:number;maxPoints:number;reason:string}> };
 };
 
 function normalizeSkillSet(skills: string[]): Set<string> {
@@ -206,9 +207,9 @@ export async function rankJobsBatch(
        if (structured) {
         const match = matchJd(profile, parsed);
         requiredSkillScore = Math.round(match.overallScore / 100 * (job.descriptionQuality === 'full' ? 30 : 18));
-        matchedSkills = [...match.matchedRequired, ...match.matchedPreferred];
+         matchedSkills = [...new Set([...match.matchedRequired, ...match.matchedPreferred].map(s => normalizeSkill(s)))];
          missingSkills = match.missingRequired;
-         [...matchedSkills, ...missingSkills].forEach(skill => skillEvidence.push({ skill: display(skill), source: demonstrated.has(normalizeSkill(skill).toLowerCase()) ? 'demonstrated' : declared.has(normalizeSkill(skill).toLowerCase()) ? 'declared' : 'unverified' }));
+         [...new Set([...matchedSkills, ...missingSkills])].forEach(skill => skillEvidence.push({ skill: display(skill), source: demonstrated.has(normalizeSkill(skill).toLowerCase()) ? 'demonstrated' : declared.has(normalizeSkill(skill).toLowerCase()) ? 'declared' : 'unverified' }));
         evidence.push(`Structured requirement coverage ${Math.round(match.requiredCoverage * 100)}%; alternatives are grouped`);
       } else if (jobSkills.length === 0) {
          requiredSkillScore = 0;
@@ -254,17 +255,12 @@ export async function rankJobsBatch(
     let roleTitle = 0;
     {
        const family = roleFamily(job.title);
-       const roleText = `${profile.experience.map(e => e.title ?? '').join(' ')} ${profile.projects?.map(e => e.title ?? '').join(' ')}`;
        const target = opts?.preferences?.targetRoles ?? [];
-       const area = (s: string) => /\b(data|machine learning|ml)\b/i.test(s) ? 'data' : /\b(frontend|front.end|react|ui)\b/i.test(s) ? 'frontend' : /\b(backend|back.end|api|server)\b/i.test(s) ? 'backend' : /\b(devops|platform|cloud)\b/i.test(s) ? 'platform' : /\b(full.stack|fullstack)\b/i.test(s) ? 'fullstack' : /\b(software|developer|engineer|web)\b/i.test(s) ? 'generic' : 'other';
-       const actual = area(job.title), demonstrated = area(roleText), desired = target.map(area);
-       const skills = normalizeSkillSet([...profile.skills, ...(opts?.preferences?.emphasizedSkills ?? [])]);
-       const specialized = actual !== 'generic' && actual !== 'other';
-       const skillRelevant = actual === 'frontend' ? ['react', 'vue.js', 'angular', 'html'].some(s => skills.has(s)) : actual === 'backend' ? ['node.js', 'express', 'python', 'java'].some(s => skills.has(s)) : false;
-       const compatible = actual === demonstrated || (actual === 'generic' && demonstrated !== 'other') || (specialized && demonstrated === 'fullstack') || (specialized && skillRelevant);
-       const targeted = !desired.length || desired.includes(actual) || desired.includes('generic') && actual === 'generic' || desired.includes('fullstack') && actual !== 'data';
-       roleTitle = family === 'other' || !compatible || !targeted ? 0 : actual === demonstrated ? 15 : 9;
-       evidence.push(`Role ${actual}: ${roleTitle ? 'supported by professional titles or relevant skills' : 'specialization not demonstrated or outside target roles'}`);
+       const actual=roleArea(job.title),areas=profileRoleAreas(profile),desired=target.map(roleArea);
+       const compatible=areas.has(actual)||(actual==='generic'&&areas.size>0);
+       const targeted=!desired.length||desired.includes(actual)||desired.includes('generic')||desired.includes('fullstack')&&['backend','frontend'].includes(actual);
+       roleTitle=family==='other'||!compatible||!targeted?0:actual==='generic'?9:areas.has('fullstack')&&actual!=='fullstack'?12:15;
+       evidence.push(`Role ${actual}: ${roleTitle?`supported by demonstrated ${[...areas].join(', ')} work; ${areas.has('fullstack')&&actual!=='fullstack'?'partial specialization of full-stack evidence':'direct role evidence'}`:'specialization not demonstrated or outside target roles'}`);
     }
 
     // 4) Seniority 15
@@ -273,12 +269,12 @@ export async function rankJobsBatch(
     const profileSen = normalizeSeniority(profile.seniority);
     {
       const seniorityOrder = ['intern', 'entry', 'mid', 'senior', 'principal'];
-      if (!profileSen || !jobSen) {
-        seniority = 8;
-        evidence.push('Level: unknown — partial (no penalty)');
-      } else if (profileSen === jobSen) {
+       if (!profileSen || !jobSen) {
+         seniority = 0;
+         evidence.push('Level: unknown — compatibility not assumed');
+      } else if (seniorityOrder.indexOf(profileSen) >= seniorityOrder.indexOf(jobSen)) {
         seniority = 15;
-        evidence.push(`Level match: ${profileSen} = ${jobSen} (no penalty)`);
+        evidence.push(`Level ${profileSen} meets ${jobSen}; no downward penalty`);
       } else {
         const diff = Math.abs(seniorityOrder.indexOf(profileSen) - seniorityOrder.indexOf(jobSen));
         seniority = diff === 1 ? 8 : diff === 2 ? 3 : 0;
@@ -309,7 +305,7 @@ export async function rankJobsBatch(
     let location = 0;
     {
       const prefLocs = opts?.preferences?.locations?.map((s) => s.toLowerCase()) ?? [];
-      if (!prefLocs.length || !job.location) location = 3;
+      if (!prefLocs.length || !job.location) { location = 0; evidence.push('Location eligibility unknown; no compatibility points'); }
       else {
         const { points, note } = locationScore(prefLocs, job.location, job.workMode);
         location = points;
@@ -317,7 +313,7 @@ export async function rankJobsBatch(
       }
     }
 
-    const breakdown: RankBreakdown = {
+     const breakdown: RankBreakdown = {
       requiredSkill: requiredSkillScore,
       responsibilitySemantic,
       roleTitle,
@@ -328,12 +324,22 @@ export async function rankJobsBatch(
     const relevanceScore = Object.values(breakdown).reduce((s, v) => s + v, 0);
     const penalty = seniorityPenalty(profileSen, jobSen);
      let fitScore = Math.max(0, Math.min(100, relevanceScore - penalty));
-     const scoreCapReasons: string[] = [];
-     const scoreCap = (profileSen === 'entry' || profileSen === 'intern') && (jobSen === 'senior' || jobSen === 'principal') ? (jobSen === 'principal' ? 25 : 35) : null;
+      const scoreCapReasons: string[] = [];
+     let scoreCap = (profileSen === 'entry' || profileSen === 'intern') && (jobSen === 'senior' || jobSen === 'principal') ? (jobSen === 'principal' ? 25 : 35) : null;
      if (scoreCap !== null) { fitScore = Math.min(fitScore, scoreCap); scoreCapReasons.push(`${jobSen === 'principal' ? 'Principal' : 'Senior'} role exceeds entry-level profile`); }
     if (penalty) evidence.push(`Seniority mismatch: -${penalty} points (${profileSen} → ${jobSen}); eligibility assessed separately`);
     const thin = !job.description || job.description.length < 120 || !resumeChunks.length;
-    if (thin) fitScore = Math.min(fitScore, 55);
+     if (thin) { scoreCap=Math.min(scoreCap??100,55);fitScore = Math.min(fitScore, scoreCap); scoreCapReasons.push('Thin job or profile evidence caps score at 55'); }
+     matchedSkills=[...new Set(matchedSkills.map(normalizeSkill))];missingSkills=[...new Set(missingSkills.map(normalizeSkill))];
+     if(!skillEvidence.length) for(const skill of [...matchedSkills,...missingSkills]) skillEvidence.push({skill,source:normalizeSkillSet((profile as any).demonstratedSkills??[]).has(skill.toLowerCase())?'demonstrated':normalizeSkillSet((profile as any).declaredSkills??profile.skills).has(skill.toLowerCase())?'declared':'unverified'});
+     const components = [
+       {key:'requiredSkill',label:'Required skills',points:requiredSkillScore,maxPoints:30,reason:evidence.find(x=>/skill|requirement/i.test(x)) ?? 'No requirement evidence'},
+       {key:'responsibilitySemantic',label:'Responsibilities',points:responsibilitySemantic,maxPoints:25,reason:evidence.find(x=>/responsibility|keyword-only/i.test(x)) ?? 'No responsibility evidence'},
+       {key:'roleTitle',label:'Role alignment',points:roleTitle,maxPoints:15,reason:evidence.find(x=>x.startsWith('Role ')) ?? 'No role alignment'},
+       {key:'seniority',label:'Seniority',points:seniority,maxPoints:15,reason:evidence.find(x=>x.startsWith('Level')||x.startsWith('Seniority')) ?? 'Unknown seniority'},
+       {key:'domainEducation',label:'Education',points:domainEducation,maxPoints:10,reason:evidence.find(x=>x.includes('education')||x.includes('degree')) ?? 'No education requirement'},
+       {key:'location',label:'Location',points:location,maxPoints:5,reason:evidence.find(x=>x.includes('Location')||x.includes('Remote')) ?? 'Unknown location'},
+     ];
     return {
       fitScore,
       breakdown,
@@ -343,7 +349,7 @@ export async function rankJobsBatch(
       matchedSkills,
        missingSkills,
         confidence: !thin && vec.size && job.descriptionQuality === 'full' && responsibilityMatches.length ? 'Medium' : 'Low',
-         scoreDetails: { relevanceScore, seniorityPenalty: penalty, candidateSeniority: profileSen, jobSeniority: jobSen, semanticStatus: vec.size ? 'embedded' : 'keyword-only', responsibilityMatches, scoreCap, scoreCapReasons, skillEvidence },
+          scoreDetails: { relevanceScore, seniorityPenalty: penalty, candidateSeniority: profileSen, jobSeniority: jobSen, semanticStatus: vec.size ? 'embedded' : 'keyword-only', responsibilityMatches, scoreCap, scoreCapReasons, skillEvidence, components },
     };
   });
 }

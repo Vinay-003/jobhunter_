@@ -34,7 +34,8 @@ describe('recommendation integrity', () => {
     expect(prefs.workModes).toEqual(['onsite']);
     expect(eligibleJob(job({ title: 'Senior React Developer' }), 'junior', prefs).status).toBe('ineligible');
     expect(eligibleJob(job({ description: 'Remote US and Canada residents only' }), 'junior', prefs).status).toBe('ineligible');
-    expect(eligibleJob(job({ postedAt: null, workMode: 'onsite' }), 'junior', { ...prefs, daysPosted: 1 }).status).toBe('uncertain');
+    expect(eligibleJob(job({ postedAt: null, workMode: 'onsite' }), 'junior', { ...prefs, daysPosted: 1 }).status).toBe('ineligible');
+    expect(eligibleJob(job({ postedAt: null, workMode: 'onsite' }), 'junior', { ...prefs, daysPosted: 1, includeUnknownDates:true }).status).toBe('uncertain');
   });
   test('minimum professional years and completed-degree evidence stay separate from fit', () => {
     const prefs = effectivePreferences({ locations: ['India'] }, {});
@@ -47,7 +48,8 @@ describe('recommendation integrity', () => {
   });
   test('remote residency never implies worldwide eligibility', () => {
     const india = effectivePreferences({ locations: ['India'] }, {});
-    expect(eligibleJob(job({ location: 'Remote', workMode: 'remote' }), 'junior', india).status).toBe('uncertain');
+    expect(eligibleJob(job({ location: 'Remote', workMode: 'remote' }), 'junior', india).status).toBe('ineligible');
+    expect(eligibleJob(job({ location: 'Remote', workMode: 'remote' }), 'junior', {...india,includeUnknownLocations:true}).status).toBe('uncertain');
     expect(eligibleJob(job({ location: 'Remote — US only', workMode: 'remote' }), 'junior', india).status).toBe('ineligible');
     expect(eligibleJob(job({ location: 'Worldwide', workMode: 'remote' }), 'junior', india).status).toBe('eligible');
     const canada = effectivePreferences({ locations: ['Canada'] }, {});

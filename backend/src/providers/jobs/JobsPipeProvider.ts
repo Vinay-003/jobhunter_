@@ -76,7 +76,7 @@ export class JobsPipeProvider implements JobProvider {
       if (query.cursor) body.cursor = query.cursor;
       // Junior candidates drown in senior postings — bias toward entry/mid.
       // include_unknown keeps the ~90% of postings with no seniority label.
-      if (query.seniorityHint === 'junior') {
+       if (['intern', 'entry', 'junior'].includes(query.seniorityHint ?? '')) {
         body.job_seniority_or = ['entry_level', 'mid_level'];
         body.include_unknown = ['seniority'];
       }
@@ -128,7 +128,9 @@ export class JobsPipeProvider implements JobProvider {
       description: stripHtml(j.description),
       url: j.final_url ?? j.url ?? null,
       salary,
-       postedAt: j.date_posted && Number.isFinite(new Date(j.date_posted).getTime()) ? new Date(j.date_posted).toISOString() : null,
+        postedAt: j.date_posted && Number.isFinite(new Date(j.date_posted).getTime()) ? new Date(j.date_posted).toISOString() : null,
+        dateSource: 'posted',
+        lastFetchedAt: new Date().toISOString(),
        workMode: j.remote ? 'remote' : null,
        descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
        retrieval: { status: 'live', requestedProvider: 'jobspipe' },

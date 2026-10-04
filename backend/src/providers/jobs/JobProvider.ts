@@ -9,14 +9,22 @@ export type NormalizedJob = {
   url: string | null;
   salary: unknown | null;
   postedAt: string | null;
+  updatedAt?: string | null;
+  firstSeenAt?: string | null;
+  lastFetchedAt?: string | null;
+  dateSource?: 'posted' | 'updated' | 'unknown' | string;
   workMode: string | null;
   descriptionQuality?: 'full' | 'snippet' | 'unknown';
   provenance?: Array<{ source: string; externalId: string }>;
   canonicalUrl?: string | null;
   fetchedAt?: string;
+  foundByTitles?: string[];
   /** Retrieval origin is separate from canonical posting source; DB fallback may have the same source. */
   retrieval?: { status: 'live' | 'fallback'; requestedProvider: string; fallbackSource?: string };
+  availability?: JobAvailability;
 };
+
+export type JobAvailability = { status: 'open' | 'closed' | 'unknown'; checkedAt: string | null; reason: string; source: string };
 
 export type JobSearchQuery = {
   keywords: string;
@@ -29,6 +37,9 @@ export type JobSearchQuery = {
   daysPosted?: number;
   country?: string;
   limit?: number;
+  sortBy?: 'match' | 'newest';
+  includeUnknownDates?: boolean;
+  verifiedOpenOnly?: boolean;
 };
 
 export type ProviderSearchResult = {

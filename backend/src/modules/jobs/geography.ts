@@ -4,7 +4,7 @@ const countries: Record<string, string[]> = {
 };
 const usStates = /,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV)\b/i;
 const canadianProvinces = /,\s*(?:AB|BC|MB|NB|NL|NS|NT|NU|ON|PE|QC|SK|YT)\b/i;
-const cities: Record<string, RegExp> = { india: /\b(?:delhi|mumbai|bengaluru|bangalore|hyderabad|pune|chennai|kolkata|noida|gurugram|gurgaon)\b/i, canada: /\b(?:toronto|vancouver|montreal|ottawa|calgary)\b/i, germany: /\b(?:hamburg|berlin|munich|münchen|frankfurt)\b/i };
+const cities: Record<string, RegExp> = { india: /\b(?:delhi|mumbai|bengaluru|bangalore|hyderabad|pune|chennai|kolkata|noida|gurugram|gurgaon|madurai|kanniyakumari|kanyakumari|karnataka|maharashtra|tamil nadu|telangana|kerala|gujarat|rajasthan|uttar pradesh|west bengal)\b/i, canada: /\b(?:toronto|vancouver|montreal|ottawa|calgary)\b/i, germany: /\b(?:hamburg|berlin|munich|münchen|frankfurt)\b/i };
 export const normalizePlace = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 export function inferCountry(value: string | null | undefined): string | null {
   if (!value) return null;

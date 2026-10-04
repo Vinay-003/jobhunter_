@@ -15,26 +15,33 @@ import { deduplicateJobs, upsertJob } from '../../providers/jobs/jobStore.js';
 import { reserveDailyCall } from '../../providers/jobs/providerBudgets.js';
 import type { NormalizedJob, JobProvider, ProviderSearchResult } from '../../providers/jobs/JobProvider.js';
 import { retrievalPlan, sourceEnvelope } from '../../providers/jobs/retrievalPlan.js';
+import { executeRetrieval } from '../../providers/jobs/retrievalExecutor.js';
 import { effectivePreferences, eligibleJob, countryCodeForLocation } from '../../modules/jobs/eligibility.js';
 import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
 import { buildResumeProfile, PROFILE_VERSION } from '../../modules/parsing/resumeProfile.js';
 import { downloadFile } from '../../modules/storage/supabaseStorage.js';
 import { recommendationCacheValid, recommendationDiagnostics, recommendationSnapshot } from '../../services/recommendationPersistence.js';
+import { discoverRoles, ROLE_DISCOVERY_VERSION } from '../../modules/jobs/roleDiscovery.js';
+import { checkJobsAvailability } from '../../modules/jobs/availability.js';
+import rateLimit from 'express-rate-limit';
 
 const router = Router();
+const workLimiter=rateLimit({windowMs:60_000,max:15,standardHeaders:true,legacyHeaders:false,message:{success:false,message:'Too many recommendation operations; retry shortly.'}});
 // Provider normalization changes invalidate both search payloads and completed
 // recommendations (older Adzuna payloads mislabeled API excerpts as full JDs).
-const retrievalVersion = 7;
+const retrievalVersion = 9;
 // A local-model run is not an AWS validation receipt, even when the configured
 // model name is the same. Keep recommendation snapshots provider-specific.
 const scoringIdentity = [process.env.EMBEDDING_PROVIDER || 'auto', process.env.EMBEDDING_MODEL_ID || '',
   process.env.LOCAL_EMBEDDING_MODEL || '', process.env.EMBEDDING_MODEL_REVISION || '', process.env.AWS_SAGEMAKER_ENDPOINT_NAME || ''];
-const rankerVersion = `${algorithmVersion}:retrieval-${retrievalVersion}:${crypto.createHash('sha256').update(JSON.stringify(scoringIdentity)).digest('hex').slice(0, 12)}`;
+const rankerVersion = `${algorithmVersion}:retrieval-${retrievalVersion}:roles-${ROLE_DISCOVERY_VERSION}:${crypto.createHash('sha256').update(JSON.stringify(scoringIdentity)).digest('hex').slice(0, 12)}`;
 const list = z.array(z.string().trim().min(1).max(120)).max(10);
 const createRunSchema = z.object({
-  resumeId: z.string().uuid(), targetRoles: list.optional(), locations: list.optional(), workModes: list.optional(),
+  resumeId: z.string().uuid(), targetRoles: list.max(3).optional(), locations: list.optional(), workModes: list.optional(),
   emphasizedSkills: list.optional(), excludedRoles: list.optional(), seniority: list.optional(),
-  daysPosted: z.number().int().min(1).max(365).optional(), keywords: z.string().trim().max(120).optional(),
+  daysPosted: z.number().int().min(1).max(365).nullable().optional(), keywords: z.string().trim().max(120).optional(),
+  sortBy: z.enum(['match','newest']).optional(), includeUnknownDates: z.boolean().optional(), verifiedOpenOnly: z.boolean().optional(),
+  includeUnknownLocations:z.boolean().optional(),
   forceRefresh: z.boolean().optional(),
   idempotencyKey: z.string().uuid().optional(),
 });
@@ -49,12 +56,53 @@ async function results(runId: string, offset: number, limit: number) {
   const { rows } = await pool.query('SELECT r.*,j.title,j.company,j.location,j.description,j.url,j.salary,j.work_mode,j.posted_at,j.source FROM recommendations r JOIN jobs j ON j.id=r.job_id WHERE r.run_id=$1 ORDER BY r.rank ASC LIMIT $2 OFFSET $3', [runId, limit, offset]);
   return rows.map(serialise);
 }
+async function cachedRowsCurrent(runId:string,preferences:ReturnType<typeof effectivePreferences>) {
+  const rows=await results(runId,0,200);
+  return rows.every((job:any)=>{
+    const date=Date.parse(job.postedAt),age=Date.now()-date;
+    if(preferences.includeUnknownDates===false&&(!Number.isFinite(age)||age<0||job.dateSource==='updated'))return false;
+    if(preferences.daysPosted&&Number.isFinite(age)&&age>preferences.daysPosted*86400000)return false;
+    if(job.availability?.status==='closed')return false;
+    if(job.availability?.status==='open'&&Date.now()-Date.parse(job.availability.checkedAt)>300000)return false;
+    return !preferences.verifiedOpenOnly||job.availability?.status==='open';
+  });
+}
 const pagination = z.object({ offset: z.coerce.number().int().min(0).default(0), limit: z.coerce.number().int().min(1).max(100).default(20) });
+async function recentClosedUrls(userId:string):Promise<Set<string>> {
+  const rows=await pool.query(`SELECT DISTINCT ON (r.job_snapshot_json->>'url') r.job_snapshot_json->>'url' AS url, r.job_snapshot_json->'availability' AS availability
+    FROM recommendations r JOIN recommendation_runs rr ON rr.id=r.run_id WHERE rr.user_id=$1 AND r.job_snapshot_json->'availability'->>'checkedAt'>=$2
+    ORDER BY r.job_snapshot_json->>'url',r.job_snapshot_json->'availability'->>'checkedAt' DESC LIMIT 1000`,[userId,new Date(Date.now()-86400000).toISOString()]);
+  return new Set(rows.rows.filter(r=>r.url&&r.availability?.status==='closed').map(r=>String(r.url)));
+}
 
-router.post('/', authenticate, validate({ body: createRunSchema }), async (req: any, res) => {
+async function ownedProfile(resume: any) {
+  const stored = await pool.query('SELECT profile_json,profile_version FROM resume_profiles WHERE resume_id=$1', [resume.id]);
+  if (stored.rows[0]?.profile_version === PROFILE_VERSION) return stored.rows[0].profile_json;
+  const buf = await downloadFile({ bucket: resume.storage_bucket || 'resumes', path: resume.storage_object_path || resume.file_path, sha256: '' });
+  const profile = buildResumeProfile(await parsePdfBuffer(Buffer.from(buf as any)));
+  await pool.query('INSERT INTO resume_profiles(resume_id,profile_json,profile_version) VALUES($1,$2,$3) ON CONFLICT(resume_id) DO UPDATE SET profile_json=$2,profile_version=$3', [resume.id,JSON.stringify(profile),PROFILE_VERSION]);
+  return profile;
+}
+async function roleSuggestions(profile: any, resumeId: string, userId: string) {
+  const roleDiscovery = await discoverRoles(profile, { ownerId: userId, cached: profile.roleDiscovery });
+  if (roleDiscovery.source === 'ai') await pool.query("UPDATE resume_profiles SET profile_json=jsonb_set(profile_json,'{roleDiscovery}',$2::jsonb) WHERE resume_id=$1 AND EXISTS (SELECT 1 FROM resumes WHERE id=$1 AND user_id=$3)", [resumeId,JSON.stringify(roleDiscovery),userId]);
+  return roleDiscovery;
+}
+router.post('/roles', authenticate, workLimiter, validate({ body: z.object({resumeId:z.string().uuid()}) }), async (req:any,res) => {
+  try {
+    const resume = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2',[req.body.resumeId,req.user.id]);
+    if(!resume.rows[0]) return res.status(404).json({success:false,message:'Resume not found'});
+    const profile = await ownedProfile(resume.rows[0]);
+    return res.json({success:true,roleDiscovery:await roleSuggestions(profile,req.body.resumeId,String(req.user.id))});
+  } catch { return res.status(503).json({success:false,message:'Could not prepare role suggestions'}); }
+});
+
+router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }), async (req: any, res) => {
   const userId = String(req.user.id);
   const { resumeId, idempotencyKey, forceRefresh = false } = req.body;
   let runId: string | null = null;
+  const startedAt = Date.now();
+  const timings: Record<string, number> = {};
   try {
     const resume = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
     if (!resume.rows[0]) return res.status(404).json({ success: false, message: 'Resume not found' });
@@ -64,13 +112,13 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
     // is allowed to spend provider/API/embedding work again.
     if (!forceRefresh) {
       const cachedRun = await pool.query(
-        `SELECT id,status,returned_count,completed_at,ranker_version,profile_version,provider_status_json,query_plan_json FROM recommendation_runs
+        `SELECT id,status,returned_count,completed_at,ranker_version,profile_version,provider_status_json,query_plan_json,preferences_snapshot_json FROM recommendation_runs
           WHERE user_id=$1 AND resume_id=$2 AND status='completed'
             AND preferences_snapshot_json = $3::jsonb
           ORDER BY completed_at DESC NULLS LAST LIMIT 1`,
         [userId, resumeId, JSON.stringify(preferences)],
       );
-      if (cachedRun.rows[0] && recommendationCacheValid(cachedRun.rows[0],rankerVersion,PROFILE_VERSION,preferences.daysPosted ?? 30)) {
+      if (cachedRun.rows[0] && recommendationCacheValid(cachedRun.rows[0],rankerVersion,PROFILE_VERSION,preferences.daysPosted ?? 30) && await cachedRowsCurrent(cachedRun.rows[0].id,preferences)) {
         const prior = cachedRun.rows[0];
         return res.json({ success: true, persisted: true, cached: true, runId: prior.id, status: prior.status, returnedCount: prior.returned_count, ...recommendationDiagnostics(prior), recommendations: await results(prior.id, 0, 20), nextOffset: prior.returned_count > 20 ? 20 : null });
       }
@@ -79,7 +127,7 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
       const previous = await pool.query('SELECT * FROM recommendation_runs WHERE user_id=$1 AND idempotency_key=$2', [userId, idempotencyKey]);
       if (previous.rows[0]) {
         const prior = previous.rows[0];
-        const reusable = prior.status === 'completed' && recommendationCacheValid(prior,rankerVersion,PROFILE_VERSION,preferences.daysPosted ?? 30,new Date(),forceRefresh);
+        const reusable = prior.status === 'completed' && recommendationCacheValid(prior,rankerVersion,PROFILE_VERSION,preferences.daysPosted ?? 30,new Date(),forceRefresh) && await cachedRowsCurrent(prior.id,preferences);
         if (!reusable && prior.status === 'completed') return res.status(409).json({success:false,code:'STALE_IDEMPOTENCY_KEY',message:'Use a new idempotency key for a refreshed run'});
         return res.status(prior.status === 'completed' ? 200 : 202).json({ success: reusable, runId: prior.id, persisted: reusable, status: prior.status, returnedCount: prior.returned_count, ...recommendationDiagnostics(prior), recommendations: reusable ? await results(prior.id, 0, 20) : [] });
       }
@@ -91,19 +139,14 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
       const prior = await pool.query('SELECT id,status,returned_count FROM recommendation_runs WHERE user_id=$1 AND idempotency_key=$2', [userId,idempotencyKey]);
       return res.status(202).json({ success: false, persisted: false, runId: prior.rows[0].id, status: prior.rows[0].status, recommendations: [] });
     }
-    let profile: any = null;
-    const stored = await pool.query('SELECT profile_json,profile_version FROM resume_profiles WHERE resume_id=$1', [resumeId]);
-    if (stored.rows[0]?.profile_version === PROFILE_VERSION) profile = stored.rows[0].profile_json;
-    if (!profile) {
-      const buf = await downloadFile({ bucket: resume.rows[0].storage_bucket || 'resumes', path: resume.rows[0].storage_object_path || resume.rows[0].file_path, sha256: '' });
-      profile = buildResumeProfile(await parsePdfBuffer(Buffer.from(buf as any)));
-      await pool.query('INSERT INTO resume_profiles(resume_id,profile_json,profile_version) VALUES($1,$2,$3) ON CONFLICT(resume_id) DO UPDATE SET profile_json=$2,profile_version=$3', [resumeId,JSON.stringify(profile),PROFILE_VERSION]);
-    }
+    const profile = await ownedProfile(resume.rows[0]);
     if (!profile || !Array.isArray(profile.skills) || !Array.isArray(profile.experience)) throw new Error('PROFILE_UNAVAILABLE');
-    const planned = new JobQueryPlanner().plan({ targetRoles: preferences.targetRoles, excludedRoles: preferences.excludedRoles, emphasizedSkills: preferences.emphasizedSkills }, profile);
-    const maxQueries = Math.max(0, Math.min(4, Number(process.env.JOOBLE_MAX_QUERIES_PER_REFRESH || 4)));
-    const queries = planned.slice(0, maxQueries).map((q) => q.keywords);
-    const primary = queries[0] || planned[0]?.keywords || 'Software Engineer';
+    const roleDiscovery = await roleSuggestions(profile,resumeId,userId);
+    const searchPreferences = { ...preferences, targetRoles: preferences.targetRoles.length ? preferences.targetRoles : roleDiscovery.roles.map(r=>r.title) };
+    const planned = new JobQueryPlanner().plan({ targetRoles: searchPreferences.targetRoles, excludedRoles: preferences.excludedRoles, emphasizedSkills: preferences.emphasizedSkills }, profile);
+    const queries = [...new Set(planned.map(q=>q.keywords))].slice(0,3);
+    timings.rolesMs = Date.now() - startedAt;
+    const retrievalStarted = Date.now();
     const enabled = new Set((process.env.JOB_PROVIDERS || 'jooble,jobspipe,adzuna,remotive,arbeitnow').split(',').map((s) => s.trim().toLowerCase()));
     const sources: any[] = [];
     const all: NormalizedJob[] = [];
@@ -116,7 +159,7 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
       try {
         const cached = await pool.query('SELECT result_json,created_at FROM job_search_cache WHERE query_hash=$1', [cacheKey]);
         let result: ProviderSearchResult;
-        if (name !== 'jobspipe' && cached.rows[0] && Date.now() - new Date(cached.rows[0].created_at).getTime() < ttl) {
+        if (!forceRefresh && name !== 'jobspipe' && cached.rows[0] && Date.now() - new Date(cached.rows[0].created_at).getTime() < ttl) {
           const data = cached.rows[0].result_json;
           if (data && !Array.isArray(data) && Array.isArray(data.jobs) && typeof data.status === 'string') {
             result = data; cacheHit = true;
@@ -126,7 +169,7 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
           if (name === 'jooble' && !(await reserveDailyCall('jooble', Number(process.env.JOOBLE_CALL_BUDGET || 100)))) {
             result = { jobs: [], status: 'budgetLimited' };
           } else {
-            result = await provider.searchResult({ keywords: query, location, page, cursor, country: countryCodeForLocation(location) ?? undefined, seniorityHint: profile.seniority, daysPosted: preferences.daysPosted });
+            result = await provider.searchResult({ keywords: query, location, page, cursor, country: countryCodeForLocation(location || preferences.locations[0]) ?? undefined, seniorityHint: profile.seniority, daysPosted: preferences.daysPosted, sortBy: preferences.sortBy });
           }
           if (name !== 'jobspipe' && (result.status === 'ok' || result.status === 'empty')) await pool.query('INSERT INTO job_search_cache (query_hash,query_text,result_json,created_at) VALUES ($1,$2,$3,now()) ON CONFLICT (query_hash) DO UPDATE SET result_json=$3,created_at=now()', [cacheKey, `${name}:${query}`, JSON.stringify(result)]).catch(() => undefined);
         }
@@ -135,38 +178,32 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
           ...(result!.fallbackReason ? { fallbackReason: result!.fallbackReason } : {}),
           ...(result!.errorCode ? { errorCode: result!.errorCode } : {}),
           ...(result!.status === 'fallback' ? { fallbackSource: [...new Set(jobs.map(j => j.source))] } : {}),
-          location, page, attemptedAt: started });
-        all.push(...jobs);
+           location, page, query, attemptedAt: started, durationMs: Date.now()-Date.parse(started) });
+        all.push(...jobs.map(job=>({ ...job, foundByTitles:[...new Set([...(job.foundByTitles??[]),query])], lastFetchedAt:job.lastFetchedAt ?? (cacheHit ? new Date(cached.rows[0].created_at).toISOString() : started), dateSource:job.dateSource ?? (job.postedAt ? 'posted' : 'unknown') })));
+        console.info(`[retrieval] provider=${name} page=${page} status=${result!.status} count=${jobs.length} cache=${cacheHit} ms=${Date.now()-Date.parse(started)}`);
         return result!.status === 'ok' && typeof result!.nextCursor === 'string' && result!.nextCursor ? result!.nextCursor : null;
-       } catch { sources.push({ ...sourceEnvelope(name,[],cacheHit,'error'), location,page,errorCode: 'PROVIDER_UNAVAILABLE', attemptedAt: started }); return null; }
+       } catch { sources.push({ ...sourceEnvelope(name,[],cacheHit,'error'), location,page,query,errorCode: 'PROVIDER_UNAVAILABLE', attemptedAt: started,durationMs:Date.now()-Date.parse(started) }); return null; }
     };
     const providers: Record<string,[JobProvider,number]> = {
       jooble:[new JoobleProvider(),3600000], jobspipe:[new JobsPipeProvider(),3600000],
       adzuna:[new AdzunaProvider(),3600000], remotive:[new RemotiveProvider(),3600000],
       arbeitnow:[new ArbeitnowProvider(),arbeitnowCacheHours() * 3600000],
     };
-    const retrieval = retrievalPlan([...enabled], preferences.locations, queries.length ? queries : [primary]);
-    const cursors = new Map<string, string>();
-    const seenCursors = new Set<string>();
-    for (const step of retrieval) {
-      if (step.provider === 'jobspipe' && step.page > 1 && !cursors.has(`${step.provider}:${step.keywords}`)) continue;
-      // Eligibility, not raw count, determines whether further bounded retrieval is useful.
-      if (deduplicateJobs(all).filter(job => eligibleJob(job,profile.seniority,preferences,profile).status !== 'ineligible').length >= 50) break;
+    const retrieval = retrievalPlan([...enabled], preferences.locations, queries);
+    await executeRetrieval(retrieval, async (step, cursor) => {
       const entry = providers[step.provider];
-      if (entry) {
-        const key = `${step.provider}:${step.keywords}`;
-        const next = await runSearch(step.provider,entry[0],step.keywords,step.location,step.page,entry[1],step.provider === 'jobspipe' ? cursors.get(key) : undefined);
-        if (step.provider === 'jobspipe') {
-          cursors.delete(key);
-          if (next) {
-            const hash = crypto.createHash('sha256').update(next).digest('hex');
-            if (!seenCursors.has(hash)) { seenCursors.add(hash); cursors.set(key,next); }
-          }
-        }
-      }
-    }
+      if (!entry) return {};
+      // The executor is intentionally bounded; eligibility can stop later rounds without
+      // starving the first-page coverage round for the other titles.
+      if (step.page > 1 && deduplicateJobs(all).filter(job => eligibleJob(job, profile.seniority, {...searchPreferences,verifiedOpenOnly:false}, profile).status !== 'ineligible').length >= 50) return {};
+      const next = await runSearch(step.provider, entry[0], step.keywords, step.location, step.page, entry[1], cursor);
+      return { nextCursor: next };
+    }, { globalConcurrency: 4, perProviderConcurrency: 1, maxCalls: 18, timeoutMs: 20_000 });
     const distinct = deduplicateJobs(all);
-    const checked = distinct.map((job) => ({ job, eligibility: eligibleJob(job,profile.seniority,preferences,profile) }));
+    const closedUrls=await recentClosedUrls(userId);
+    for(const job of distinct) if(job.url&&closedUrls.has(job.url))job.availability={status:'closed',checkedAt:new Date().toISOString(),reason:'Previously confirmed/reported closed for this account within 24 hours',source:'saved-closure'};
+    timings.retrievalMs = Date.now()-retrievalStarted;
+    const checked = distinct.map((job) => ({ job, eligibility: eligibleJob(job,profile.seniority,{...searchPreferences,verifiedOpenOnly:false},profile) }));
     const rejectedReasons: Record<string,number> = {};
     for (const entry of checked.filter(entry => entry.eligibility.status === 'ineligible')) for (const reason of entry.eligibility.reasons) rejectedReasons[reason] = (rejectedReasons[reason] ?? 0) + 1;
     const eligible = checked.filter((entry) => entry.eligibility.status !== 'ineligible');
@@ -174,10 +211,24 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
       await pool.query('UPDATE recommendation_runs SET provider_status_json=$2,query_plan_json=$3 WHERE id=$1', [runId,JSON.stringify(sources),JSON.stringify({queries,rejectedReasons})]);
       throw new Error('ALL_PROVIDERS_FAILED');
     }
-    const scored = await rankJobsBatch(profile, eligible.map((entry) => entry.job), { preferences, ownerId: userId });
-    const ranked = eligible.map(({ job, eligibility }, i) => ({ ...job, eligibility, ...scored[i], confidence: (scored[i] as any).confidence ?? 'Low' }))
-      .sort((a,b) => (a.eligibility.status === 'eligible' ? 0 : 1) - (b.eligibility.status === 'eligible' ? 0 : 1) || b.fitScore-a.fitScore || `${a.source}:${a.externalId}`.localeCompare(`${b.source}:${b.externalId}`))
-      .slice(0, 200);
+    const rankingStarted = Date.now();
+    const scored = await rankJobsBatch(profile, eligible.map((entry) => entry.job), { preferences:searchPreferences, ownerId: userId });
+    timings.rankingMs = Date.now()-rankingStarted;
+    const compare = (a:any,b:any) => (preferences.sortBy==='newest' ? ((Date.parse(b.postedAt)||0)-(Date.parse(a.postedAt)||0)) : ((a.eligibility.status==='eligible'?0:1)-(b.eligibility.status==='eligible'?0:1))) || b.fitScore-a.fitScore || `${a.source}:${a.externalId}`.localeCompare(`${b.source}:${b.externalId}`);
+    const candidates = eligible.map(({ job, eligibility }, i) => ({ ...job, eligibility, ...scored[i], confidence: (scored[i] as any).confidence ?? 'Low' })).sort(compare).slice(0,200);
+    const availabilityStarted = Date.now();
+    await checkJobsAvailability(candidates,{maxChecks:20,concurrency:4,batchDeadlineMs:15000});
+    for(const job of candidates) job.eligibility=eligibleJob(job,profile.seniority,searchPreferences,profile);
+    const ranked = candidates.filter(job=>{
+      if(job.eligibility.status!=='ineligible') return true;
+      for(const reason of job.eligibility.reasons) rejectedReasons[reason]=(rejectedReasons[reason]??0)+1;
+      return false;
+    }).sort(compare);
+    timings.availabilityMs=Date.now()-availabilityStarted;
+    timings.totalMs=Date.now()-startedAt;
+    const versions={rankerVersion,profileVersion:PROFILE_VERSION,embeddingModelId:scored[0]?.embeddingModelId??'none'};
+    const diagnostics={queries,roleDiscovery,searchRoles:searchPreferences.targetRoles,rejectedReasons,timings,versions,availabilityScope:{checked:Math.min(candidates.length,20),candidates:candidates.length}};
+    const persistenceStarted=Date.now();
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -190,13 +241,15 @@ router.post('/', authenticate, validate({ body: createRunSchema }), async (req: 
         await client.query(`INSERT INTO recommendations (run_id,job_id,rank,fit_score,confidence,breakdown_json,evidence_json,job_snapshot_json,matched_skills_json,missing_skills_json,eligibility_json)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [runId,jobId,index+1,job.fitScore,job.confidence,JSON.stringify(job.breakdown),JSON.stringify(job.evidence),JSON.stringify(snapshot),JSON.stringify(job.matchedSkills),JSON.stringify(job.missingSkills),JSON.stringify(job.eligibility)]);
       }
-      await client.query(`UPDATE recommendation_runs SET status='completed',completed_at=now(),embedding_model_id=$2,query_plan_json=$3,provider_status_json=$4,candidate_count=$5,returned_count=$6 WHERE id=$1`, [runId,scored[0]?.embeddingModelId ?? 'none',JSON.stringify({queries,rejectedReasons}),JSON.stringify(sources),distinct.length,ranked.length]);
+      timings.persistenceMs=Date.now()-persistenceStarted;timings.totalMs=Date.now()-startedAt;
+      await client.query(`UPDATE recommendation_runs SET status='completed',completed_at=now(),embedding_model_id=$2,query_plan_json=$3,provider_status_json=$4,candidate_count=$5,returned_count=$6 WHERE id=$1`, [runId,scored[0]?.embeddingModelId ?? 'none',JSON.stringify(diagnostics),JSON.stringify(sources),distinct.length,ranked.length]);
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
-    return res.json({ success:true, runId, persisted:true, totalFetched:all.length, deduped:distinct.length, candidateCount:distinct.length, returnedCount:ranked.length, insufficientEligibleJobs:ranked.length < 50, sources, rejectedReasons, preferences, recommendations:await results(runId,0,20), nextOffset:ranked.length > 20 ? 20 : null, versions:{ rankerVersion, profileVersion:PROFILE_VERSION, embeddingModelId:scored[0]?.embeddingModelId ?? 'none' } });
+    console.info(`[recommendations] completed count=${ranked.length} timings=${JSON.stringify(timings)}`);
+    return res.json({ success:true, runId, persisted:true, totalFetched:all.length, deduped:distinct.length, candidateCount:distinct.length, returnedCount:ranked.length, insufficientEligibleJobs:ranked.length < 50, sources, ...diagnostics, preferences, recommendations:await results(runId,0,20), nextOffset:ranked.length > 20 ? 20 : null });
   } catch (error) {
     if (runId) await pool.query("UPDATE recommendation_runs SET status='failed',completed_at=now(),error_code=$2 WHERE id=$1 AND status='running'",[runId,(error as Error).message === 'ALL_PROVIDERS_FAILED' ? 'ALL_PROVIDERS_FAILED' : 'RECOMMENDATION_FAILED']).catch(() => undefined);
-    console.error('recommendation run failed', error);
+    console.error('[recommendations] run failed (details withheld to protect private data)');
     return res.status(503).json({ success:false, code:(error as Error).message === 'ALL_PROVIDERS_FAILED' ? 'ALL_PROVIDERS_FAILED' : 'RECOMMENDATION_FAILED', message:'Recommendation run failed', runId, persisted:false });
   }
 });
@@ -217,5 +270,31 @@ router.get('/:id/results',authenticate,async (req:any,res) => {
     const rows = await results(req.params.id,offset,limit);
     res.json({success:true,runId:req.params.id,total:run.rows[0].returned_count,...recommendationDiagnostics(run.rows[0]),results:rows,nextOffset:offset+rows.length<run.rows[0].returned_count ? offset+rows.length : null});
   } catch { res.status(500).json({success:false,message:'Could not read recommendations'}); }
+});
+router.post('/:id/jobs/:jobId/availability',authenticate,workLimiter,async(req:any,res)=>{
+  if(!z.string().uuid().safeParse(req.params.id).success||!z.string().uuid().safeParse(req.params.jobId).success)return res.status(400).json({success:false,message:'Invalid identifier'});
+  try {
+    const found=await pool.query(`SELECT r.job_snapshot_json FROM recommendations r JOIN recommendation_runs rr ON rr.id=r.run_id WHERE r.run_id=$1 AND r.job_id=$2 AND rr.user_id=$3`,[req.params.id,req.params.jobId,req.user.id]);
+    if(!found.rows[0])return res.status(404).json({success:false,message:'Recommendation not found'});
+    const job=found.rows[0].job_snapshot_json;
+    const previous=job.availability;
+    await checkJobsAvailability([job],{maxChecks:1,ttlMs:0,deadlineMs:4000});
+    if(previous?.status==='closed'&&job.availability?.status==='unknown')job.availability=previous;
+    await pool.query("UPDATE recommendations SET job_snapshot_json=jsonb_set(job_snapshot_json,'{availability}',$3::jsonb) WHERE run_id=$1 AND job_id=$2",[req.params.id,req.params.jobId,JSON.stringify(job.availability)]);
+    if(job.availability?.status==='closed')await pool.query("UPDATE recommendation_runs SET ranker_version=ranker_version||':closed-check' WHERE user_id=$1 AND completed_at>now()-interval '5 minutes'",[req.user.id]);
+    return res.json({success:true,availability:job.availability});
+  }catch{return res.status(503).json({success:false,message:'Availability could not be checked'});}
+});
+router.post('/:id/jobs/:jobId/report-closed',authenticate,workLimiter,async(req:any,res)=>{
+  if(!z.string().uuid().safeParse(req.params.id).success||!z.string().uuid().safeParse(req.params.jobId).success)return res.status(400).json({success:false,message:'Invalid identifier'});
+  const availability={status:'closed',checkedAt:new Date().toISOString(),source:'user_report',reason:'User reports the original posting is no longer accepting applications; not independently verified by JobHunter'};
+  try{
+    const result=await pool.query(`UPDATE recommendations r SET job_snapshot_json=jsonb_set(r.job_snapshot_json,'{availability}',$4::jsonb)
+      FROM recommendation_runs rr WHERE r.run_id=rr.id AND r.run_id=$1 AND r.job_id=$2 AND rr.user_id=$3 RETURNING r.job_id`,[req.params.id,req.params.jobId,req.user.id,JSON.stringify(availability)]);
+    if(!result.rows.length)return res.status(404).json({success:false,message:'Recommendation not found'});
+    // A newly reported closure must invalidate the completed-run cache immediately.
+    await pool.query("UPDATE recommendation_runs SET ranker_version=ranker_version||':closed-report' WHERE user_id=$1 AND completed_at>now()-interval '5 minutes'",[req.user.id]);
+    return res.json({success:true,availability});
+  }catch{return res.status(503).json({success:false,message:'Could not record closure report'});}
 });
 export default router;

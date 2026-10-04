@@ -39,12 +39,12 @@ describe('recommendation ranking regressions', () => {
     expect(eligibleJob({ ...job('Frontend Engineer'), location: 'Toronto, ON' }, 'entry', prefs({ locations: ['United States'] })).status).toBe('ineligible');
     expect(eligibleJob({ ...job('Frontend Engineer'), location: 'San Francisco, CA' }, 'entry', prefs({ locations: ['Canada'] })).status).toBe('ineligible');
   });
-  test('planner derives specialization and omits excluded roles, with new-grad variants', () => {
-    const queries = new JobQueryPlanner().plan({ excludedRoles: ['Software Engineer', 'Developer'] }, profile({ experience: [{ title: 'Frontend Engineer', description: 'React applications' }], seniority: 'entry' }));
+  test('planner derives specialization without premature new-grad variants', () => {
+    const queries = new JobQueryPlanner().plan({ excludedRoles: ['Software Engineer', 'Backend Developer'] }, profile({ experience: [{ title: 'Frontend Engineer', description: 'React applications' }], seniority: 'entry' }));
     expect(queries.length).toBeGreaterThan(0);
     expect(queries.some(q => /frontend/i.test(q.keywords))).toBe(true);
-    expect(queries.some(q => /junior|new.grad|entry|fresher/i.test(q.keywords))).toBe(true);
-    expect(queries.every(q => !/software engineer|\bdeveloper\b/i.test(q.keywords))).toBe(true);
+    expect(queries.some(q => /new.grad/i.test(q.keywords))).toBe(false);
+    expect(queries.every(q => !/software engineer|backend developer/i.test(q.keywords))).toBe(true);
   });
   test('semantic coverage averages separate responsibilities rather than promoting one matching bullet', async () => {
     const p = profile();

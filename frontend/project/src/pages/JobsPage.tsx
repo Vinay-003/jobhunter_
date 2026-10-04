@@ -1,7 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../lib/api';
 import { displayValue, safeText } from '../lib/display';
+import { buildMatchReport } from '../lib/matchReport';
 import {
   ArrowUpRight,
   Briefcase,
@@ -32,6 +34,7 @@ type ScoreDetails = {
   scoreCapReasons?: string[];
   skillEvidence?: Array<{ skill: string; source: 'demonstrated' | 'declared' | 'unverified' }>;
   responsibilityMatches?: Array<{ responsibility: string; evidence: string | null; similarity?: number; rawCosine?: number; supported?: boolean }>;
+  components?: Array<{ key?: string; label?: string; points?: number; maxPoints?: number; reason?: string }>;
 };
 
 type Job = {
@@ -64,6 +67,8 @@ type Job = {
   workMode?: string;
   postedAt?: string;
   scoreDetails?: ScoreDetails | null;
+  availability?: { status: 'open' | 'closed' | 'unknown'; checkedAt?: string | null; reason?: string; source?: string };
+  updatedAt?: string; firstSeenAt?: string; lastFetchedAt?: string; dateSource?: string; foundByTitles?: string[];
 };
 
 type Resume = { id: string; fileName?: string; file_name?: string };
@@ -87,6 +92,7 @@ type RecommendationResponse = {
   runId?: string; nextOffset?: number | null; returnedCount?: number;
   sources?: Array<{ provider?: unknown; status?: unknown; cacheHit?: unknown; fetchedCount?: unknown; fallbackReason?: unknown; errorCode?: unknown; location?: unknown; page?: unknown }>;
   rejectedReasons?: Record<string, number>;
+  roleDiscovery?: any; queries?: any[]; timings?: any;
 };
 
 function safeExternalUrl(value?: string) {
@@ -167,7 +173,7 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
                <p className="mt-0.5 truncate text-xs text-slate-500">{displayValue(job.company) || 'Company not listed'}</p>
             </div>
             <div className={`shrink-0 rounded-xl border px-2.5 py-1.5 text-center ${tone.border} ${tone.bg}`}>
-              <p className={`text-base font-semibold leading-none ${tone.text}`}>{score}%</p>
+              <p className={`text-base font-semibold leading-none ${tone.text}`}>{score}/100</p>
               <p className="mt-1 text-[8px] font-semibold uppercase tracking-[0.12em] text-slate-600">fit</p>
             </div>
           </div>
@@ -176,7 +182,8 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
              {job.location && <span className="flex items-center gap-1"><MapPin size={11} /> {displayValue(job.location)}</span>}
              {displayValue(job.jobLevel) && <span className="flex items-center gap-1"><Briefcase size={11} /> {displayValue(job.jobLevel)}</span>}
             {displayValue(job.confidence) && <span className="flex items-center gap-1"><Target size={11} /> {displayValue(job.confidence)} confidence</span>}
-            {job.eligibility && <span>{job.eligibility.status === 'eligible' ? 'No confirmed barrier' : job.eligibility.status === 'uncertain' ? 'Qualifications unverified' : 'Eligibility barrier'}</span>}
+             {job.eligibility && <span>{job.eligibility.status === 'eligible' ? 'No confirmed barrier' : job.eligibility.status === 'uncertain' ? 'Qualifications unverified' : 'Eligibility barrier'}</span>}
+             {job.availability && <span className={job.availability.status === 'open' ? 'text-emerald-300' : job.availability.status === 'closed' ? 'text-rose-300' : 'text-amber-300'}>{job.availability.status}</span>}
           </div>
 
           {!!job.matchedSkills?.length && (
@@ -192,7 +199,7 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
   );
 }
 
-function JobDetail({ job }: { job: Job }) {
+function JobDetail({ job, onRecheck, onReportClosed, checking }: { job: Job; onRecheck?:()=>void; onReportClosed?:()=>void; checking?:boolean }) {
   const score = scoreOf(job);
   const tone = scoreTone(score);
   const external = safeExternalUrl(job.link ?? job.url);
@@ -218,7 +225,7 @@ function JobDetail({ job }: { job: Job }) {
         </div>
 
         <div className={`self-start rounded-2xl border px-4 py-3 text-center ${tone.border} ${tone.bg}`}>
-          <p className={`text-3xl font-semibold tracking-[-0.05em] ${tone.text}`}>{score}%</p>
+          <p className={`text-3xl font-semibold tracking-[-0.05em] ${tone.text}`}>{score}/100</p>
           <p className="mt-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-600">fit score</p>
         </div>
       </div>
@@ -250,7 +257,7 @@ function JobDetail({ job }: { job: Job }) {
           <p className="text-[11px] font-semibold text-amber-200">Scoring safeguards</p>
           <div className="mt-2 space-y-1 text-[11px] leading-5 text-stone-500">
             {job.scoreDetails.seniorityPenalty !== undefined && job.scoreDetails.seniorityPenalty !== 0 ? <p>Seniority adjustment: −{job.scoreDetails.seniorityPenalty} points ({displayValue(job.scoreDetails.candidateSeniority) || 'unknown'} candidate → {displayValue(job.scoreDetails.jobSeniority) || 'unknown'} role).</p> : null}
-            {job.scoreDetails.scoreCap !== null && job.scoreDetails.scoreCap !== undefined ? <p>Score capped at {job.scoreDetails.scoreCap}%.</p> : null}
+            {job.scoreDetails.scoreCap !== null && job.scoreDetails.scoreCap !== undefined ? <p>Score capped at {job.scoreDetails.scoreCap}/100.</p> : null}
             {job.scoreDetails.scoreCapReasons?.length ? <p>Cap reasons: {job.scoreDetails.scoreCapReasons.map(displayValue).join('; ')}</p> : null}
             {job.scoreDetails.semanticStatus === 'keyword-only' ? <p>Semantic model unavailable; this fit score uses limited keyword evidence.</p> : null}
           </div>
@@ -284,6 +291,7 @@ function JobDetail({ job }: { job: Job }) {
         </div>
       )}
       <p className="text-xs text-amber-200">Qualification status: {job.eligibility?.status === 'eligible' ? 'No explicit barrier detected; verify the full posting and work authorization.' : job.eligibility?.status === 'uncertain' ? `Unverified — ${job.eligibility.reasons?.join('; ') || 'check the full posting'}` : job.eligibility?.status === 'ineligible' ? `Known barrier — ${job.eligibility.reasons?.join('; ')}` : 'Not evaluated for this historical result.'}</p>
+      {job.availability && <p className="text-xs text-amber-200">Availability: {job.availability.status}{job.availability.reason ? ` — ${displayValue(job.availability.reason)}` : ''}. Checked: {job.availability.checkedAt ? new Date(job.availability.checkedAt).toLocaleString() : 'not checked'}. Status may change; recheck before applying.</p>}
 
       {description && (
         <div>
@@ -294,7 +302,9 @@ function JobDetail({ job }: { job: Job }) {
       )}
 
       <div className="flex flex-wrap items-center gap-3 border-t border-white/[0.06] pt-5">
-        {external ? <a href={external} target="_blank" rel="noopener noreferrer" className="jh-button-primary">View original job <ArrowUpRight size={14} /></a> : <span className="text-xs text-slate-600">Original job link unavailable</span>}
+          {onRecheck&&<button onClick={onRecheck} disabled={checking} className="jh-button-ghost">{checking?'Checking…':'Check current availability'}</button>}
+          {onReportClosed&&job.availability?.status!=='closed'&&<button onClick={onReportClosed} disabled={checking} className="jh-button-ghost">Report expired / closed</button>}
+          {external && job.availability?.status !== 'closed' ? <a href={external} target="_blank" rel="noopener noreferrer" className="jh-button-primary">View original job <ArrowUpRight size={14} /></a> : <span className="text-xs text-slate-600">{job.availability?.status === 'closed' ? 'Closed posting — link disabled' : 'Original job link unavailable'}</span>}
         <span className="text-[10px] text-slate-700">Fit score should guide prioritization, not replace reading the full JD.</span>
       </div>
     </div>
@@ -315,10 +325,22 @@ export default function JobsPage() {
   const [sources, setSources] = useState<NonNullable<RecommendationResponse['sources']>>([]);
   const [rejectedReasons, setRejectedReasons] = useState<Record<string, number>>({});
   const [loadingMore, setLoadingMore] = useState(false);
+  const [checkingAvailability,setCheckingAvailability]=useState(false);
   const requestSequence = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
-  const [showFilters, setShowFilters] = useState(false);
-  const [prefs, setPrefs] = useState({ targetRole: '', location: '', minScore: 40, workMode: '', keywords: '', daysPosted: '' });
+  const [showFilters, setShowFilters] = useState(true);
+  const [prefs, setPrefs] = useState({ targetRole: '', location: 'India', minScore: 40, workMode: '', keywords: '', daysPosted: '7' });
+  const [targetRoles, setTargetRoles] = useState<string[]>([]);
+  const [roleDiscovery, setRoleDiscovery] = useState<any>(null);
+  const [roleDiscoveryError, setRoleDiscoveryError] = useState('');
+  const [lastRunDiagnostics, setLastRunDiagnostics] = useState<any>({});
+  const [sortBy, setSortBy] = useState<'match' | 'newest'>('match');
+  const [includeUnknownDates, setIncludeUnknownDates] = useState(false);
+  const [verifiedOpenOnly, setVerifiedOpenOnly] = useState(false);
+  const [includeUnknownLocations,setIncludeUnknownLocations]=useState(false);
+  const discoverySequence = useRef(0);
+  const manualRoles = useRef(false);
+  const [discovering, setDiscovering] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -335,20 +357,38 @@ export default function JobsPage() {
          const preferences = profile?.preferences ?? profile?.profile?.preferences;
         const roles = preferences?.target_roles ?? preferences?.targetRoles;
         const locations = preferences?.locations;
-        setPrefs((current) => ({
+         setPrefs((current) => ({
           ...current,
-          targetRole: current.targetRole || roles?.[0] || '',
-          location: locations?.[0] || current.location,
+           targetRole: current.targetRole || roles?.[0] || '',
+            location: locations?.[0] || current.location || 'India',
           workMode: (preferences?.work_modes ?? preferences?.workModes ?? []).join(','),
-        }));
+         }));
+         if (roles?.length) { setTargetRoles(roles.slice(0, 3)); manualRoles.current=true; }
       } catch {
         // The empty state below explains what the user needs to do.
       }
     })();
   }, []);
 
+  useEffect(() => {
+    if (!selectedResume) return;
+    const sequence = ++discoverySequence.current;
+    const sequenceRef=discoverySequence;
+    const controller = new AbortController();
+    setDiscovering(true);setRoleDiscovery(null);setJobs([]);setRunId(null);setNextOffset(null);setTotal(0);
+    if (!manualRoles.current) setTargetRoles([]);
+    setRoleDiscoveryError('');
+    void api.post('/recommendation-runs/roles', { resumeId: selectedResume }, { timeout: 75000, signal:controller.signal })
+      .then(({ data }) => { if (sequence === discoverySequence.current && data?.roleDiscovery) { setRoleDiscovery(data.roleDiscovery); if(!manualRoles.current) setTargetRoles((data.roleDiscovery.roles ?? []).slice(0, 3).map((r: any) => r.title)); if(data.roleDiscovery.warning)setRoleDiscoveryError(data.roleDiscovery.warning); } })
+      .catch(() => { if (sequence === discoverySequence.current&&!controller.signal.aborted) { setRoleDiscovery(null); setRoleDiscoveryError('Role suggestions are unavailable right now. Add up to three roles manually; no search has been submitted.'); } })
+      .finally(()=>{if(sequence===discoverySequence.current)setDiscovering(false);});
+    return ()=>{controller.abort();sequenceRef.current=sequence+1;};
+  }, [selectedResume]);
+
   const runRecommendations = async (isRefresh = false) => {
     if (!selectedResume) return setError('Choose a resume before generating matches.');
+    if (discovering) return;
+    if (!prefs.location.trim()) return setError('Choose a location explicitly (for example India); remote is not a country.');
     activeRequest.current?.abort();
     const controller = new AbortController();
     activeRequest.current = controller;
@@ -360,10 +400,11 @@ export default function JobsPage() {
     try {
       const payload = {
         resumeId: selectedResume,
-        ...(prefs.targetRole.trim() ? { targetRoles: [prefs.targetRole.trim()] } : {}),
-        ...(prefs.location.trim() ? { locations: [prefs.location.trim()] } : {}),
+         targetRoles: targetRoles.slice(0, 3).filter(Boolean),
+         locations: prefs.location.split(';').map(s=>s.trim()).filter(Boolean),
         workModes: prefs.workMode.split(',').map((value) => value.trim()).filter(Boolean),
-        ...(prefs.daysPosted ? { daysPosted: Number(prefs.daysPosted) } : {}),
+          daysPosted: prefs.daysPosted ? Number(prefs.daysPosted) : null,
+          sortBy, includeUnknownDates, verifiedOpenOnly, includeUnknownLocations,
         ...(prefs.keywords.trim() ? { keywords: prefs.keywords.trim() } : {}),
         ...(isRefresh ? { forceRefresh: true, idempotencyKey: crypto.randomUUID() } : {}),
       };
@@ -374,7 +415,9 @@ export default function JobsPage() {
        const raw = result?.recommendations ?? result?.results ?? [];
       const mapped = raw.map(mapRecommendation);
       setJobs(mapped);
-       setRunId(result?.runId ?? null);
+        setRunId(result?.runId ?? null);
+        if (result?.roleDiscovery) setRoleDiscovery(result.roleDiscovery);
+         setLastRunDiagnostics({ ...result, resumeFileName:selectedResumeName });
        setNextOffset(result?.nextOffset ?? null);
        setTotal(result?.returnedCount ?? mapped.length); setSources(result?.sources ?? []); setRejectedReasons(result?.rejectedReasons ?? {});
       setSelectedIndex(0);
@@ -402,13 +445,11 @@ export default function JobsPage() {
   };
 
   useEffect(() => {
-    if (selectedResume) void runRecommendations(false);
     const sequence = requestSequence.current;
     const requestRef = activeRequest;
     const sequenceRef = requestSequence;
     return () => { requestRef.current?.abort(); if (sequenceRef.current === sequence) sequenceRef.current++; };
     // Run when the user switches the resume; filter changes are applied explicitly.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedResume]);
 
   const visibleJobs = useMemo(() => jobs.filter((job) => scoreOf(job) >= prefs.minScore), [jobs, prefs.minScore]);
@@ -416,15 +457,21 @@ export default function JobsPage() {
   const topMatches = visibleJobs.filter((job) => scoreOf(job) >= 75).length;
   const selectedResumeName = resumes.find((resume) => resume.id === selectedResume)?.fileName ?? resumes.find((resume) => resume.id === selectedResume)?.file_name;
   const copyMatches = async () => {
-    const markdown = visibleJobs.map((job, index) => {
-      const lines = [`## ${index + 1}. ${displayValue(job.title)}`, `- Company: ${displayValue(job.company) || 'Not listed'}`, `- Location: ${displayValue(job.location) || 'Not listed'}`, `- Fit score: ${scoreOf(job)}%`];
-      if (job.breakdown?.length) lines.push(`- Breakdown: ${job.breakdown.map((item) => `${item.label} ${Math.round(item.value)}`).join(', ')}`);
-      if (job.matchedSkills?.length) lines.push(`- Matched skills: ${job.matchedSkills.map(displayValue).join(', ')}`);
-      if (job.missingSkills?.length) lines.push(`- Skill gaps: ${job.missingSkills.map(displayValue).join(', ')}`);
-      if (job.link) lines.push(`- Link: ${job.link}`);
-      return lines.join('\n');
-    }).join('\n\n');
-    await navigator.clipboard.writeText(`# JobHunter match report\n\nResume: ${selectedResumeName || 'Unknown'}\n\n${markdown}`);
+    try { await navigator.clipboard.writeText(buildMatchReport({ jobs: visibleJobs, resumeFileName:lastRunDiagnostics.resumeFileName || selectedResumeName, runId, run: lastRunDiagnostics, roleDiscovery:lastRunDiagnostics.roleDiscovery, scope: 'loaded', total, filteredCount: visibleJobs.length })); }
+    catch { setError('Could not copy the report. Allow clipboard access and try again.'); }
+  };
+  const recheckAvailability=async()=>{
+    if(!runId||!selected)return;
+    const id=selected.id??selected.jobId,sequence=requestSequence.current;
+    setCheckingAvailability(true);
+    try{const response=await api.post(`/recommendation-runs/${runId}/jobs/${id}/availability`,{}, {timeout:15000});if(sequence===requestSequence.current)setJobs(current=>current.map(j=>(j.id??j.jobId)===id?{...j,availability:response.data.availability}:j));}
+    catch{setError('Availability check failed; do not assume the posting is open.');}finally{setCheckingAvailability(false);}
+  };
+  const reportClosed=async()=>{
+    if(!runId||!selected||!window.confirm('Have you confirmed that the original posting is expired or closed? This hides it from your searches for 24 hours.'))return;
+    const id=selected.id??selected.jobId,sequence=requestSequence.current;
+    try{const response=await api.post(`/recommendation-runs/${runId}/jobs/${id}/report-closed`);if(sequence===requestSequence.current)setJobs(current=>current.map(j=>(j.id??j.jobId)===id?{...j,availability:response.data.availability}:j));}
+    catch{setError('Could not save the closure report.');}
   };
 
   return (
@@ -440,7 +487,7 @@ export default function JobsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setShowFilters((value) => !value)} className="jh-button-ghost"><SlidersHorizontal size={14} /> Preferences</button>
-          <button onClick={() => runRecommendations(true)} disabled={refreshing || !selectedResume} className="jh-button-accent"><RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh matches</button>
+          <button onClick={() => runRecommendations(true)} disabled={refreshing || loading || discovering || !selectedResume} className="jh-button-accent"><RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh matches</button>
         </div>
       </section>
 
@@ -455,21 +502,29 @@ export default function JobsPage() {
           <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-xs font-semibold text-stone-300"><Filter size={14} className="text-amber-300" /> Search profile</div><button onClick={() => setShowFilters(false)} className="rounded-lg p-1.5 text-stone-500 hover:bg-white/5 hover:text-white"><X size={14} /></button></div>
           <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 [&>div]:min-w-0">
             <div><label className="text-[10px] font-medium text-slate-600">Resume</label><select value={selectedResume} onChange={(event) => setSelectedResume(event.target.value)} className="jh-input mt-1.5">{resumes.map((resume) => <option key={resume.id} value={resume.id} className="bg-[#0d1019]">{resume.fileName ?? resume.file_name ?? resume.id.slice(0, 8)}</option>)}</select></div>
-            <div><label className="text-[10px] font-medium text-slate-600">Target role</label><input value={prefs.targetRole} onChange={(event) => setPrefs((current) => ({ ...current, targetRole: event.target.value }))} className="jh-input mt-1.5" placeholder="e.g. Backend Engineer" /></div>
+              <div className="md:col-span-2"><label className="text-[10px] font-medium text-slate-600">Target roles (up to 3)</label>
+                {discovering && <p role="status" className="text-xs text-amber-300">Reading professional evidence to suggest roles…</p>}
+                <div className="mt-1.5 space-y-2">{targetRoles.map((role,index)=><div key={index} className="flex gap-2"><input aria-label={`Target role ${index+1}`} maxLength={80} value={role} onChange={event=>{manualRoles.current=true;setTargetRoles(current=>current.map((item,i)=>i===index?event.target.value:item));}} className="jh-input" /><button aria-label={`Remove role ${index+1}`} onClick={()=>{manualRoles.current=true;setTargetRoles(current=>current.filter((_,i)=>i!==index));}}>×</button></div>)}</div>
+                {targetRoles.length<3&&<button onClick={()=>{manualRoles.current=true;setTargetRoles(current=>[...current,'']);}} className="text-xs text-amber-300">+ Add role</button>}
+                {roleDiscovery?.roles?.length>0&&<><button className="ml-3 text-xs text-amber-300" onClick={()=>{manualRoles.current=false;setTargetRoles(roleDiscovery.roles.map((r:any)=>r.title));}}>Use suggested roles</button><p className="mt-2 text-xs">Suggestions: {roleDiscovery.source} · {roleDiscovery.model || 'deterministic fallback'}</p>{roleDiscovery.roles.map((role:any)=><details key={role.title} className="mt-2 text-xs text-slate-400"><summary>{role.title}: {role.reason}</summary><p className="mt-1 whitespace-pre-wrap">{role.evidence.join('\n')}</p></details>)}</>}
+                {roleDiscoveryError&&<p className="mt-2 text-xs text-amber-300">{roleDiscoveryError}</p>}
+              </div>
             <div><label className="text-[10px] font-medium text-slate-600">Location</label><input value={prefs.location} onChange={(event) => setPrefs((current) => ({ ...current, location: event.target.value }))} className="jh-input mt-1.5" placeholder="India, Bengaluru, Remote" /></div>
             <div><label className="text-[10px] font-medium text-slate-600">Minimum fit score</label><input type="number" min={0} max={100} value={prefs.minScore} onChange={(event) => setPrefs((current) => ({ ...current, minScore: Math.max(0, Math.min(100, Number(event.target.value) || 0)) }))} className="jh-input mt-1.5" /></div>
             <div><label className="text-[10px] font-medium text-slate-600">Work mode (comma-separated)</label><input value={prefs.workMode} onChange={(event) => setPrefs((current) => ({ ...current, workMode: event.target.value }))} className="jh-input mt-1.5" placeholder="remote,hybrid" /></div>
             <div><label className="text-[10px] font-medium text-slate-600">Keywords in job text</label><input value={prefs.keywords} onChange={(event) => setPrefs((current) => ({ ...current, keywords: event.target.value }))} className="jh-input mt-1.5" /></div>
-            <div><label className="text-[10px] font-medium text-slate-600">Posted within days</label><input type="number" min={1} max={365} value={prefs.daysPosted} onChange={(event) => setPrefs((current) => ({ ...current, daysPosted: event.target.value }))} className="jh-input mt-1.5" /></div>
+              <div><label className="text-[10px] font-medium text-slate-600">Freshness</label><select aria-label="Freshness" value={prefs.daysPosted || 'any'} onChange={(event) => setPrefs((current) => ({ ...current, daysPosted: event.target.value === 'any' ? '' : event.target.value }))} className="jh-input mt-1.5"><option value="1">24 hours</option><option value="3">3 days</option><option value="7">7 days</option><option value="30">30 days</option><option value="any">Any date</option></select></div>
+             <div><label className="text-[10px] font-medium text-slate-600">Sort</label><select value={sortBy} onChange={(event) => setSortBy(event.target.value as 'match' | 'newest')} className="jh-input mt-1.5"><option value="match">Best match</option><option value="newest">Newest</option></select></div>
           </div>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.055] pt-4"><p className="text-[10px] leading-4 text-slate-600">Target role drives provider retrieval. Resume evidence + semantic alignment drive ranking. Soft skills are not stuffed into the search query.</p><button onClick={() => runRecommendations(false)} className="jh-button-primary"><Search size={14} /> Apply & rerun</button></div>
+           <div className="mt-4 flex flex-wrap gap-4 border-t border-white/[0.055] pt-4 text-[10px] text-slate-500"><label><input type="checkbox" checked={includeUnknownDates} onChange={(e) => setIncludeUnknownDates(e.target.checked)} /> Include unknown dates</label><label><input type="checkbox" checked={verifiedOpenOnly} onChange={(e) => setVerifiedOpenOnly(e.target.checked)} /> Verified open only</label></div><div className="mt-3 flex flex-wrap items-center justify-between gap-3"><p className="text-[10px] leading-4 text-slate-600">Review roles and search scope before retrieving matches. Fit scores are evidence summaries, not hiring probabilities.</p><button onClick={() => runRecommendations(false)} className="jh-button-primary"><Search size={14} /> Find matches</button></div>
         </section>
       )}
 
       {error && <div className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] p-4 text-xs text-rose-200">{error}</div>}
+      {showFilters&&<label className="block text-xs text-slate-400"><input type="checkbox" checked={includeUnknownLocations} onChange={e=>setIncludeUnknownLocations(e.target.checked)}/> Include jobs with unverified applicant location (may not accept applications from your country)</label>}
       {(jobs.length > 0 || sources.length > 0 || Object.keys(rejectedReasons).length > 0) && <div className="rounded-2xl border border-white/[0.055] bg-white/[0.02] p-4 text-[11px] text-slate-500"><p className="font-semibold text-slate-300">Recommendation evidence</p>{sources.length > 0 ? <div className="mt-1 space-y-1">{sources.map((source, index) => <p key={`${displayValue(source.provider)}-${index}`} className="break-words"><span className="text-slate-300">{displayValue(source.provider) || 'Provider unavailable'}</span>: {displayValue(source.status) || 'status unavailable'} · {source.cacheHit === undefined ? 'cache unknown' : `cache ${displayValue(source.cacheHit)}`} · fetched {source.fetchedCount === undefined ? 'unknown' : displayValue(source.fetchedCount)}{displayValue(source.location) ? ` · ${displayValue(source.location)}` : ''}{displayValue(source.page) ? ` · page ${displayValue(source.page)}` : ''}{displayValue(source.fallbackReason) ? ` · fallback: ${displayValue(source.fallbackReason)}` : ''}{displayValue(source.errorCode) ? ` · error: ${displayValue(source.errorCode)}` : ''}</p>)}</div> : <p className="mt-1">Sources unavailable.</p>}{Object.keys(rejectedReasons).length > 0 && <p className="mt-1">Rejected: {Object.entries(rejectedReasons).map(([reason, count]) => `${displayValue(reason)} (${count})`).join(', ')}</p>}</div>}
 
-      {loading ? (
+      {loading || refreshing ? (
         // Ranking can run 25–50 s behind provider scrapes + embeds — show a
         // structural skeleton of the results grid, not a bare spinner (§0 rule 7).
         <div className="space-y-4" aria-busy="true" aria-label="Ranking opportunities for this resume">
@@ -495,7 +550,7 @@ export default function JobsPage() {
       ) : visibleJobs.length === 0 ? (
         <div className="mx-auto max-w-xl rounded-3xl border border-white/[0.07] bg-white/[0.025] px-6 py-12 text-center">
           <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-stone-800 text-stone-500"><Search size={23} /></span>
-          <h2 className="mt-4 text-lg font-semibold text-white">No matches above your threshold</h2>
+          <h2 className="mt-4 text-lg font-semibold text-white">{runId?'No matches above your threshold':'Review your roles and search scope'}</h2>
           <p className="mx-auto mt-2 max-w-md text-xs leading-5 text-slate-500">Lower the minimum fit score, broaden the target role/location, or refresh the provider cache.</p>
            <div className="mt-5 flex flex-wrap justify-center gap-2"><button onClick={() => setShowFilters(true)} className="jh-button-ghost">Adjust preferences</button>{nextOffset !== null && <button className="jh-button-ghost" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Loading…' : `Load more (${jobs.length} of ${total})`}</button>}</div>
         </div>
@@ -508,7 +563,7 @@ export default function JobsPage() {
           </div>
 
           <div className="jh-surface-strong min-w-0 p-5 md:p-6 xl:sticky xl:top-8 xl:self-start">
-            {selected ? <JobDetail job={selected} /> : <div className="py-20 text-center text-sm text-slate-600">Select a job to inspect its match report.</div>}
+            {selected ? <JobDetail job={selected} onRecheck={recheckAvailability} onReportClosed={reportClosed} checking={checkingAvailability} /> : <div className="py-20 text-center text-sm text-slate-600">Select a job to inspect its match report.</div>}
           </div>
         </section>
       )}

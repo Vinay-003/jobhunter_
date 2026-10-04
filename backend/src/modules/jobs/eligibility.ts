@@ -4,13 +4,15 @@ import { parseJd } from '../jd/jdParser.js';
 import { detectJobSeniority, roleFamily } from './ranking.js';
 import { inferCountry, normalizePlace, countryAliases } from './geography.js';
 import { normalizeSeniority } from './seniority.js';
+import { roleArea } from './roleDiscovery.js';
 
-export type EffectivePreferences = { targetRoles: string[]; locations: string[]; workModes: string[]; emphasizedSkills: string[]; excludedRoles: string[]; seniority: string[]; daysPosted?: number; keywords?: string };
+export type EffectivePreferences = { targetRoles: string[]; locations: string[]; workModes: string[]; emphasizedSkills: string[]; excludedRoles: string[]; seniority: string[]; daysPosted?: number; keywords?: string; sortBy?: 'match'|'newest'; includeUnknownDates?: boolean; verifiedOpenOnly?: boolean; includeUnknownLocations?:boolean };
 export function effectivePreferences(saved: any, request: any): EffectivePreferences {
   const list = (key: string, column: string): string[] => (request[key] !== undefined ? request[key] : saved?.[column] ?? []).map((s: string) => s.trim()).filter(Boolean);
   return { targetRoles: list('targetRoles', 'target_roles'), locations: list('locations', 'locations'), workModes: list('workModes', 'work_modes'),
     emphasizedSkills: list('emphasizedSkills', 'emphasized_skills'), excludedRoles: list('excludedRoles', 'excluded_roles'), seniority: list('seniority', 'seniority').map(level => normalizeSeniority(level) ?? level),
-    daysPosted: request.daysPosted, keywords: request.keywords?.trim() || undefined };
+    daysPosted: request.daysPosted === null ? undefined : request.daysPosted ?? 7, keywords: request.keywords?.trim() || undefined,
+    sortBy: request.sortBy ?? 'match', includeUnknownDates: request.includeUnknownDates ?? false, verifiedOpenOnly: request.verifiedOpenOnly ?? false, includeUnknownLocations:request.includeUnknownLocations??false };
 }
 export type CandidateQualification = Partial<ResumeProfile> & { professionalYears?: number | null };
 export type Eligibility = { status: 'eligible' | 'ineligible' | 'uncertain'; reasons: string[] };
@@ -29,12 +31,14 @@ export function countryCodeForLocation(location: string | null | undefined): str
   return country ? ({ india:'IN', 'united states':'US', canada:'CA', germany:'DE', 'united kingdom':'GB', australia:'AU' } as Record<string,string>)[country] ?? null : null;
 }
 const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-const roleArea = (value: string) => /\b(frontend|front end|react|ui)\b/i.test(value) ? 'frontend' : /\b(backend|back end|api|server)\b/i.test(value) ? 'backend' : /\b(data engineer|data engineering)\b/i.test(value) ? 'data' : /\b(full stack|fullstack)\b/i.test(value) ? 'fullstack' : 'generic';
 
 /** Explicit barriers only; absent evidence is uncertain, not proof of eligibility. */
 export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | undefined, prefs: EffectivePreferences, candidate?: CandidateQualification): Eligibility {
   const blockers: string[] = [];
   const unknown: string[] = [];
+  if (job.availability?.status === 'closed') blockers.push('Job is closed');
+  if (prefs.verifiedOpenOnly && (job.availability?.status !== 'open' || !job.availability.checkedAt || Date.now() - Date.parse(job.availability.checkedAt) > 300_000)) blockers.push('Open applications not verified recently');
+  if (job.availability?.status === 'unknown') unknown.push('Application availability unverified');
   const title = job.title.toLowerCase();
   const description = job.description ?? '';
   if (roleFamily(job.title) === 'other') blockers.push('Unrelated role family');
@@ -42,7 +46,7 @@ export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | 
   if (prefs.targetRoles.length && roleFamily(job.title) !== 'other') {
     const wanted = prefs.targetRoles.map(roleArea);
     const actual = roleArea(job.title);
-    if (actual !== 'generic' && !wanted.includes('generic') && !wanted.includes('fullstack') && actual !== 'fullstack' && !wanted.includes(actual)) blockers.push('Outside requested role specialization');
+     if (actual !== 'generic' && !wanted.includes('generic') && !wanted.includes(actual) && !(wanted.includes('fullstack') && ['backend','frontend'].includes(actual))) blockers.push('Outside requested role specialization');
   }
   const level = detectJobSeniority(job.title, job.description);
   if (['intern', 'entry'].includes(normalizeSeniority(candidateLevel) ?? '') && (level === 'senior' || level === 'principal')) blockers.push('Explicit senior role');
@@ -85,6 +89,7 @@ export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | 
   if (prefs.locations.length) {
     const advertised = `${location} ${description}`;
     const requested = prefs.locations.map(value => countryOf(value) ?? normalize(value));
+    if (requested.includes('india') && /\b(?:latin america|latam|us[ -]only|usa[ -]only|us citizens? only)\b/i.test(`${job.title} ${location} ${description}`)) blockers.push('Outside advertised applicant region');
     const residency = advertised.match(/\b(?:us|usa|united states|canada|india|germany|united kingdom|uk|australia)(?:\s*(?:and|or|,|\/)\s*(?:us|usa|united states|canada|india|germany|united kingdom|uk|australia))*\s*(?:residents?|candidates?|based|only|eligible)\b|\b(?:only|residents?|based in|eligible in)\s*(?:the\s+)?(?:us|usa|united states|canada|india|germany|united kingdom|uk|australia)\b/i)?.[0] ?? '';
     const allowed = [...new Set([...residency.matchAll(/\b(?:us|usa|united states|canada|india|germany|united kingdom|uk|australia)\b/gi)].map(match => countryOf(match[0])).filter(Boolean))];
      const locationCountries = [inferCountry(location)].filter(Boolean) as string[];
@@ -98,7 +103,12 @@ export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | 
     else if (!allowed.length && !worldwide && remote && !locationCountry) unknown.push('Remote residency eligibility unavailable');
     else if ((!location || (!locationCountries.length && !worldwide && !prefs.locations.some(loc => normalize(location).includes(normalize(loc))))) && !remote) unknown.push('Location eligibility unavailable');
   }
-  if (prefs.daysPosted && job.postedAt && Number.isFinite(new Date(job.postedAt).getTime()) && Date.now() - new Date(job.postedAt).getTime() > prefs.daysPosted * 86400000) blockers.push('Posting too old');
-  if (prefs.daysPosted && (!job.postedAt || !Number.isFinite(new Date(job.postedAt).getTime()))) unknown.push('Posting date unavailable');
+  const posted = job.postedAt ? Date.parse(job.postedAt) : NaN;
+  const trustworthyDate = Number.isFinite(posted) && posted <= Date.now() && job.dateSource !== 'updated';
+  if (!trustworthyDate) {
+    if (prefs.includeUnknownDates === false) blockers.push('Posting date unavailable or invalid (strict freshness)');
+    else if (prefs.daysPosted) unknown.push('Posting date unavailable or invalid');
+  } else if (prefs.daysPosted && Date.now() - posted > prefs.daysPosted * 86400000) blockers.push('Posting too old');
+  if(prefs.includeUnknownLocations===false && unknown.some(reason=>/Location eligibility unavailable|Remote residency eligibility unavailable/.test(reason))) blockers.push('Applicant location unverified (strict geography)');
   return blockers.length ? { status:'ineligible', reasons:blockers } : unknown.length ? { status:'uncertain', reasons:unknown } : { status:'eligible', reasons:[] };
 }
