@@ -209,3 +209,10 @@ The first audit used the actual uploaded PDF, a newly signed-up audit account, r
 - Remotive exhausted its existing daily quota during these tests; its fallback status was visible, not counted as successful live retrieval. Strict date filtering intentionally excludes Jooble records without a trustworthy posting date.
 - First-seen time is left unavailable where the current schema/provider does not establish it; update/fetch dates are not fabricated as posting/first-seen dates.
 - The key is stored only in ignored local backend configuration. The template documents `APINEX_API_KEY` and `APINEX_ROLE_MODEL=free/gpt-6-luna`; set a rotated key privately in Render when deployment configuration is authorized. No secret is included in the commit. The exposed key should be rotated.
+
+## Requested MiMo fallback — 2026-10-05
+- Confirmed exact catalog ID at `https://apinex.bond/api/public/models`: `free/mimo-v2.6-pro`, live and `allowFree: true` at verification time.
+- The role-discovery chain is now Luna first, then one MiMo attempt only when a received Luna response fails output/evidence validation. Both use the same evidence checks; actual successful model identity is retained in output and cache. If both fail, the visible deterministic fallback remains.
+- Configuration/auth/rate-limit/network errors do not trigger another model call. No paid model and no same-model retry were added. Inference budget is 70 seconds total (45 Luna, 25 MiMo); UI discovery timeout is 90 seconds. Version/cache identity includes the ordered chain.
+- Tests: 142 backend tests passed, three opt-in skips; backend build passed. A controlled invalid Luna response triggered a **live** MiMo request using the actual contact-redacted professional resume material. MiMo returned validated Full Stack Developer, Backend Developer and Frontend Developer roles in approximately 15.7 seconds. The induced Luna failure is a test input, not a claim of a live Luna outage.
+- AWS/Render configuration and embedding models were not changed. No additional key is needed for the fallback.

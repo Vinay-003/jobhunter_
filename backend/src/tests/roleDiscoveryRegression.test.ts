@@ -26,6 +26,32 @@ describe('role discovery',()=>{
     const b=await discoverRoles(profile,{ownerId:'unit-valid-b',cached:a,transport});expect(b.cacheKey).not.toBe(a.cacheKey);expect(calls).toBe(2);
     process.env.APINEX_ROLE_MODEL='gpt-6-luna';expect((await discoverRoles(profile,{ownerId:'unit-paid',transport})).source).toBe('fallback');expect(calls).toBe(2);
   });
+  test('invalid Luna output retries once on MiMo and caches actual model identity per owner',async()=>{
+    for (const [index, invalid] of ['not-json', JSON.stringify({choices:[{message:{content:''}}]}), response({roles:valid.roles.map(r=>({...r,evidence:['invented evidence outside the resume']}))})].entries()) {
+      const models:string[]=[];
+      const transport=async(q:any)=>{models.push(JSON.parse(q.body).model);expect(q.timeoutMs).toBeGreaterThan(0);expect(q.timeoutMs).toBeLessThanOrEqual(models.length%2===1?45_000:25_000);return models.length%2===1?invalid:response(valid);};
+      const ownerId=`unit-mimo-${index}`;
+      const result=await discoverRoles(profile,{ownerId,transport});
+      expect(result.source).toBe('ai');expect(result.model).toBe('free/mimo-v2.6-pro');expect(result.warning).toContain('Luna returned invalid');
+      expect(models).toEqual(['free/gpt-6-luna','free/mimo-v2.6-pro']);
+      expect((await discoverRoles(profile,{ownerId,cached:result,transport})).model).toBe('free/mimo-v2.6-pro');expect(models.length).toBe(2);
+      await discoverRoles(profile,{ownerId:`${ownerId}-other`,cached:result,transport});expect(models.length).toBe(4);
+    }
+  });
+  test('both invalid outputs use local deterministic fallback with no raw content leaked',async()=>{
+    const models:string[]=[];
+    const result=await discoverRoles(profile,{ownerId:'unit-both-invalid',transport:async(q:any)=>{models.push(JSON.parse(q.body).model);return 'private-raw-invalid-output';}});
+    expect(models).toEqual(['free/gpt-6-luna','free/mimo-v2.6-pro']);
+    expect(result.source).toBe('fallback');expect(result.model).toBeNull();expect(result.roles.map(r=>r.title)).toEqual(inferRoleTitles(profile));
+    expect(JSON.stringify(result)).not.toContain('private-raw-invalid-output');
+  });
+  test('missing configuration cannot use persisted cache or in-flight request',async()=>{
+    let calls=0;const transport=async()=>{calls++;return response(valid);};
+    const cached=await discoverRoles(profile,{ownerId:'unit-config-cache',transport});expect(calls).toBe(1);
+    delete process.env.APINEX_API_KEY;
+    const result=await discoverRoles(profile,{ownerId:'unit-config-cache',cached,transport});
+    expect(result.source).toBe('fallback');expect(result.warning).toContain('NOT_CONFIGURED');expect(calls).toBe(1);
+  });
   test('malformed JSON, hallucinated quotes, duplicates and premature seniority fail safely',async()=>{
     for(const [i,x] of [null,{roles:valid.roles.map(r=>({...r,evidence:['NOT IN THE RESUME AT ALL']}))},{roles:[valid.roles[0],valid.roles[0],valid.roles[2]]},{roles:valid.roles.map(r=>({...r,title:'Senior '+r.title}))}].entries()) {
       expect((await discoverRoles(profile,{ownerId:'unit-invalid-'+i,transport:async()=>response(x)})).source).toBe('fallback');

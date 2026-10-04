@@ -378,7 +378,7 @@ export default function JobsPage() {
     setDiscovering(true);setRoleDiscovery(null);setJobs([]);setRunId(null);setNextOffset(null);setTotal(0);
     if (!manualRoles.current) setTargetRoles([]);
     setRoleDiscoveryError('');
-    void api.post('/recommendation-runs/roles', { resumeId: selectedResume }, { timeout: 75000, signal:controller.signal })
+    void api.post('/recommendation-runs/roles', { resumeId: selectedResume }, { timeout: 90000, signal:controller.signal })
       .then(({ data }) => { if (sequence === discoverySequence.current && data?.roleDiscovery) { setRoleDiscovery(data.roleDiscovery); if(!manualRoles.current) setTargetRoles((data.roleDiscovery.roles ?? []).slice(0, 3).map((r: any) => r.title)); if(data.roleDiscovery.warning)setRoleDiscoveryError(data.roleDiscovery.warning); } })
       .catch(() => { if (sequence === discoverySequence.current&&!controller.signal.aborted) { setRoleDiscovery(null); setRoleDiscoveryError('Role suggestions are unavailable right now. Add up to three roles manually; no search has been submitted.'); } })
       .finally(()=>{if(sequence===discoverySequence.current)setDiscovering(false);});

@@ -3,8 +3,10 @@ import axios from 'axios';
 import { z } from 'zod';
 import type { ResumeProfile } from '../parsing/resumeProfile.js';
 
-export const ROLE_DISCOVERY_VERSION = '2.0.0';
-const MODEL = 'free/gpt-6-luna';
+export const ROLE_DISCOVERY_VERSION = '2.1.0';
+const MODELS = ['free/gpt-6-luna', 'free/mimo-v2.6-pro'] as const;
+const INFERENCE_BUDGET_MS = 70_000;
+const MODEL_TIMEOUTS_MS = [45_000, 25_000] as const;
 const TTL = 24 * 60 * 60_000;
 const cache = new Map<string, RoleDiscoveryResult>();
 const pending = new Map<string, Promise<RoleDiscoveryResult>>();
@@ -94,48 +96,66 @@ export function parseRoleOutput(content:string): {value:unknown;repaired:boolean
 
 export async function discoverRoles(profile: ResumeProfile, options: { ownerId: string; cached?: RoleDiscoveryResult | null; transport?: RoleDiscoveryTransport }): Promise<RoleDiscoveryResult> {
   const material = profileMaterial(profile);
-  const cacheKey = sha(`${options.ownerId}:${ROLE_DISCOVERY_VERSION}:${MODEL}:${material}`);
+  const cacheKey = sha(`${options.ownerId}:${ROLE_DISCOVERY_VERSION}:${MODELS.join(',')}:${material}`);
   const usable = (v?: RoleDiscoveryResult | null) => {
-    if (!v || v.version !== ROLE_DISCOVERY_VERSION || v.cacheKey !== cacheKey || v.source !== 'ai' || v.model !== MODEL) return false;
+    if (!v || v.version !== ROLE_DISCOVERY_VERSION || v.cacheKey !== cacheKey || v.source !== 'ai' || !MODELS.some(model => model === v.model)) return false;
     const age = Date.now() - Date.parse(v.createdAt);
     try { validatedRoles(v, material, profile); } catch { return false; }
     return Number.isFinite(age) && age >= 0 && age < TTL;
   };
-  if (usable(options.cached)) return options.cached!;
-  if (usable(cache.get(cacheKey))) return cache.get(cacheKey)!;
-  if (pending.has(cacheKey)) return pending.get(cacheKey)!;
+  // Validate configuration before any cache hit or in-flight reuse.
+  const configError = material.length > 40_000 ? 'INPUT_TOO_LONG' : !process.env.APINEX_API_KEY ? 'NOT_CONFIGURED' : process.env.APINEX_ROLE_MODEL && process.env.APINEX_ROLE_MODEL !== MODELS[0] ? 'MODEL_NOT_ALLOWED' : null;
+  if (!configError) {
+    if (usable(options.cached)) return options.cached!;
+    if (usable(cache.get(cacheKey))) return cache.get(cacheKey)!;
+    if (pending.has(cacheKey)) return pending.get(cacheKey)!;
+  }
   const task = (async () => {
     const base = { version: ROLE_DISCOVERY_VERSION, cacheKey, createdAt: new Date().toISOString() };
     try {
-      if (material.length > 40_000) throw Error('INPUT_TOO_LONG');
-      if (!process.env.APINEX_API_KEY) throw Error('NOT_CONFIGURED');
-      if (process.env.APINEX_ROLE_MODEL && process.env.APINEX_ROLE_MODEL !== MODEL) throw Error('MODEL_NOT_ALLOWED');
+      if (configError) throw Error(configError);
       const transport: RoleDiscoveryTransport = options.transport ?? (async req => {
         const response = await axios.post(req.url, JSON.parse(req.body), { headers: req.headers, timeout: req.timeoutMs, maxContentLength: req.maxBytes, maxBodyLength: 100_000, maxRedirects: 0, responseType: 'text' });
         return typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
       });
       const started = Date.now();
-      const raw = await transport({ url: 'https://api.apinex.bond/v1/chat/completions', headers: { Authorization: `Bearer ${process.env.APINEX_API_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: MODEL, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: material }], reasoning_effort:'low', max_tokens: 16000 }), timeoutMs: 60_000, maxBytes: 96_000 });
-      if (Buffer.byteLength(raw) > 96_000) throw Error('RESPONSE_TOO_LARGE');
-      const envelope=JSON.parse(raw);
-      const content = envelope?.choices?.[0]?.message?.content;
-      if (typeof content !== 'string') throw Error('INVALID_SCHEMA');
-      if(!content.trim()) throw Error(envelope?.choices?.[0]?.finish_reason==='length'?'OUTPUT_BUDGET_EXHAUSTED':'EMPTY_CONTENT');
-      const output=parseRoleOutput(content);
-      const roles = validatedRoles(output.value, material, profile);
-      const result: RoleDiscoveryResult = { ...base, source: 'ai', model: MODEL, roles, ...(output.repaired?{warning:'AI response lacked closing JSON delimiters; repaired delimiters only, then validated all fields and evidence.'}:{}) };
-      cache.set(cacheKey, result);
-      while (cache.size > 128) cache.delete(cache.keys().next().value!);
-      console.info(`[role-discovery] source=ai model=${MODEL} roles=${roles.length} ms=${Date.now() - started}`);
-      return result;
+      let primaryInvalid = false;
+      for (const [index, model] of MODELS.entries()) {
+        const timeoutMs = Math.min(MODEL_TIMEOUTS_MS[index], INFERENCE_BUDGET_MS - (Date.now() - started));
+        if (timeoutMs <= 0) throw Error('INFERENCE_TIMEOUT');
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const request = transport({ url: 'https://api.apinex.bond/v1/chat/completions', headers: { Authorization: `Bearer ${process.env.APINEX_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: material }], reasoning_effort:'low', max_tokens: 16000 }), timeoutMs, maxBytes: 96_000 });
+        let raw: string;
+        try {
+          raw = await Promise.race([request, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error('INFERENCE_TIMEOUT')), timeoutMs); })]);
+        } finally { if (timer) clearTimeout(timer); }
+        try {
+          if (typeof raw !== 'string' || Buffer.byteLength(raw) > 96_000) throw Error('INVALID_RESPONSE_SCHEMA');
+          const envelope = JSON.parse(raw);
+          const content = envelope?.choices?.[0]?.message?.content;
+          if (typeof content !== 'string' || !content.trim()) throw Error('INVALID_RESPONSE_SCHEMA');
+          const output = parseRoleOutput(content);
+          const roles = validatedRoles(output.value, material, profile);
+          const warning = index === 1 ? 'Luna returned invalid role output; validated fallback model free/mimo-v2.6-pro was used.' : output.repaired ? 'AI response lacked closing JSON delimiters; repaired delimiters only, then validated all fields and evidence.' : undefined;
+          const result: RoleDiscoveryResult = { ...base, source: 'ai', model, roles, ...(warning ? { warning } : {}) };
+          cache.set(cacheKey, result);
+          while (cache.size > 128) cache.delete(cache.keys().next().value!);
+          console.info(`[role-discovery] source=ai model=${model} roles=${roles.length} ms=${Date.now() - started}`);
+          return result;
+        } catch {
+          if (index === 0) { primaryInvalid = true; continue; }
+          throw Error('INVALID_RESPONSE_SCHEMA');
+        }
+      }
+      throw Error(primaryInvalid ? 'INVALID_RESPONSE_SCHEMA' : 'INFERENCE_TIMEOUT');
     } catch (error) {
       const code = axios.isAxiosError(error) ? `HTTP_${error.response?.status ?? 'UNAVAILABLE'}` : error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : 'INVALID_RESPONSE_SCHEMA';
       console.warn(`[role-discovery] source=fallback code=${code}`);
       return { ...base, source: 'fallback' as const, model: null, roles: fallback(profile), warning: `AI role discovery unavailable (${code}); evidence-based fallback used. No paid model was called.` };
     }
   })();
-  pending.set(cacheKey, task);
-  try { return await task; } finally { pending.delete(cacheKey); }
+  if (!configError) pending.set(cacheKey, task);
+  try { return await task; } finally { if (!configError) pending.delete(cacheKey); }
 }
 export default discoverRoles;
