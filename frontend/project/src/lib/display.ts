@@ -17,3 +17,11 @@ export function displayValue(value: unknown): string {
   }
   return '';
 }
+
+/** Format stored report metrics without treating boolean signals as missing. */
+export function formatMetricValue(value: unknown): string {
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'number' && Number.isFinite(value)) return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+  if (typeof value === 'string' && value.trim()) return safeText(value);
+  return 'Not recorded';
+}

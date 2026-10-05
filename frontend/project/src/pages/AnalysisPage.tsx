@@ -3,6 +3,7 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 import { Button, Eyebrow, ScoreRing, Tag } from '../components/UI';
 import './analysis.css';
 import api, { getApiErrorMessage } from '../lib/api';
+import { formatMetricValue } from '../lib/display';
 import { AlertCircle, ArrowLeft, ArrowRight, Check, CheckCircle, ChevronDown, Download, FileText, Printer, RefreshCcw, ShieldCheck, Target } from 'lucide-react';
 
 type Status = 'pass' | 'warn' | 'fail';
@@ -327,7 +328,7 @@ function SavedSignals({ view, match = false }: { view: ViewModel; match?: boolea
     {!!strengths?.length && <div><h3>Strengths</h3><ul>{strengths.map((text, i) => <li key={i}>{text}</li>)}</ul></div>}
     {!!warnings?.length && <div><h3>Review before applying</h3><ul>{warnings.map((text, i) => <li key={i}>{text}</li>)}</ul></div>}
     {match && !!view.jdMatch?.deterministic?.matchedPreferred?.length && <div><h3>Matched preferred skills</h3><div className="skill-cloud">{view.jdMatch.deterministic.matchedPreferred.map(skill => <Tag key={skill} tone="blue">{skill}</Tag>)}</div></div>}
-    {!match && view.readiness.metrics && <dl>{Object.entries(view.readiness.metrics).map(([name, value]) => <div key={name}><dt>{name.replace(/([A-Z])/g, ' $1')}</dt><dd>{typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 3 }) : 'Not recorded'}</dd></div>)}</dl>}
+    {!match && view.readiness.metrics && <dl>{Object.entries(view.readiness.metrics).map(([name, value]) => <div key={name}><dt>{name.replace(/([A-Z])/g, ' $1')}</dt><dd>{formatMetricValue(value)}</dd></div>)}</dl>}
     {match && view.jdMatch?.breakdown && <dl>{Object.entries(view.jdMatch.breakdown).map(([name, value]) => <div key={name}><dt>{name.replace(/([A-Z])/g, ' $1')}</dt><dd>{value ?? 'Not recorded'}</dd></div>)}</dl>}
   </section>;
 }

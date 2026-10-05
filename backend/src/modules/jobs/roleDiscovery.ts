@@ -150,7 +150,11 @@ export async function discoverRoles(profile: ResumeProfile, options: { ownerId: 
       }
       throw Error(primaryInvalid ? 'INVALID_RESPONSE_SCHEMA' : 'INFERENCE_TIMEOUT');
     } catch (error) {
-      const code = axios.isAxiosError(error) ? `HTTP_${error.response?.status ?? 'UNAVAILABLE'}` : error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : 'INVALID_RESPONSE_SCHEMA';
+       const code = axios.isAxiosError(error)
+         ? error.response?.status === 402
+           ? 'HTTP_402_ACCOUNT_OR_QUOTA'
+           : `HTTP_${error.response?.status ?? 'UNAVAILABLE'}`
+         : error instanceof Error && /^[A-Z_]{3,40}$/.test(error.message) ? error.message : 'INVALID_RESPONSE_SCHEMA';
       console.warn(`[role-discovery] source=fallback code=${code}`);
       return { ...base, source: 'fallback' as const, model: null, roles: fallback(profile), warning: `AI role discovery unavailable (${code}); evidence-based fallback used. No paid model was called.` };
     }
