@@ -1,388 +1,102 @@
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../lib/api';
-import {
-  ArrowRight,
-  Briefcase,
-  Check,
-  CheckCircle,
-  FileText,
-  Gauge,
-  Loader2,
-  Lock,
-  FileSearch,
-  ShieldCheck,
-  Sparkles,
-  UploadCloud,
-  X,
-} from 'lucide-react';
+import { Button, Eyebrow, SelectMenu, Tag } from '../components/UI';
+import { ArrowRight, Briefcase, Check, ChevronDown, FileText, LockKeyhole, ShieldCheck, Target, Upload } from 'lucide-react';
+import './analysis.css';
 
 type Mode = 'resume' | 'match';
 type TargetLevel = 'entry' | 'mid' | 'senior';
-
-const modes = [
-  {
-    id: 'resume' as const,
-    eyebrow: 'No job description',
-    title: 'Resume Health',
-    description: 'A rule-based 100-point review of ATS readability, impact, bullet quality, skills evidence, completeness, and writing.',
-    icon: FileSearch,
-    accent: 'amber',
-    tags: ['No AI similarity', 'Detailed report', 'Priority fixes'],
-  },
-  {
-    id: 'match' as const,
-    eyebrow: 'For a specific role',
-    title: 'Tailored Match',
-    description: 'Keep your Resume Health score separate, then compare your evidence, required skills, responsibilities, and seniority to one JD.',
-    icon: Briefcase,
-    accent: 'amber',
-    tags: ['JD-specific', 'Semantic evidence', 'Missing skills'],
-  },
-];
-
-function FileDropzone({
-  file,
-  loading,
-  onFile,
-}: {
-  file: File | null;
-  loading: boolean;
-  onFile: (file: File | null) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const [dragging, setDragging] = useState(false);
-
-  const validate = (next: File | null) => {
-    if (!next) return onFile(null);
-    if (next.type !== 'application/pdf' && !next.name.toLowerCase().endsWith('.pdf')) return;
-    onFile(next);
-  };
-
-  const onDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setDragging(false);
-    if (loading) return;
-    validate(event.dataTransfer.files?.[0] ?? null);
-  };
-
-  return (
-    <div
-      onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={onDrop}
-      className={`relative overflow-hidden rounded-2xl border border-dashed p-6 transition sm:p-8 ${dragging ? 'border-amber-400/40 bg-amber-400/10' : file ? 'border-emerald-400/25 bg-emerald-400/[0.035]' : 'border-stone-700 bg-stone-900/50 hover:border-amber-400/40 hover:bg-amber-400/[0.06]'}`}
-    >
-      <input
-        ref={inputRef}
-        type="file"
-        accept="application/pdf,.pdf"
-        className="hidden"
-        disabled={loading}
-        onChange={(event: ChangeEvent<HTMLInputElement>) => validate(event.target.files?.[0] ?? null)}
-      />
-      <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-amber-500/10 blur-3xl" />
-      <div className="relative flex flex-col items-center text-center">
-        <span className={`grid h-14 w-14 place-items-center rounded-2xl border ${file ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300' : 'border-stone-700 bg-stone-800 text-amber-300'}`}>
-          {file ? <CheckCircle size={24} /> : <UploadCloud size={24} />}
-        </span>
-        <p className="mt-4 text-sm font-semibold text-stone-100">{file ? file.name : 'Drop your resume here'}</p>
-        <p className="mt-1 max-w-md text-xs leading-5 text-stone-500">{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB • ready to analyze` : 'PDF only, up to 5 MB. Text-based PDFs give the most reliable structural analysis.'}</p>
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => inputRef.current?.click()}
-          className="pointer-events-auto mt-4 rounded-xl border border-stone-700 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-300 transition hover:bg-stone-700 hover:text-stone-100"
-        >
-          {file ? 'Choose another file' : 'Browse PDF'}
-        </button>
-        {file && (
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => onFile(null)}
-            className="pointer-events-auto absolute right-0 top-0 rounded-lg p-1.5 text-stone-600 transition hover:bg-white/5 hover:text-stone-300"
-            aria-label="Remove selected file"
-          >
-            <X size={15} />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+const levelOptions = [{ value: 'entry', label: 'Entry / early career' }, { value: 'mid', label: 'Mid-level' }, { value: 'senior', label: 'Senior' }];
+const checks = ['ATS structure', 'Core completeness', 'Impact evidence', 'Experience / projects', 'Skills evidence', 'Bullet writing', 'Concision', 'Consistency'];
+const maxFileSize = 5 * 1024 * 1024;
 
 export default function AtsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const existingResumeId = searchParams.get('resumeId');
+  const fileRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<Mode>('resume');
   const [file, setFile] = useState<File | null>(null);
-  // Set when arriving via /app/ats?resumeId=<id> (e.g. "Analyze this resume" from
-  // the resume view): analysis runs against the STORED file, no re-upload.
   const [existing, setExisting] = useState<{ id: string; fileName?: string } | null>(null);
   const [targetLevel, setTargetLevel] = useState<TargetLevel>('entry');
   const [jobDescription, setJobDescription] = useState('');
   const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<'upload' | 'analyze'>('upload');
   const [error, setError] = useState('');
+  const [dragging, setDragging] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
-    if (!existingResumeId) return;
+    if (!existingResumeId) { setExisting(null); return; }
     let cancelled = false;
-    (async () => {
-      try {
-        const res = await api.get(`/resumes/${existingResumeId}`);
-        if (cancelled) return;
-        const r = (res.data as { resume?: { id?: string; fileName?: string } })?.resume;
-        if (r) setExisting({ id: String(r.id ?? existingResumeId), fileName: r.fileName });
-        else setError('That resume no longer exists — upload a PDF instead.');
-      } catch (err) {
-        if (cancelled) return;
-        const status = (err as { status?: number })?.status;
-        setError(status === 404
-          ? 'That resume no longer exists — upload a PDF instead.'
-          : getApiErrorMessage(err));
-      }
-    })();
+    api.get(`/resumes/${existingResumeId}`).then((res) => {
+      if (cancelled) return;
+      const r = (res.data as { resume?: { id?: string; fileName?: string } })?.resume;
+      if (r) { setExisting({ id: String(r.id ?? existingResumeId), fileName: r.fileName }); setError(''); }
+      else setError('That resume no longer exists — upload a PDF instead.');
+    }).catch((err) => {
+      if (!cancelled) setError((err as { status?: number })?.status === 404 ? 'That resume no longer exists — upload a PDF instead.' : getApiErrorMessage(err));
+    });
     return () => { cancelled = true; };
   }, [existingResumeId]);
 
-  const clearExisting = () => {
-    setExisting(null);
-    setError('');
-    navigate('/app/ats', { replace: true });
+  const chooseFile = (next: File | null) => {
+    if (!next) { setFile(null); return; }
+    if (!next.name.toLowerCase().endsWith('.pdf') && next.type !== 'application/pdf') { setError('Choose a PDF resume. Other file types are not supported.'); return; }
+    if (next.size > maxFileSize) { setError('That PDF is larger than 5 MB. Choose a smaller file.'); return; }
+    setError(''); setFile(next); setExisting(null);
+    if (existingResumeId) navigate('/app/ats', { replace: true });
   };
-
-  const handleFile = (next: File | null) => {
-    if (next && next.size > 5 * 1024 * 1024) {
-      setError('That PDF is larger than 5 MB. Choose a smaller file.');
-      setFile(null);
-      return;
-    }
-    setError('');
-    setFile(next);
-    // a freshly chosen file replaces the stored-resume flow
-    if (next) setExisting(null);
-  };
+  const onDrop = (event: DragEvent<HTMLDivElement>) => { event.preventDefault(); setDragging(false); if (!loading) chooseFile(event.dataTransfer.files?.[0] ?? null); };
 
   const analyze = async () => {
-    if (!existing && !file) return setError('Choose a PDF resume first.');
-    if (mode === 'match' && jobDescription.trim().length < 20) return setError('Paste the job description you want to match against.');
-
-    setLoading(true);
-    setError('');
+    if (!existing && !file) { setError('Choose a PDF resume first.'); return; }
+    if (mode === 'match' && jobDescription.trim().length < 20) { setError('Paste at least 20 characters from the job description you want to match against.'); return; }
+    setLoading(true); setError(''); setPhase(existing ? 'analyze' : 'upload');
     try {
       let resumeId: string;
       let fileName: string;
-      if (existing) {
-        resumeId = existing.id;
-        fileName = existing.fileName || 'resume.pdf';
-      } else {
-        const form = new FormData();
-        form.append('resume', file!);
-        form.append('targetLevel', targetLevel);
+      if (existing) { resumeId = existing.id; fileName = existing.fileName || 'resume.pdf'; }
+      else {
+        const form = new FormData(); form.append('resume', file!); form.append('targetLevel', targetLevel);
         const upload = await api.post('/resumes', form, { headers: { 'Content-Type': 'multipart/form-data' } });
-         const uploaded = upload.data as { resume?: { id?: string }; id?: string };
-         resumeId = uploaded?.resume?.id ?? uploaded?.id ?? '';
+        const uploaded = upload.data as { resume?: { id?: string }; id?: string };
+        resumeId = uploaded?.resume?.id ?? uploaded?.id ?? '';
         if (!resumeId) throw new Error('Upload succeeded but no resume id was returned.');
         fileName = file!.name;
+        setExisting({ id: resumeId, fileName });
       }
-
-      // Cold local model load (venv SentenceTransformer) can take 60-120s on first
-      // request; SageMaker cold starts can also exceed the 60s default. Give these
-      // calls their own longer timeout instead of raising the global one.
+      setPhase('analyze');
       const response = mode === 'resume'
         ? await api.post('/analyses/readiness', { resumeId, targetLevel }, { timeout: 120000 })
         : await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel }, { timeout: 260000 });
-
-       const data = response.data as { analysisId?: string; [key: string]: unknown };
+      const data = response.data as { analysisId?: string; [key: string]: unknown };
       if (!data?.analysisId) throw new Error('Analysis completed but no report id was returned.');
-
-      navigate(`/app/analysis/${data.analysisId}`, {
-        state: {
-          initialAnalysis: data,
-          fileName,
-          mode,
-          createdAt: new Date().toISOString(),
-        },
-      });
-    } catch (err) {
-      setError(getApiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
+      navigate(`/app/analysis/${data.analysisId}`, { state: { initialAnalysis: data, fileName, mode, createdAt: new Date().toISOString() } });
+    } catch (err) { setError(getApiErrorMessage(err)); }
+    finally { setLoading(false); }
   };
 
-  return (
-    <div className="space-y-8 pb-10">
-      <section className="flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
-        <div>
-          <p className="jh-eyebrow"><Sparkles size={13} /> Resume intelligence</p>
-          <h1 className="jh-title mt-3">Know what is holding your resume back.</h1>
-          <p className="jh-subtitle mt-3">Start with document quality. Add a job description only when you want role-specific matching. We keep those two signals separate so the score stays interpretable.</p>
-        </div>
-        <div className="flex max-w-xl gap-3 rounded-2xl border border-stone-800 bg-stone-900/60 p-3 text-xs text-stone-500">
-          <ShieldCheck className="mt-0.5 shrink-0 text-amber-300" size={17} />
-          <span>Your no-JD report is deterministic and rule-based. AWS embeddings are used only for tailored matching and job relevance, never to invent a generic resume score.</span>
-        </div>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-2">
-        {modes.map((item) => {
-          const active = mode === item.id;
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              onClick={() => { setMode(item.id); setError(''); }}
-              className={`relative overflow-hidden rounded-2xl border p-5 text-left transition md:p-6 ${active ? 'border-amber-400/30 bg-amber-400/[0.07]' : 'border-stone-800 bg-stone-900/60 hover:border-stone-700 hover:bg-stone-900'}`}
-            >
-              <div className="absolute right-[-55px] top-[-55px] h-40 w-40 rounded-full blur-3xl bg-amber-500/10" />
-              <div className="relative flex items-start gap-4">
-                <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border ${active ? 'border-amber-400/20 bg-amber-400/10 text-amber-300' : 'border-stone-700 bg-stone-800 text-stone-500'}`}>
-                  <Icon size={20} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-600">{item.eyebrow}</p>
-                      <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>{item.title}</h2>
-                    </div>
-                    <span className={`grid h-6 w-6 place-items-center rounded-full border ${active ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300' : 'border-stone-700 text-transparent'}`}><Check size={13} /></span>
-                  </div>
-                  <p className="mt-2 max-w-xl text-xs leading-5 text-stone-500">{item.description}</p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {item.tags.map((tag) => <span key={tag} className="jh-chip">{tag}</span>)}
-                  </div>
-                </div>
-              </div>
-            </button>
-          );
-        })}
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[1.3fr_.7fr]">
-        <div className="jh-surface-strong p-5 md:p-6">
-          <div className="mb-5 flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-stone-100">Upload and analyze</p>
-              <p className="mt-1 text-xs text-stone-500">Your report opens as a dedicated diagnostic page after processing.</p>
-            </div>
-            <span className="hidden rounded-full border border-stone-800 bg-stone-950 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-stone-600 sm:inline-flex">Step 1 of 1</span>
-          </div>
-
-          {existing ? (
-            <div className="rounded-2xl border border-emerald-400/25 bg-emerald-400/[0.035] p-5 md:p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-300"><CheckCircle size={20} /></span>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-stone-100 truncate">{existing.fileName || 'Saved resume'}</p>
-                    <p className="mt-0.5 text-xs text-stone-500">Using your stored PDF — no re-upload needed.</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={clearExisting}
-                  className="rounded-xl border border-stone-700 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-300 transition hover:bg-stone-700 hover:text-stone-100"
-                >
-                  Upload a different file
-                </button>
-              </div>
-            </div>
-          ) : (
-            <FileDropzone file={file} loading={loading} onFile={handleFile} />
-          )}
-
-          <div className="mt-5 grid gap-4 md:grid-cols-[.65fr_1.35fr]">
-            <div>
-              <label className="text-[11px] font-medium text-stone-500">Career level</label>
-              <select value={targetLevel} onChange={(event) => setTargetLevel(event.target.value as TargetLevel)} className="jh-input mt-2">
-                <option value="entry" className="bg-stone-950">Entry / early career</option>
-                <option value="mid" className="bg-stone-950">Mid-level</option>
-                <option value="senior" className="bg-stone-950">Senior</option>
-              </select>
-              <p className="mt-1.5 text-[10px] leading-4 text-stone-600">Used only to adapt reasonable depth/length expectations—not to award points for being senior.</p>
-            </div>
-
-            {mode === 'match' ? (
-              <div>
-                <div className="flex items-center justify-between gap-3">
-                  <label className="text-[11px] font-medium text-stone-500">Job description</label>
-                  <span className="text-[10px] text-stone-600">{jobDescription.length.toLocaleString()} chars</span>
-                </div>
-                <textarea
-                  value={jobDescription}
-                  onChange={(event) => setJobDescription(event.target.value)}
-                  rows={8}
-                  maxLength={20000}
-                  placeholder="Paste the complete job description here…"
-                  className="jh-input mt-2 min-h-[170px] resize-y leading-5"
-                />
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-stone-800 bg-stone-950 p-4">
-                <p className="text-[11px] font-medium text-stone-400">What the report checks</p>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-stone-500 sm:grid-cols-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-2">
-                  {['ATS parseability', 'Core completeness', 'Impact & metrics', 'Experience / projects', 'Skills evidence', 'Bullet writing', 'Concision', 'Consistency'].map((label) => (
-                    <span key={label} className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-amber-400/70" />{label}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {error && <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-xs text-amber-200">{error}</div>}
-
-          <div className="mt-5 flex flex-col-reverse gap-3 border-t border-stone-800 pt-5 sm:flex-row sm:items-center sm:justify-between">
-            <span className="flex items-center gap-2 text-[11px] text-stone-500"><Lock size={13} /> Private resume storage through your existing Supabase setup</span>
-            <button onClick={analyze} disabled={loading || (!file && !existing)} className="jh-button-primary min-w-[170px]">
-              {loading ? <><Loader2 size={16} className="animate-spin" /> Analyzing…</> : <>{mode === 'match' ? 'Analyze + match' : 'Build my report'} <ArrowRight size={15} /></>}
-            </button>
-          </div>
-
-          {/* Analysis can take 25–50 s on a cold backend — show what's happening
-              instead of leaving the button as the only signal (Issue 3 fix 2). */}
-          {loading && (
-            <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.04] p-4 md:p-5" role="status" aria-label="Analysis in progress">
-              <p className="text-sm font-medium text-amber-100">
-                {mode === 'match' ? 'Matching against the job description…' : 'Building your report…'}
-              </p>
-              <p className="mt-1 text-xs leading-5 text-amber-200/60">
-                Uploading the PDF, parsing its structure, scoring it, and saving the results. On a cold backend this can take up to a minute — keep this tab open.
-              </p>
-              <div className="mt-3 space-y-2" aria-hidden="true">
-                <div className="h-2 w-full rounded bg-stone-800/70 animate-pulse" />
-                <div className="h-2 w-4/5 rounded bg-stone-800/50 animate-pulse" />
-                <div className="h-2 w-3/5 rounded bg-stone-800/40 animate-pulse" />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <aside className="space-y-4">
-          <div className="jh-surface p-5">
-            <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-400/10 text-amber-300"><Gauge size={18} /></span>
-              <div><p className="text-sm font-semibold text-stone-100">A score you can explain</p><p className="text-[11px] text-stone-600">Every point maps to a visible check.</p></div>
-            </div>
-            <div className="mt-5 space-y-3">
-              {[['20', 'Parseability & ATS structure'], ['20', 'Impact & measurable evidence'], ['15', 'Completeness'], ['15', 'Experience / project quality'], ['10', 'Skills clarity & evidence'], ['10', 'Writing & bullet quality'], ['5', 'Concision'], ['5', 'Consistency']].map(([points, label]) => (
-                <div key={label} className="flex items-center justify-between gap-4 border-b border-stone-800 pb-2.5 last:border-0 last:pb-0">
-                  <span className="text-xs text-stone-500">{label}</span>
-                  <span className="text-xs font-semibold text-stone-300">{points} pts</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.06] p-5">
-            <FileText size={18} className="text-amber-300" />
-            <p className="mt-3 text-sm font-semibold text-stone-100">Why this is different</p>
-            <p className="mt-1.5 text-xs leading-5 text-stone-500">A generic report should diagnose document quality, not guess whether your resume fits a job that was never provided. Tailored Match handles relevance separately.</p>
-          </div>
-        </aside>
-      </section>
+  const selectedName = file?.name ?? existing?.fileName;
+  return <div className="workspace-page ats-page">
+    <div className="page-heading"><div><Eyebrow>Resume intelligence</Eyebrow><h1>Make the next edit count.</h1><p>Start with document quality. Switch to Tailored Match only when comparing against one specific role.</p></div><div className="header-note"><ShieldCheck size={20}/><span><b>Explainable by design</b><small>Health and role fit stay separate.</small></span></div></div>
+    <div className="mode-switch" role="group" aria-label="Analysis mode">
+      <button type="button" className={mode === 'resume' ? 'active' : ''} aria-pressed={mode === 'resume'} disabled={loading} onClick={() => { setMode('resume'); setError(''); setShowDetails(false); }}><span className="mode-switch__icon"><Target size={20}/></span><span><b>Resume Health</b><small>No job description needed</small></span></button>
+      <button type="button" className={mode === 'match' ? 'active mode-switch__match' : ''} aria-pressed={mode === 'match'} disabled={loading} onClick={() => { setMode('match'); setError(''); setShowDetails(false); }}><span className="mode-switch__icon"><Briefcase size={20}/></span><span><b>Tailored Match</b><small>Compare against one role</small></span></button>
     </div>
-  );
+    <div className="ats-grid"><section className="ats-workcard">
+      <div className="ats-workcard__head"><div><span className="step-pill">01</span><div><h2>{mode === 'resume' ? 'Choose your resume' : 'Resume + job description'}</h2><p>{mode === 'resume' ? 'Upload a text-based PDF or use a saved resume.' : 'Use the same resume, then paste the role you actually care about.'}</p></div></div><Tag tone={mode === 'resume' ? 'amber' : 'blue'}>{mode === 'resume' ? '100-point diagnostic' : 'Role-specific'}</Tag></div>
+      <input ref={fileRef} type="file" accept="application/pdf,.pdf" hidden disabled={loading} onChange={(e: ChangeEvent<HTMLInputElement>) => { chooseFile(e.target.files?.[0] ?? null); e.target.value = ''; }}/>
+      <div className={`dropzone ${selectedName ? 'dropzone--selected' : ''} ${dragging ? 'analysis-dropzone--dragging' : ''}`} onDragOver={e => { e.preventDefault(); if (!loading) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
+        <span className="dropzone__icon">{selectedName ? <FileText size={22}/> : <Upload size={22}/>}</span><span className="dropzone__content"><b>{selectedName || 'Drop your resume here'}</b><small>{existing ? 'Saved PDF · no re-upload needed' : file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · PDF ready` : 'PDF only · up to 5 MB · text PDFs work best'}</small></span><button type="button" className="dropzone__change analysis-dropzone-action" disabled={loading} onClick={() => fileRef.current?.click()}>{selectedName ? 'Change file' : 'Browse'}</button>
+      </div>
+      {mode === 'match' && <div className="jd-field"><div className="jd-field__label"><label htmlFor="job-description">Job description</label><small>{jobDescription.length.toLocaleString()} characters</small></div><textarea id="job-description" value={jobDescription} maxLength={20000} disabled={loading} onChange={e => setJobDescription(e.target.value)} placeholder="Paste the full job description here. Required skills, responsibilities and seniority signals will be evaluated separately from Resume Health."/><div className="jd-field__foot"><span><ShieldCheck size={14}/> Only professional evidence is used for matching.</span></div></div>}
+      {!loading && <div className="analysis-source-actions"><Link to="/app/resumes" className="inline-link">Choose a saved resume</Link>{selectedName && <button type="button" className="inline-link inline-link--button" onClick={() => { setFile(null); setExisting(null); setError(''); if (existingResumeId) navigate('/app/ats', { replace: true }); }}>Remove selected resume</button>}</div>}
+      <div className="ats-controls"><div><span className="analysis-field-label">Career level</span><SelectMenu value={targetLevel} disabled={loading} onChange={value => setTargetLevel(value as TargetLevel)} label="Career level" options={levelOptions}/><small>Used only to adapt reasonable depth expectations.</small></div><div className="ats-controls__summary"><span className={selectedName ? 'ready' : ''}><Check size={14}/> PDF {selectedName ? 'ready' : 'needed'}</span><span><LockKeyhole size={14}/> Private storage</span>{mode === 'match' && <span className={jobDescription.trim().length >= 20 ? 'ready' : ''}><Check size={14}/> JD {jobDescription.trim().length >= 20 ? 'ready' : 'needed'}</span>}</div></div>
+      {error && <p className="analysis-form-error" role="alert">{error}</p>}
+      <div className="ats-submit"><div><p>{mode === 'resume' ? 'No AI similarity score.' : 'Resume Health remains unchanged.'}</p><small>{mode === 'resume' ? 'Every point maps to a visible document-quality check.' : 'This creates a separate role-fit analysis.'}</small></div><Button disabled={loading} onClick={analyze}>{loading ? 'Analyzing…' : mode === 'resume' ? 'Build my report' : 'Analyze + match'} {!loading && <ArrowRight size={16}/>}</Button></div>
+      {loading && <div className="analysis-progress" role="status" aria-live="polite"><div className="analysis-progress__top"><span className="spinner"/><div><b>{phase === 'upload' ? 'Uploading your resume' : mode === 'resume' ? 'Building your Resume Health report' : 'Matching your evidence to the role'}</b><small>Keep this tab open while we finish the analysis.</small></div></div><div className="analysis-stages"><span className={phase === 'analyze' ? 'done' : 'active'}>{phase === 'analyze' ? <Check size={14}/> : <i/>} Resume uploaded</span><span className={phase === 'analyze' ? 'active' : ''}><i/> Reading structure</span><span><i/> Evaluating evidence</span><span><i/> Building recommendations</span></div></div>}
+    </section><aside className="ats-aside"><div className="rubric-card"><div className="rubric-card__head"><span className="rubric-card__icon"><Target size={20}/></span><div><b>{mode === 'resume' ? 'What Resume Health checks' : 'What Tailored Match checks'}</b><small>{mode === 'resume' ? '8 independent document signals' : 'Role evidence only'}</small></div></div>{mode === 'resume' ? <div className="check-grid">{checks.map((check, i) => <div key={check}><span>{String(i + 1).padStart(2, '0')}</span>{check}</div>)}</div> : <div className="match-checks">{['Required skills coverage', 'Responsibility alignment', 'Seniority alignment', 'Semantic evidence', 'Missing skills'].map(check => <div key={check}><Check size={16}/>{check}</div>)}</div>}<button type="button" className={`details-link ${showDetails ? 'details-link--open' : ''}`} aria-expanded={showDetails} onClick={() => setShowDetails(v => !v)}>How {mode === 'resume' ? 'scoring' : 'matching'} works <ChevronDown size={14}/></button>{showDetails && <div className="ats-method-note"><p>{mode === 'resume' ? 'Resume Health uses independent document-quality groups. Visible points map to real checks returned by the analysis. Job relevance is excluded.' : 'Tailored Match compares one supplied job description against required skills, responsibilities, seniority and available semantic evidence. It never changes your Resume Health score.'}</p></div>}</div><div className={`signal-reminder ${mode === 'match' ? 'signal-reminder--blue' : ''}`}><div><span>{mode === 'resume' ? '01' : '02'}</span><small>signal</small></div><p><b>{mode === 'resume' ? 'Document quality' : 'Role fit'}</b>{mode === 'resume' ? 'Your score does not guess job relevance.' : 'Your Health score does not change when the JD changes.'}</p></div></aside></div>
+  </div>;
 }

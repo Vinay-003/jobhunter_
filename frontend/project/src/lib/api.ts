@@ -77,15 +77,10 @@ api.interceptors.response.use(
     // 401: session expired -> redirect to login (avoid redirect loop)
     if (status === 401) {
       const current = window.location.pathname;
-      if (current !== '/login' && current !== '/signup' && current !== '/') {
-        // Use history push via location to ensure full redirect outside SPA if needed
-        // But prefer SPA navigation: we set a flag and redirect
-        if (!current.startsWith('/app')) {
-          // Only auto-redirect if we are in protected area intent
-        }
+      if (current === '/app' || current.startsWith('/app/')) {
         // Defer redirect to avoid breaking concurrent requests
         setTimeout(() => {
-          if (window.location.pathname !== '/login') {
+          if (window.location.pathname === '/app' || window.location.pathname.startsWith('/app/')) {
             window.location.href = '/login';
           }
         }, 100);

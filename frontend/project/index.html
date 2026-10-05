@@ -4,16 +4,19 @@
     <meta charset="UTF-8" />
     <!-- <link rel="icon" type="image/svg+xml" href="" /> -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Issue 3 fix 5: fonts loaded via preconnected <link> instead of a
-         render-blocking CSS @import chain (first paint no longer waits on
-         fonts.googleapis.com; display=swap keeps text visible during load). -->
+    <meta name="theme-color" content="#0a0908" />
+    <script>
+      try {
+        const saved = localStorage.getItem('jh-theme');
+        const theme = saved === 'light' || saved === 'dark' ? saved : matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f5f2ec' : '#0a0908';
+      } catch { document.documentElement.dataset.theme = 'dark'; }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700;9..144,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
-    <title>ResumeBuilder - Create Your Professional Profile</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <title>JobHunter</title>
   </head>
   <body>
     <div id="root"></div>

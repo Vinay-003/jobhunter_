@@ -1,152 +1,340 @@
-// src/pages/LandingPage.tsx — Warm Ink Editorial — Amber on Charcoal, not purple
-import { Link } from 'react-router-dom';
-import { ArrowUpRight, Sparkles, ShieldCheck, Layers, FileSearch, Quote } from 'lucide-react';
+import { useEffect, useMemo, useRef, type RefObject, type PointerEvent as ReactPointerEvent } from 'react';
+import Icon from '../components/Icon';
+import { Button, Eyebrow, Logo, ScoreRing, Tag, ThemeToggle } from '../components/UI';
+import { Link, useNavigate } from 'react-router-dom';
+import DragReturn from '../components/DragReturn';
 
-export default function LandingPage() {
+const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
+const smooth = (from: number, to: number, value: number) => {
+  if (from === to) return value >= to ? 1 : 0;
+  const t = clamp((value - from) / (to - from));
+  return t * t * (3 - 2 * t);
+};
+
+function Header() {
   return (
-    <div className="min-h-screen bg-[#0C0A09] text-stone-100 selection:bg-amber-400/30 overflow-x-hidden">
-      <div className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(231,229,228,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(231,229,228,0.06)_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_0%,#000_70%,transparent_110%)]" />
-        <div className="absolute -top-32 right-[-10%] h-[640px] w-[640px] rounded-full bg-amber-500/12 blur-[120px]" />
-        <div className="absolute top-[18%] -left-[8%] h-[480px] w-[480px] rounded-full bg-orange-500/08 blur-[110px]" />
+    <header className="marketing-nav wrap">
+      <Logo />
+      <nav><a href="#product">Product</a><a href="#how">How it works</a><a href="#privacy">Privacy</a></nav>
+      <div className="marketing-nav__actions"><ThemeToggle compact/><Link to="/login" className="nav-login">Sign in</Link><Link to="/signup" className="button button--small button--primary">Analyze my resume <Icon name="arrow" size={14}/></Link></div>
+    </header>
+  );
+}
+
+function useHeroScroll(heroRef: RefObject<HTMLElement>) {
+  useEffect(() => {
+    let frame = 0;
+    let top = 0;
+    let height = 1;
+    const measure = () => {
+      const node = heroRef.current;
+      if (!node) return;
+      const rect = node.getBoundingClientRect();
+      top = rect.top + window.scrollY;
+      height = Math.max(1, rect.height);
+    };
+    const update = () => {
+      frame = 0;
+      const node = heroRef.current;
+      if (!node) return;
+      const desktop = window.matchMedia('(min-width: 901px)').matches;
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const progress = reduced ? 0 : clamp((window.scrollY - top) / Math.min(height * (desktop ? .72 : .82), desktop ? 560 : 430));
+      const copyY = desktop ? -34 : -16;
+      const visualY = desktop ? -18 : -28;
+      const copyFade = desktop ? .52 : .18;
+      const visualFade = desktop ? .28 : .2;
+      const visualScale = desktop ? .025 : .035;
+      node.style.setProperty('--hero-scroll', progress.toFixed(4));
+      node.style.setProperty('--hero-copy-y', `${(copyY * progress).toFixed(2)}px`);
+      node.style.setProperty('--hero-copy-opacity', (1 - progress * copyFade).toFixed(4));
+      node.style.setProperty('--hero-visual-y', `${(visualY * progress).toFixed(2)}px`);
+      node.style.setProperty('--hero-visual-scale', (1 - progress * visualScale).toFixed(4));
+      node.style.setProperty('--hero-visual-opacity', (1 - progress * visualFade).toFixed(4));
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
+    const onResize = () => { measure(); schedule(); };
+    const onStoryAnchor = (event: MouseEvent) => {
+      const anchor = (event.target as Element).closest?.('a[href="#product"],a[href="#how"],a[href="#sample"]');
+      if (!anchor || !window.matchMedia('(min-width: 901px) and (min-height: 700px)').matches || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const id = anchor.getAttribute('href')?.slice(1);
+      const points = { product: .06, how: .47, sample: .86 };
+      if (!id || !(id in points)) return;
+      const story = document.querySelector<HTMLElement>('.landing-story');
+      if (!story) return;
+      const rect = story.getBoundingClientRect();
+      const storyTop = rect.top + window.scrollY;
+      const storyTravel = Math.max(1, story.offsetHeight - window.innerHeight);
+      event.preventDefault();
+      window.scrollTo({ top: storyTop + storyTravel * points[id as keyof typeof points], behavior: 'smooth' });
+    };
+    measure(); update();
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', onResize);
+    document.addEventListener('click', onStoryAnchor);
+    return () => {
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', onResize);
+      document.removeEventListener('click', onStoryAnchor);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [heroRef]);
+}
+
+function useReveal(rootRef: RefObject<HTMLDivElement>) {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const nodes = [...root.querySelectorAll('.landing-reveal')];
+    if (!('IntersectionObserver' in window)) {
+      nodes.forEach(node => node.classList.add('is-visible'));
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: .16, rootMargin: '0px 0px -8% 0px' });
+    nodes.forEach(node => observer.observe(node));
+    return () => observer.disconnect();
+  }, [rootRef]);
+}
+
+function HeroVisual() {
+  const stageRef = useRef<HTMLDivElement>(null);
+  const reset = () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    stage.style.setProperty('--tilt-x','0deg');
+    stage.style.setProperty('--tilt-y','0deg');
+    stage.style.setProperty('--shift-x','0px');
+    stage.style.setProperty('--shift-y','0px');
+  };
+  const move = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch') return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const r = event.currentTarget.getBoundingClientRect();
+    const px = Math.max(-.5, Math.min(.5, (event.clientX-r.left)/r.width-.5));
+    const py = Math.max(-.5, Math.min(.5, (event.clientY-r.top)/r.height-.5));
+    stage.style.setProperty('--tilt-x',`${px*28}deg`);
+    stage.style.setProperty('--tilt-y',`${py*-21}deg`);
+    stage.style.setProperty('--shift-x',`${px*64}px`);
+    stage.style.setProperty('--shift-y',`${py*46}px`);
+  };
+  return (
+    <div className="hero-visual" role="img" aria-label="Illustrative interactive JobHunter report preview" onPointerMove={move} onPointerLeave={reset}>
+      <div className="hero-stage" ref={stageRef}><span className="hero-example-label">ILLUSTRATIVE EXAMPLE · NOT YOUR DATA</span>
+        <div className="hero-orbit hero-orbit--one"/><div className="hero-orbit hero-orbit--two"/>
+        <DragReturn className="hero-drag hero-drag--resume" mode="absolute" label="Resume preview">
+          <div className="resume-sheet depth-card">
+            <div className="resume-sheet__top"><span className="mini-avatar">VS</span><div><b>Sample Candidate</b><small>Software Engineer</small></div><Tag tone="green">Parsed</Tag></div>
+            <div className="resume-line resume-line--long"/><div className="resume-line resume-line--medium"/>
+            <h4>Experience</h4>
+            <div className="resume-bullet"><i/>Built Ad Factory across 5 formats and 3 language modes.</div>
+            <div className="resume-bullet"><i/>Integrated Meta, GA4, Shopify and Shiprocket.</div>
+            <h4>Projects</h4>
+            <div className="resume-bullet"><i/>Built JobHunter ATS + job recommendation system.</div>
+          </div>
+        </DragReturn>
+        <DragReturn className="hero-drag hero-drag--score" mode="absolute" label="Resume Health score">
+          <div className="score-float depth-card"><ScoreRing value={78} size={126}/><div><b>Good foundation</b><small>Needs stronger impact evidence</small></div></div>
+        </DragReturn>
+        <DragReturn className="hero-drag hero-drag--insight" mode="absolute" label="Top recommendation">
+          <div className="insight-float depth-card"><span className="insight-float__icon"><Icon name="spark"/></span><div><small>Top opportunity</small><b>Add measurable outcomes</b><p>High impact · Experience</p></div></div>
+        </DragReturn>
+        <DragReturn className="hero-drag hero-drag--match" mode="absolute" label="Tailored Match score">
+          <div className="match-float depth-card"><div className="match-float__score">86<span>%</span></div><div><small>Role match</small><b>Sample role</b><p>Strong backend evidence</p></div></div>
+        </DragReturn>
       </div>
-
-      <header className="relative sticky top-0 z-20 border-b border-stone-800/60 bg-[#0C0A09]/70 backdrop-blur-xl">
-        <div className="mx-auto flex h-[64px] max-w-[1280px] items-center justify-between px-6">
-          <Link to="/" className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-400 text-stone-900 shadow-lg shadow-amber-900/20">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M7 7h10v10" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </span>
-            <span className="text-[18px] font-semibold tracking-[-0.025em]" style={{ fontFamily: 'Fraunces, serif' }}>JobHunter</span>
-            <span className="hidden sm:inline-flex items-center rounded-full border border-stone-700 bg-stone-900 px-2.5 py-0.5 text-[10px] font-medium tracking-[0.14em] text-stone-400">V2 • PRIVATE</span>
-          </Link>
-          <div className="flex items-center gap-2">
-            <Link to="/login" className="hidden sm:inline-flex h-9 items-center rounded-full border border-stone-800 bg-stone-900 px-4 text-sm font-medium text-stone-300 hover:bg-stone-800 hover:text-stone-100 transition">Sign in</Link>
-            <Link to="/signup" className="inline-flex h-9 items-center gap-1.5 rounded-full bg-amber-400 px-5 text-sm font-semibold text-stone-900 hover:bg-amber-300 transition">Create account <ArrowUpRight size={14} /></Link>
-          </div>
-        </div>
-      </header>
-
-      <section className="relative mx-auto max-w-[1280px] px-6 pt-12 pb-10 sm:pt-16">
-        <div className="relative grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs font-medium text-amber-200">
-              <Sparkles size={12} /> No JD needed • Then tailored to any role
-            </div>
-            <h1 className="mt-5 text-[42px] sm:text-[56px] font-bold leading-[0.92] tracking-[-0.04em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>
-              Your resume,
-              <br />
-              <span className="text-amber-400">diagnosed</span> — not guessed.
-            </h1>
-            <p className="mt-4 max-w-[560px] text-[15px] leading-6 text-stone-400">
-              Drop a text PDF. Get a <span className="text-stone-100">100-point report</span> that shows exactly what to fix. Add a JD later for a <span className="text-stone-100">separate</span> fit score — never mixed, never hallucinated.
-            </p>
-            <div className="mt-7 flex flex-wrap gap-3">
-              <Link to="/signup" className="inline-flex h-[44px] items-center justify-center rounded-full bg-amber-400 px-7 text-sm font-semibold text-stone-900 hover:bg-amber-300 transition">Start health check →</Link>
-              <Link to="/login" className="inline-flex h-[44px] items-center justify-center rounded-full border border-stone-800 bg-stone-900 px-7 text-sm font-medium text-stone-300 hover:bg-stone-800 hover:text-stone-100 transition">Sign in</Link>
-            </div>
-            <div className="mt-4 flex items-center gap-3 text-xs text-stone-500">
-              <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Private bucket • PII redacted • HttpOnly</span>
-              <span className="hidden sm:inline">•</span>
-              <span className="hidden sm:inline">Rule-based 3.0.0 • 8 checks</span>
-            </div>
-
-            <div className="mt-10 grid grid-cols-3 gap-6 border-t border-stone-800 pt-6">
-              {[
-                { k: '100', v: 'point report', sub: '8 groups, not a vibe' },
-                { k: '3.0.0', v: 'rule-based', sub: 'no embeddings' },
-                { k: '384d', v: 'anass', sub: 'mock/local/SageMaker' },
-              ].map(s => (
-                <div key={s.k}>
-                  <div className="text-[22px] font-semibold tracking-[-0.02em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>{s.k}</div>
-                  <div className="text-xs font-medium text-stone-300">{s.v}</div>
-                  <div className="text-xs text-stone-500">{s.sub}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="relative lg:h-[520px]">
-            <div className="absolute inset-0 -z-10 bg-gradient-to-br from-amber-500/15 via-transparent to-stone-700/10 blur-2xl" />
-            <div className="relative mx-auto w-full max-w-[520px] [perspective:1200px]">
-              <div className="relative rounded-[24px] border border-stone-800 bg-stone-900 p-[1px] shadow-2xl shadow-black/50 [transform:rotateY(-6deg)_rotateX(4deg)] hover:[transform:rotateY(-3deg)_rotateX(2deg)] transition-transform duration-700">
-                <div className="rounded-[23px] bg-[#141210] p-6">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs tracking-[0.16em] text-stone-500">RESUME HEALTH — V3</span>
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-xs font-medium text-emerald-400">● 92% ats parse</span>
-                  </div>
-                  <div className="mt-4 flex items-end gap-4">
-                    <div className="relative grid h-28 w-28 place-items-center">
-                      <svg className="h-28 w-28 -rotate-90" viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="rgba(231,229,228,0.1)" strokeWidth="8"/><circle cx="50" cy="50" r="42" fill="none" stroke="#FACC15" strokeWidth="8" strokeLinecap="round" strokeDasharray={`${78 * 2.64} 264`} /></svg>
-                      <div className="absolute text-center"><div className="text-[28px] font-bold tracking-[-0.03em] text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>78</div><div className="text-xs text-stone-500">/100</div></div>
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-sm font-semibold text-stone-100">Good — needs proof</div>
-                      <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
-                        {[
-                          { l: 'Parse', v: '20/20' },
-                          { l: 'Impact', v: '8/20' },
-                          { l: 'Skills', v: '9/10' },
-                        ].map(c => (
-                          <div key={c.l} className="rounded-xl bg-stone-800 border border-stone-700 px-3 py-2"><div className="text-stone-500">{c.l}</div><div className="font-medium text-stone-100">{c.v}</div></div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-5 space-y-2">
-                    {[
-                      'Only 1 of 24 bullets has a number',
-                      'Add summary — 0 → recruiters skim top 6s',
-                      'Leadership is strong, add 1 more work proof',
-                    ].map(t => (
-                      <div key={t} className="flex gap-2 rounded-xl border border-stone-800 bg-stone-900 px-3 py-2.5 text-xs text-stone-400"><span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-amber-400" />{t}</div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="absolute -bottom-6 -left-4 hidden sm:flex items-center gap-3 rounded-2xl border border-stone-800 bg-[#141210] px-4 py-3 shadow-xl">
-                <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-400 text-stone-900"><Briefcase size={16} /></span>
-                <div><div className="text-xs font-medium text-stone-100">Tailored Match 43/100</div><div className="text-xs text-stone-500">Missing: K8s, Redis • 13% coverage</div></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-[1280px] px-6 pb-10">
-        <div className="grid gap-4 md:grid-cols-3">
-          {[
-            { icon: FileSearch, title: 'Report, not a number', desc: 'Score + label + 20/24 checks, metrics, priority actions, expandable evidence. Hard refresh still loads from /analyses/:id.' },
-            { icon: Layers, title: 'Jobs are separate', desc: 'Master/detail with resume + role + location filter. No ATS/salary in fit — relevance only.' },
-            { icon: ShieldCheck, title: 'Private', desc: 'Supabase private bucket, SHA256 cache, PII stripped before any embedding.' },
-          ].map(c => (
-            <div key={c.title} className="group relative overflow-hidden rounded-[20px] border border-stone-800 bg-stone-900/60 p-6 hover:bg-stone-900 transition">
-              <c.icon className="text-amber-300" size={20} />
-              <h3 className="mt-3 text-sm font-semibold text-stone-100" style={{ fontFamily: 'Fraunces, serif' }}>{c.title}</h3>
-              <p className="mt-1.5 text-sm leading-5 text-stone-400">{c.desc}</p>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-10 flex flex-col items-start justify-between gap-6 rounded-[20px] border border-stone-800 bg-stone-900/60 p-6 md:flex-row md:items-center">
-          <div className="flex gap-3">
-            <Quote size={18} className="text-stone-600" />
-            <p className="max-w-[560px] text-sm leading-6 text-stone-400">Resume Health is <span className="text-stone-100">document quality</span>. Tailored Match is <span className="text-stone-100">fit for one JD</span>. We never mix them — that’s what makes the score explainable.</p>
-          </div>
-          <Link to="/signup" className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-5 py-2.5 text-sm font-semibold text-stone-900 hover:bg-amber-300">Create your report <ArrowUpRight size={14} /></Link>
-        </div>
-      </section>
-
-      <footer className="mx-auto max-w-[1280px] px-6 py-8 flex items-center justify-between border-t border-stone-800 text-xs text-stone-500">
-        <span>© 2026 JobHunter V2 • Privacy • Terms</span>
-        <span className="hidden sm:inline">Warm ink • Amber • Fraunces • No purple slop</span>
-      </footer>
+      <div className="hero-drag-hint"><span className="hero-drag-hint__dot"/><span className="hero-drag-hint__desktop">Grab any panel and move it</span><span className="hero-drag-hint__touch">Tap once, then tap + hold to move</span></div>
     </div>
   );
 }
 
-function Briefcase(props: { size?: number; className?: string }) {
+function LandingStory() {
+  const storyRef = useRef<HTMLDivElement>(null);
+  const firstScene = useRef<HTMLDivElement>(null);
+  const secondScene = useRef<HTMLDivElement>(null);
+  const thirdScene = useRef<HTMLDivElement>(null);
+  const sceneRefs = useMemo(() => [firstScene, secondScene, thirdScene], []);
+
+  useEffect(() => {
+    let frame = 0;
+    let storyTop = 0;
+    let storyTravel = 1;
+
+    const measure = () => {
+      const story = storyRef.current;
+      if (!story) return;
+      const rect = story.getBoundingClientRect();
+      storyTop = rect.top + window.scrollY;
+      storyTravel = Math.max(1, story.offsetHeight - window.innerHeight);
+    };
+
+    const apply = (node: HTMLElement | null, opacity: number, y: number, scale: number, enter: number, exit: number, x = 0) => {
+      if (!node) return;
+      node.style.setProperty('--scene-opacity', opacity.toFixed(4));
+      node.style.setProperty('--scene-y', `${y.toFixed(2)}px`);
+      node.style.setProperty('--scene-x', `${x.toFixed(2)}px`);
+      node.style.setProperty('--scene-scale', scale.toFixed(4));
+      node.style.setProperty('--scene-enter', enter.toFixed(4));
+      node.style.setProperty('--scene-exit', exit.toFixed(4));
+      node.style.pointerEvents = opacity > .55 ? 'auto' : 'none';
+    };
+
+    const update = () => {
+      frame = 0;
+      const story = storyRef.current;
+      if (!story) return;
+      const desktop = window.matchMedia('(min-width: 901px)').matches;
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reduced || desktop && window.innerHeight < 700) {
+        story.classList.remove('mobile-story-motion');
+        sceneRefs.forEach(ref => {
+          const node = ref.current;
+          if (!node) return;
+          node.removeAttribute('style');
+          node.classList.remove('mobile-story-visible');
+          delete node.dataset.mobileRevealed;
+        });
+        return;
+      }
+
+      if (!desktop) {
+        story.classList.add('mobile-story-motion');
+        const vh = Math.max(1, window.innerHeight);
+        sceneRefs.forEach((ref) => {
+          const node = ref.current;
+          if (!node) return;
+          node.style.pointerEvents = 'auto';
+          const rect = node.getBoundingClientRect();
+          const enter = clamp((vh * .94 - rect.top) / (vh * .46));
+          const exit = clamp((vh * .26 - rect.bottom) / (vh * .30));
+          const opacity = clamp(enter * (1 - exit * .62));
+          const y = 48 * (1 - enter) - 26 * exit;
+          const scale = .972 + .028 * enter - .012 * exit;
+          const blur = 3.2 * (1 - enter) + 1.4 * exit;
+          node.style.setProperty('--mobile-scene-opacity', opacity.toFixed(4));
+          node.style.setProperty('--mobile-scene-y', `${y.toFixed(2)}px`);
+          node.style.setProperty('--mobile-scene-scale', scale.toFixed(4));
+          node.style.setProperty('--mobile-scene-blur', `${blur.toFixed(2)}px`);
+          if (enter > .1 || node.dataset.mobileRevealed === 'true') {
+            node.dataset.mobileRevealed = 'true';
+            node.classList.add('mobile-story-visible');
+          }
+        });
+        return;
+      }
+
+      story.classList.remove('mobile-story-motion');
+      sceneRefs.forEach(ref => {
+        const node = ref.current;
+        if (!node) return;
+        node.classList.remove('mobile-story-visible');
+        delete node.dataset.mobileRevealed;
+      });
+
+      const p = clamp((window.scrollY - storyTop) / storyTravel);
+
+      const s0Out = smooth(.27, .40, p);
+      apply(sceneRefs[0].current, 1 - s0Out, -54 * s0Out, 1 - .025 * s0Out, 1, s0Out, -18 * s0Out);
+
+      const s1In = smooth(.22, .35, p);
+      const s1Out = smooth(.60, .73, p);
+      const s1Opacity = s1In * (1 - s1Out);
+      apply(sceneRefs[1].current, s1Opacity, 58 * (1 - s1In) - 48 * s1Out, .965 + .035 * s1In - .02 * s1Out, s1In, s1Out, 18 * (1 - s1In));
+
+      const s2In = smooth(.56, .70, p);
+      apply(sceneRefs[2].current, s2In, 62 * (1 - s2In), .965 + .035 * s2In, s2In, 0, -18 * (1 - s2In));
+
+      story.style.setProperty('--story-progress', p.toFixed(4));
+    };
+
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
+    const onResize = () => { measure(); schedule(); };
+    measure(); update();
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', onResize);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [sceneRefs]);
+
   return (
-    <svg width={props.size ?? 16} height={props.size ?? 16} viewBox="0 0 24 24" fill="none" className={props.className}><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 10h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8Z M3 10a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    <div className="landing-story" ref={storyRef}>
+      <div className="landing-story__sticky">
+        <section className="story-scene story-scene--signals" id="product" ref={sceneRefs[0]}>
+          <div className="signal-section wrap">
+            <div className="signal-copy"><Eyebrow tone="blue">One resume · two signals</Eyebrow><h2>Answer the right question<br/>at the right time.</h2><p>Document quality and job fit are different problems. JobHunter keeps them separate so every result remains useful and explainable.</p></div>
+            <div className="signal-grid">
+              <article className="signal-card signal-card--amber"><div className="signal-card__icon"><Icon name="target"/></div><span>Resume Health</span><h3>“Is my resume strong?”</h3><p>ATS structure, impact, completeness, skills evidence, writing, concision and consistency.</p><div className="mini-bars"><i style={{width:'100%'}}/><i style={{width:'42%'}}/><i style={{width:'88%'}}/><i style={{width:'76%'}}/></div><footer><b>78 / 100</b><small>No job description required</small></footer></article>
+              <div className="signal-connector"><span>≠</span><small>never mixed</small></div>
+              <article className="signal-card signal-card--blue"><div className="signal-card__icon"><Icon name="briefcase"/></div><span>Tailored Match</span><h3>“Do I fit this role?”</h3><p>Required skills, responsibilities, seniority and semantic evidence for one specific job description.</p><div className="skill-pills"><Tag tone="blue">TypeScript ✓</Tag><Tag tone="blue">Node.js ✓</Tag><Tag>Redis missing</Tag></div><footer><b>86% match</b><small>Role-specific evidence</small></footer></article>
+            </div>
+          </div>
+        </section>
+
+        <section className="story-scene story-scene--process" id="how" ref={sceneRefs[1]}>
+          <div className="process-section wrap">
+            <div><div className="center-heading"><Eyebrow>How it works</Eyebrow><h2>From PDF to a better application.</h2><p>No mystery score. Each stage produces something you can inspect.</p></div>
+              <div className="process-grid">{[
+                ['01','Upload','Your text-based PDF stays private.'],['02','Diagnose','Eight clear scoring groups evaluate document quality.'],['03','Prioritize','See the few changes that matter most first.'],['04','Match','Compare separately against jobs worth applying to.']
+              ].map(([n,t,b],i)=><div className="process-step" key={n}><span>{n}</span><div className="process-step__line"/><div className="process-step__orb"><Icon name={i===0?'upload':i===1?'target':i===2?'spark':'briefcase'}/></div><h3>{t}</h3><p>{b}</p></div>)}</div>
+            </div>
+          </div>
+        </section>
+
+        <section className="story-scene story-scene--sample" id="sample" ref={sceneRefs[2]}>
+          <div className="sample-section wrap">
+            <div className="sample-copy"><Eyebrow>Report, not a vibe</Eyebrow><h2>Know what to fix before you apply.</h2><p>Your report leads with the score, then the top actions, then evidence. Detailed scoring rules stay available without drowning the main experience.</p><ul><li><Icon name="check"/> Three priority actions before eight categories</li><li><Icon name="check"/> Evidence tied back to resume content</li><li><Icon name="check"/> Progressive disclosure instead of card overload</li></ul><Link to="/signup" className="inline-link">Create your own report <Icon name="arrow" size={15}/></Link></div>
+            <DragReturn className="sample-report-drag" label="Sample Resume Health report">
+              <div className="sample-report">
+                <div className="sample-report__head"><div><small>ILLUSTRATIVE RESUME HEALTH</small><h3>Good foundation</h3><p>Strong structure. Improve measurable impact.</p></div><ScoreRing value={78} size={140}/></div>
+                <div className="sample-priority"><span>01</span><div><small>HIGH IMPACT</small><b>Add measurable outcomes</b><p>Only a small share of experience bullets prove scale or results.</p></div><Tag tone="amber">Fix first</Tag></div>
+                <div className="sample-bars"><div><span>ATS structure</span><i><b style={{width:'100%'}}/></i><em>20/20</em></div><div><span>Impact</span><i><b style={{width:'40%'}}/></i><em>8/20</em></div><div><span>Completeness</span><i><b style={{width:'93%'}}/></i><em>14/15</em></div></div>
+              </div>
+              <div className="drag-caption"><span/> Drag the report · release to reset</div>
+            </DragReturn>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+export default function Landing() {
+  const navigate = useNavigate();
+  const pageRef = useRef<HTMLDivElement>(null);
+  const heroRef = useRef<HTMLDivElement>(null);
+  useHeroScroll(heroRef);
+  useReveal(pageRef);
+
+  return (
+    <div className="marketing-page" ref={pageRef}>
+      <div className="noise"/><Header />
+      <section className="hero wrap" ref={heroRef}>
+        <div className="hero-copy reveal">
+          <Eyebrow>Explainable resume intelligence</Eyebrow>
+          <h1>Your resume isn’t a number.<br/><span>See what’s holding it back.</span></h1>
+          <p>Upload once. Get a transparent 100-point Resume Health diagnostic. Then independently compare your evidence against roles you actually want.</p>
+          <div className="hero-actions"><Button icon="arrow" onClick={() => navigate('/signup')}>Analyze my resume</Button><a href="#sample" className="button button--ghost">See sample report</a></div>
+          <div className="trust-row"><span><Icon name="lock" size={14}/> Private storage</span><span><Icon name="shield" size={14}/> Explainable scoring</span><span><Icon name="spark" size={14}/> No guessed ATS fit</span></div>
+        </div>
+        <HeroVisual />
+      </section>
+
+      <LandingStory />
+
+      <section id="privacy" className="privacy-band landing-reveal"><div className="wrap privacy-band__inner"><div><Eyebrow>Private by default</Eyebrow><h2>Your career data should not feel public.</h2></div><div className="privacy-points"><article><Icon name="lock"/><h3>Private storage</h3><p>Resume files live in private storage, not public URLs.</p></article><article><Icon name="shield"/><h3>PII-aware processing</h3><p>Sensitive identity fields stay out of semantic job matching.</p></article><article><Icon name="target"/><h3>Explainable score</h3><p>Generic Resume Health remains deterministic and inspectable.</p></article></div></div></section>
+
+      <section className="final-cta wrap landing-reveal"><div className="final-cta__glow"/><Eyebrow>Ready when you are</Eyebrow><h2>Your next application should<br/>start with evidence.</h2><p>Build your Resume Health report, fix the highest-impact gaps, then match with intention.</p><Button icon="arrow" onClick={() => navigate('/signup')}>Create my report</Button></section>
+      <footer className="marketing-footer wrap landing-reveal"><Logo/><p>Explainable resume intelligence for focused job search.</p><div><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><Link to="/login">Sign in</Link></div><small>© 2026 JobHunter</small></footer>
+    </div>
   );
 }

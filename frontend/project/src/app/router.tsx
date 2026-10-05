@@ -1,42 +1,28 @@
 // src/app/router.tsx
-import { createBrowserRouter, Navigate, Outlet, useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { createBrowserRouter, Navigate, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useLayoutEffect } from 'react';
 import AppShell from './AppShell';
 import { useAuth } from '../features/auth/AuthContext';
-import LandingPage from '../pages/LandingPage';
 import LoginPage from '../pages/LoginPage';
 import SignupPage from '../pages/SignupPage';
 import AtsPage from '../pages/AtsPage';
 import AnalysisPage from '../pages/AnalysisPage';
-import JobsPage from '../pages/JobsPage';
 import ResumesPage from '../pages/ResumesPage';
 import ResumeViewPage from '../pages/ResumeViewPage';
 import ProfilePage from '../pages/ProfilePage';
 
-function PrivacyPage() {
-  return (
-    <div className="max-w-3xl mx-auto px-4 py-12 text-stone-400">
-      <h1 className="text-2xl font-bold text-stone-100 mb-4" style={{ fontFamily: 'Fraunces, serif' }}>Privacy Policy</h1>
-      <p className="text-sm leading-relaxed">We store resumes securely and only use data to provide ATS scoring and job matching. Contact support for data deletion requests.</p>
-      <a href="/" className="text-amber-300 hover:text-amber-200 text-sm mt-4 inline-block">← Back to home</a>
-    </div>
-  );
-}
-function TermsPage() {
-  return (
-    <div className="max-w-3xl mx-auto px-4 py-12 text-stone-400">
-      <h1 className="text-2xl font-bold text-stone-100 mb-4" style={{ fontFamily: 'Fraunces, serif' }}>Terms of Service</h1>
-      <p className="text-sm leading-relaxed">Use JobHunter responsibly. Uploaded content must be your own. We provide analysis for informational purposes only.</p>
-      <a href="/" className="text-amber-300 hover:text-amber-200 text-sm mt-4 inline-block">← Back to home</a>
-    </div>
-  );
-}
+import PrivacyPage from '../pages/PrivacyPage';
+import TermsPage from '../pages/TermsPage';
+import NotFoundPage from '../pages/NotFoundPage';
+
+const LandingPage = lazy(() => import('../pages/LandingPage'));
+const JobsPage = lazy(() => import('../pages/JobsPage'));
 
 // Issue 3: structural shell skeleton while the single session check resolves —
 // never a blank screen or text-only spinner (§0 rule 7).
 function AppShellSkeleton() {
   return (
-    <div className="min-h-screen bg-[#0C0A09] text-stone-100" aria-busy="true" aria-label="Checking session">
+    <div className="session-skeleton min-h-screen" aria-busy="true" aria-label="Checking session">
       <aside className="fixed inset-y-0 left-0 hidden w-[268px] animate-pulse border-r border-stone-800/70 p-5 lg:block">
         <div className="h-8 w-36 rounded-lg bg-stone-800/70" />
         <div className="mt-8 space-y-3">
@@ -67,7 +53,9 @@ function SessionGuard({ children }: { children: React.ReactNode }) {
     if (!loading && !user) navigate('/login', { replace: true });
   }, [loading, user, navigate]);
 
-  if (loading) return <AppShellSkeleton />;
+  // Keep authenticated forms mounted during a profile/session refresh so their
+  // pending edits and save confirmation survive. Initial auth still blocks.
+  if (loading && !user) return <AppShellSkeleton />;
   if (!user) return null;
   return <>{children}</>;
 }
@@ -80,7 +68,13 @@ function PublicOnly({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-export const router = createBrowserRouter([
+function RouteFrame() {
+  const { pathname } = useLocation();
+  useLayoutEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: 'instant' }); }, [pathname]);
+  return <Suspense fallback={<div className="session-skeleton library-skeleton" aria-busy="true" aria-label="Loading page"><div/><div/><div/></div>}><Outlet /></Suspense>;
+}
+
+export const router = createBrowserRouter([{ element: <RouteFrame />, children: [
   { path: '/', element: <LandingPage /> },
   {
     path: '/login',
@@ -117,8 +111,8 @@ export const router = createBrowserRouter([
       { path: 'profile', element: <ProfilePage /> },
     ],
   },
-  { path: '*', element: <Navigate to="/" replace /> },
-]);
+  { path: '*', element: <NotFoundPage /> },
+]}]);
 
 // Also export a bare outlet for nested usage
 export function RootOutlet() {

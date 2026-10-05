@@ -1,162 +1,37 @@
-/* Fonts: loaded via <link rel="preconnect"> in index.html (Issue 3 fix 5) —
-   the old CSS @import here blocked rendering until fonts.googleapis.com answered. */
-
-@tailwind base;
+@import './prototype.css';
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  color: #F5F5F4;
-  background: #0C0A09;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  --jh-bg: #0C0A09;
-  --jh-bg-soft: #1C1917;
-  --jh-panel: #1C1917;
-  --jh-panel-strong: #292524;
-  --jh-line: rgba(231, 229, 228, 0.08);
-  --jh-line-strong: rgba(231, 229, 228, 0.14);
-  --jh-muted: #A8A29E;
-  --jh-muted-strong: #78716C;
-  --jh-paper: #F5F5F4;
-  --jh-amber: #FACC15;
-  --jh-amber-strong: #EAB308;
-  --jh-amber-soft: rgba(250, 204, 21, 0.12);
-  --jh-emerald: #10B981;
-  --jh-rose: #F43F5E;
+/* Production extensions: identity strings are not fixed-length demo copy. */
+.sidebar { box-sizing: border-box; }
+.sidebar__user { min-width: 0; }
+.sidebar__user > div { min-width: 0; }
+.sidebar__user b, .sidebar__user small { overflow-wrap: anywhere; white-space: normal; }
+.sidebar__user small { display: block; }
+.session-skeleton { color:var(--text); background:var(--bg); }
+.session-skeleton [class*="bg-stone"] { background:var(--line); border-color:var(--line); }
+.report-tabs button.active { color:var(--text); }
+.match-report-page .report-tabs button.active::after { background:var(--blue); }
+.match-metrics-grid article b, .match-evidence-score b { color:var(--blue); }
+.match-report-hero__copy > p, .match-report-hero__copy h1 span { color:var(--muted); }
+.auth-form label > span, .hero-copy > p { color:var(--muted); }
+.legal-wrap p, .report-hero__copy > p, .report-hero__copy h1 span { color:var(--muted); }
+.button--danger, .danger-action { color:var(--red); }
+.hero-copy > p, .hero h1 span { color: var(--muted); }
+.hero-orbit, .hero-example-label, .hero-drag-hint { pointer-events: none; }
+.app-shell :is(.header-note b,.signal-reminder b) { color: var(--amber); }
+.app-shell .signal-reminder--blue b { color: var(--blue); }
+@media (max-width: 900px) {
+  .sidebar:not(.sidebar--open) { visibility: hidden; pointer-events: none; }
+  .sidebar--open { visibility: visible; overflow-y: auto; }
 }
-
-* { box-sizing: border-box; }
-html { background: var(--jh-bg); scroll-behavior: smooth; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--jh-bg); color: var(--jh-paper); }
-button, input, textarea, select { font: inherit; }
-button, a { -webkit-tap-highlight-color: transparent; }
-::selection { background: rgba(250, 204, 21, 0.3); color: #0C0A09; }
-
-@layer base {
-  body {
-    @apply bg-[#0C0A09] text-stone-100 font-sans;
-  }
-  h1, h2, h3 {
-    font-family: 'Fraunces', Georgia, serif;
-    letter-spacing: -0.02em;
-  }
-  h4, h5, h6 {
-    @apply font-sans font-semibold;
-  }
-  code, pre {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
-  }
-}
-
-@layer components {
-  .auth-input {
-    @apply w-full bg-stone-900 border border-stone-800 rounded-xl px-4 py-3
-    text-stone-100 placeholder:text-stone-500 focus:outline-none focus:border-amber-400/40 focus:ring-2 focus:ring-amber-400/10
-    transition-all duration-200;
-  }
-  .auth-btn {
-    @apply w-full bg-amber-400 hover:bg-amber-300 text-stone-900 font-semibold py-3 px-6 rounded-xl
-    transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-amber-400/30;
-  }
-  .auth-link {
-    @apply text-amber-300 hover:text-amber-200 transition-colors duration-200;
-  }
-  .particle { @apply absolute rounded-full opacity-20 pointer-events-none; }
-
-  .jh-surface {
-    @apply rounded-[20px] border border-stone-800 bg-stone-900/60 shadow-2xl shadow-black/20;
-    backdrop-filter: blur(12px);
-  }
-  .jh-surface-strong {
-    @apply rounded-[20px] border border-stone-700/60 bg-stone-900 shadow-2xl shadow-black/20;
-  }
-  .jh-eyebrow {
-    @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300;
-  }
-  .jh-title {
-    font-family: 'Fraunces', serif;
-    @apply text-3xl font-bold tracking-[-0.02em] text-stone-100 md:text-[34px];
-  }
-  .jh-subtitle {
-    @apply max-w-2xl text-sm leading-6 text-stone-400;
-  }
-  .jh-button-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-full bg-amber-400 px-5 py-2.5 text-sm font-semibold text-stone-900 transition hover:bg-amber-300 disabled:opacity-40;
-  }
-  .jh-button-accent {
-    @apply inline-flex items-center justify-center gap-2 rounded-full bg-stone-800 px-5 py-2.5 text-sm font-medium text-stone-100 border border-stone-700 hover:bg-stone-700 transition disabled:opacity-40;
-  }
-  .jh-button-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-full border border-stone-800 bg-stone-900/60 px-4 py-2.5 text-sm text-stone-400 hover:text-stone-100 hover:border-stone-700 transition;
-  }
-  .jh-input {
-    @apply w-full rounded-xl border border-stone-800 bg-stone-900 px-3.5 py-2.5 text-sm text-stone-100 outline-none transition placeholder:text-stone-600 focus:border-amber-400/40 focus:ring-2 focus:ring-amber-400/10;
-  }
-  .jh-chip {
-    @apply inline-flex items-center rounded-full border border-stone-800 bg-stone-900 px-2.5 py-1 text-xs font-medium text-stone-400;
-  }
-}
-
-/* Restored visuals */
-.gradient-bg {
-  background: #0C0A09;
-}
-.card-border {
-  position: relative;
-  border-radius: 1rem;
-  overflow: hidden;
-}
-.card-border::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 1rem;
-  padding: 1.5px;
-  background: linear-gradient(90deg, #FACC15, #78716C);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0.6;
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: -2;
-  background:
-    radial-gradient(800px circle at 15% -10%, rgba(250,204,21,0.09), transparent 60%),
-    radial-gradient(600px circle at 85% 5%, rgba(16,185,129,0.06), transparent 60%),
-    linear-gradient(180deg, #0C0A09 0%, #0C0A09 100%);
-}
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: -1;
-  opacity: 0.03;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-}
-
-.jh-scrollbar { scrollbar-width: thin; scrollbar-color: rgba(168,162,158,.3) transparent; }
-.jh-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
-.jh-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.jh-scrollbar::-webkit-scrollbar-thumb { background: rgba(168,162,158,.25); border-radius: 999px; }
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-}
-
 @media print {
-  nav, button, .no-print { display: none !important; }
-  aside { position: static !important; max-height: none !important; overflow: visible !important; }
-  body { background: #fff !important; color: #000 !important; }
-  body::after { display: none !important; }
-  a { text-decoration: none !important; color: #000 !important; }
+  html[data-theme] { --bg:#fff; --surface:#fff; --surface-2:#f5f2ec; --text:#1c1814; --muted:#514a43; --faint:#625a51; --line:#ccc; --amber:#865113; --blue:#3f5fae; }
+  body { background:#fff; color:#1c1814; }
+  body::before, .sidebar, .sidebar-backdrop, .app-topbar, .app-footer { display:none !important; }
+  .app-main { margin:0 !important; width:100% !important; }
+  .app-content { padding:0 !important; }
+  .workspace-page { max-width:none; padding:0; }
+  .score-ring__inner { background:#fff !important; }
+  .report-hero, .match-report-hero, .priority-item, .breakdown-row { break-inside:avoid; }
 }
