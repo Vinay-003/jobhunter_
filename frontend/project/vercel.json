@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/v1/:path*",
-      "destination": "https://api.vinaybuilds.me/api/v1/:path*"
+      "destination": "https://jobhunter-backend-lkkf.onrender.com/api/v1/:path*"
     },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
