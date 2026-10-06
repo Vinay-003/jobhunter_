@@ -607,27 +607,27 @@ export default function JobsPage() {
           <div className="target-roles-card rounded-xl border p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <label className="text-xs font-semibold text-slate-300">Target roles (up to 3)</label>
-                <p className="text-[11px] text-slate-500">Pick from resume suggestions or type custom titles to focus job retrieval.</p>
+                <label className="text-xs font-semibold text-slate-800 dark:text-slate-200">Target roles (up to 3)</label>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">Pick from resume suggestions or type custom titles to focus job retrieval.</p>
               </div>
-              <span className="text-[11px] font-medium text-amber-300">{targetRoles.length}/3 selected</span>
+              <span className="text-[11px] font-semibold text-blue-600 dark:text-amber-300">{targetRoles.length}/3 selected</span>
             </div>
 
             {discovering && (
-              <div className="flex items-center gap-1.5 text-xs text-amber-300">
+              <div className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-amber-300">
                 <Loader2 size={12} className="animate-spin shrink-0" />
                 <span>Analyzing resume to suggest roles…</span>
               </div>
             )}
 
             {/* Selected Roles & Input Tag Container */}
-            <div className="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-black/20 p-2 focus-within:border-amber-400/40">
+            <div className="target-roles-box">
               {targetRoles.map((role, index) => (
                 <span
                   key={`${role}-${index}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/25 bg-amber-400/10 px-2.5 py-1 text-xs font-medium text-amber-200"
+                  className="job-selected-role-tag"
                 >
-                  <Target size={12} className="shrink-0 text-amber-400" />
+                  <Target size={12} className="shrink-0 opacity-70" />
                   <span className="max-w-[200px] truncate">{role}</span>
                   <button
                     type="button"
@@ -636,7 +636,7 @@ export default function JobsPage() {
                       manualRoles.current = true;
                       setTargetRoles((current) => current.filter((_, i) => i !== index));
                     }}
-                    className="rounded p-0.5 text-amber-400/70 hover:bg-amber-400/20 hover:text-white"
+                    className="tag-remove-btn"
                   >
                     <X size={12} />
                   </button>
@@ -657,13 +657,13 @@ export default function JobsPage() {
                       }
                     }}
                     placeholder={targetRoles.length === 0 ? "Type role & press Enter" : "Add another role…"}
-                    className="w-full bg-transparent px-1.5 py-1 text-xs text-white placeholder:text-stone-500 focus:outline-none"
+                    className="target-roles-input"
                   />
                   {newRoleInput.trim() && (
                     <button
                       type="button"
                       onClick={handleAddCustomRole}
-                      className="shrink-0 rounded-md bg-amber-400/20 px-2 py-0.5 text-[11px] font-medium text-amber-300 hover:bg-amber-400/30"
+                      className="target-roles-add-btn"
                     >
                       Add
                     </button>
@@ -674,15 +674,15 @@ export default function JobsPage() {
 
             {/* AI Role Suggestions */}
             {roleDiscovery?.roles?.length > 0 && (
-              <div className="space-y-2 pt-1 border-t border-white/[0.05]">
+              <div className="space-y-2 pt-2 border-t border-black/5 dark:border-white/5">
                 <div className="flex items-center justify-between text-[11px]">
-                  <span className="flex items-center gap-1.5 font-medium text-stone-400">
-                    <Sparkles size={12} className="text-amber-300" /> Suggested from resume:
+                  <span className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-stone-300">
+                    <Sparkles size={12} className="text-blue-600 dark:text-amber-300" /> Suggested from resume:
                   </span>
                   <button
                     type="button"
                     onClick={() => setShowRoleEvidence((prev) => !prev)}
-                    className="flex items-center gap-1 text-[10px] text-stone-500 transition-colors hover:text-stone-300"
+                    className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-stone-500 transition-colors hover:text-slate-800 dark:hover:text-stone-300"
                   >
                     {showRoleEvidence ? 'Hide reasoning' : 'Why these roles?'}
                     <ChevronDown size={11} className={`transition-transform duration-200 ${showRoleEvidence ? 'rotate-180' : ''}`} />
@@ -692,27 +692,30 @@ export default function JobsPage() {
                 <div className="flex flex-wrap gap-1.5">
                   {roleDiscovery.roles.map((role: any) => {
                     const isSelected = targetRoles.includes(role.title);
+                    const isCapped = !isSelected && targetRoles.length >= 3;
                     return (
                       <button
                         key={role.title}
                         type="button"
-                        disabled={isSelected || targetRoles.length >= 3}
+                        disabled={isCapped}
                         onClick={() => {
-                          if (!isSelected && targetRoles.length < 3) {
-                            manualRoles.current = true;
+                          manualRoles.current = true;
+                          if (isSelected) {
+                            setTargetRoles((current) => current.filter((r) => r !== role.title));
+                          } else if (targetRoles.length < 3) {
                             setTargetRoles((current) => [...current, role.title]);
                           }
                         }}
-                        title={role.reason}
-                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all ${
+                        title={isCapped ? 'Maximum 3 roles selected' : isSelected ? `Click to remove "${role.title}"` : role.reason}
+                        className={`job-suggested-pill ${
                           isSelected
-                            ? 'border border-amber-400/30 bg-amber-400/20 text-amber-300'
-                            : targetRoles.length >= 3
-                            ? 'border border-white/5 bg-white/[0.02] text-stone-600 cursor-not-allowed'
-                            : 'border border-white/10 bg-white/5 text-stone-300 hover:border-amber-400/40 hover:bg-white/10'
+                            ? 'job-suggested-pill--selected'
+                            : isCapped
+                            ? 'job-suggested-pill--disabled'
+                            : 'job-suggested-pill--available'
                         }`}
                       >
-                        {isSelected ? <Check size={11} className="text-amber-300" /> : <Plus size={11} className="text-stone-400" />}
+                        {isSelected ? <Check size={12} className="shrink-0" /> : <Plus size={12} className="shrink-0 opacity-60" />}
                         <span>{role.title}</span>
                       </button>
                     );
@@ -724,7 +727,7 @@ export default function JobsPage() {
                         manualRoles.current = false;
                         setTargetRoles(roleDiscovery.roles.slice(0, 3).map((r: any) => r.title));
                       }}
-                      className="rounded-full border border-dashed border-amber-400/30 px-2.5 py-1 text-[10px] text-amber-300/80 hover:bg-amber-400/10 hover:text-amber-200"
+                      className="job-suggested-pill job-suggested-pill--available font-semibold text-blue-600 dark:text-amber-300 border-dashed"
                     >
                       Select all
                     </button>
@@ -732,15 +735,15 @@ export default function JobsPage() {
                 </div>
 
                 {showRoleEvidence && (
-                  <div className="mt-2 space-y-2 rounded-xl border border-white/10 bg-black/40 p-3 text-xs">
-                    <div className="flex items-center justify-between border-b border-white/5 pb-1.5 text-[10px] text-stone-500">
+                  <div className="mt-2 space-y-2 role-evidence-box text-xs">
+                    <div className="flex items-center justify-between border-b border-black/5 dark:border-white/5 pb-1.5 text-[10px] text-slate-500 dark:text-stone-500">
                       <span>Evidence discovery · {roleDiscovery.source} ({roleDiscovery.model || 'deterministic fallback'})</span>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                       {roleDiscovery.roles.map((role: any) => (
-                        <div key={role.title} className="rounded-lg border border-white/5 bg-white/[0.02] p-2.5 space-y-1">
-                          <span className="font-semibold text-amber-200">{role.title}</span>
-                          <p className="text-[10px] text-stone-400 leading-relaxed">{role.reason}</p>
+                        <div key={role.title} className="role-evidence-card space-y-1">
+                          <span className="role-evidence-card-title text-blue-600 dark:text-amber-200 font-semibold">{role.title}</span>
+                          <p className="role-evidence-card-desc text-[10px] text-slate-600 dark:text-stone-400 leading-relaxed">{role.reason}</p>
                         </div>
                       ))}
                     </div>
@@ -749,7 +752,7 @@ export default function JobsPage() {
               </div>
             )}
 
-            {roleDiscoveryError && <p className="mt-2 text-xs text-amber-300">{roleDiscoveryError}</p>}
+            {roleDiscoveryError && <p className="mt-2 text-xs text-red-500 dark:text-amber-300">{roleDiscoveryError}</p>}
           </div>
 
           {/* Search Scope & Filters Grid */}

@@ -2,6 +2,9 @@ import dns from 'node:dns/promises';
 import https from 'node:https';
 import net from 'node:net';
 import type { JobAvailability, NormalizedJob } from '../../providers/jobs/JobProvider.js';
+import type { EmbeddingProvider } from '../../providers/embeddings/EmbeddingProvider.js';
+import { MockEmbeddingProvider } from '../../providers/embeddings/MockEmbeddingProvider.js';
+import { getRankingEmbeddingProvider } from './ranking.js';
 
 export type AvailabilityResponse={status:number;body:string;finalUrl?:string;location?:string};
 export type AvailabilityOptions={fetch?:(url:string,init:{signal:AbortSignal;redirect:'manual'})=>Promise<AvailabilityResponse>; concurrency?:number; deadlineMs?:number; batchDeadlineMs?:number; ttlMs?:number; now?:()=>string; allowHosts?:string[]; maxChecks?:number};
@@ -78,3 +81,121 @@ export async function checkJobsAvailability(jobs:NormalizedJob[],o:AvailabilityO
   }};
   await Promise.all(Array.from({length:Math.max(1,Math.min(8,o.concurrency??4))},worker));return jobs;
 }
+
+export const CLOSURE_SEMANTIC_ANCHORS = [
+  'We are no longer accepting applications for this position.',
+  'This job opening is closed and no longer accepting submissions.',
+  'This position has been filled and applications are closed.',
+  'Applications for this vacancy are now closed.',
+  'This job listing is closed and not taking any more applicants.'
+];
+
+export const ACTIVE_SEMANTIC_ANCHORS = [
+  'We are currently hiring and actively accepting applications for this open role.',
+  'Apply now to join our team for this open position.',
+  'This position is open and actively accepting applications.'
+];
+
+export function extractClosureCandidateSnippets(job: NormalizedJob): string[] {
+  const raw = `${job.title}\n${job.description ?? ''}`;
+  const lines = raw.split(/(?:\r?\n)+|(?<=[.!?])\s+/);
+  const matched: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (trimmed.length < 10 || trimmed.length > 250) continue;
+    if (/(?:accept|application|closed?|fill(?:ed)?|expire|vacancy|opening|status|submission|available|listing)/i.test(trimmed)) {
+      matched.push(trimmed);
+      if (matched.length >= 6) break;
+    }
+  }
+  return matched;
+}
+
+export async function verifySemanticAvailability(
+  jobs: NormalizedJob[],
+  provider?: EmbeddingProvider
+): Promise<NormalizedJob[]> {
+  const activeJobs = jobs.filter(j => j.availability?.status !== 'closed');
+  if (!activeJobs.length) return jobs;
+
+  const jobSnippets = new Map<NormalizedJob, string[]>();
+  const allSnippetsSet = new Set<string>();
+
+  for (const job of activeJobs) {
+    const snippets = extractClosureCandidateSnippets(job);
+    if (snippets.length > 0) {
+      jobSnippets.set(job, snippets);
+      for (const s of snippets) allSnippetsSet.add(s);
+    }
+  }
+
+  if (allSnippetsSet.size === 0) return jobs;
+
+  const embProvider = provider ?? getRankingEmbeddingProvider();
+  const snippetList = Array.from(allSnippetsSet);
+  const allTexts = [...CLOSURE_SEMANTIC_ANCHORS, ...ACTIVE_SEMANTIC_ANCHORS, ...snippetList];
+
+  try {
+    const res = await embProvider.embed({ texts: allTexts, purpose: 'job' });
+    const vecs = res.vectors;
+    const isMock = /mock|hash/i.test(res.modelId) || embProvider instanceof MockEmbeddingProvider;
+
+    const closureVecs = vecs.slice(0, CLOSURE_SEMANTIC_ANCHORS.length);
+    const activeVecs = vecs.slice(CLOSURE_SEMANTIC_ANCHORS.length, CLOSURE_SEMANTIC_ANCHORS.length + ACTIVE_SEMANTIC_ANCHORS.length);
+    const snippetVecs = vecs.slice(CLOSURE_SEMANTIC_ANCHORS.length + ACTIVE_SEMANTIC_ANCHORS.length);
+
+    const snippetVecMap = new Map<string, number[]>();
+    snippetList.forEach((s, idx) => {
+      snippetVecMap.set(s, snippetVecs[idx]);
+    });
+
+    const now = new Date().toISOString();
+
+    for (const [job, snippets] of jobSnippets.entries()) {
+      for (const snippet of snippets) {
+        if (isMock) {
+          if (CLOSURE_PATTERN.test(snippet)) {
+            job.availability = {
+              status: 'closed',
+              reason: `Semantic closure pattern match: "${snippet.slice(0, 100)}"`,
+              source: 'semantic-closure',
+              checkedAt: now
+            };
+            break;
+          }
+          continue;
+        }
+
+        const sv = snippetVecMap.get(snippet);
+        if (!sv) continue;
+
+        let maxClose = -1;
+        for (const cv of closureVecs) {
+          const sim = MockEmbeddingProvider.cosine(sv, cv);
+          if (sim > maxClose) maxClose = sim;
+        }
+
+        let maxActive = -1;
+        for (const av of activeVecs) {
+          const sim = MockEmbeddingProvider.cosine(sv, av);
+          if (sim > maxActive) maxActive = sim;
+        }
+
+        if (maxClose >= 0.62 && maxClose > maxActive) {
+          job.availability = {
+            status: 'closed',
+            reason: `Semantic closure match (${maxClose.toFixed(2)}): "${snippet.slice(0, 100)}"`,
+            source: 'semantic-closure',
+            checkedAt: now
+          };
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[availability] verifySemanticAvailability failed, keeping current status:', err);
+  }
+
+  return jobs;
+}
+
