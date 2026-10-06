@@ -5,6 +5,7 @@ import { detectJobSeniority, roleFamily } from './ranking.js';
 import { inferCountry, normalizePlace, countryAliases } from './geography.js';
 import { normalizeSeniority } from './seniority.js';
 import { roleArea } from './roleDiscovery.js';
+import { CLOSURE_PATTERN } from './availability.js';
 
 export type EffectivePreferences = { targetRoles: string[]; locations: string[]; workModes: string[]; emphasizedSkills: string[]; excludedRoles: string[]; seniority: string[]; daysPosted?: number; keywords?: string; sortBy?: 'match'|'newest'; includeUnknownDates?: boolean; verifiedOpenOnly?: boolean; includeUnknownLocations?:boolean };
 export function effectivePreferences(saved: any, request: any): EffectivePreferences {
@@ -37,6 +38,7 @@ export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | 
   const blockers: string[] = [];
   const unknown: string[] = [];
   if (job.availability?.status === 'closed') blockers.push('Job is closed');
+  if (CLOSURE_PATTERN.test(job.description ?? '') || CLOSURE_PATTERN.test(job.title)) blockers.push('Job is closed (applications closed)');
   if (prefs.verifiedOpenOnly && (job.availability?.status !== 'open' || !job.availability.checkedAt || Date.now() - Date.parse(job.availability.checkedAt) > 300_000)) blockers.push('Open applications not verified recently');
   if (job.availability?.status === 'unknown') unknown.push('Application availability unverified');
   const title = job.title.toLowerCase();

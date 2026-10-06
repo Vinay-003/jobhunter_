@@ -169,6 +169,77 @@ html[data-theme="light"] .jobs-page .job-skill-pill--missing {
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(136, 19, 55, 0.08);
 }
+
+/* Compact Evidence Box & Chips */
+.jobs-page .job-evidence-box {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+.jobs-page .job-evidence-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+.jobs-page .job-evidence-chip__source {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.8;
+}
+.jobs-page .job-evidence-chip--demonstrated {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(52, 211, 153, 0.25);
+  color: #a7f3d0;
+}
+.jobs-page .job-evidence-chip--declared {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(56, 189, 248, 0.25);
+  color: #bae6fd;
+}
+.jobs-page .job-evidence-chip--unverified {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+}
+
+html[data-theme="light"] .jobs-page .job-evidence-box {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+html[data-theme="light"] .jobs-page .job-evidence-chip--demonstrated {
+  background: #dcfce7 !important;
+  border-color: #86efac !important;
+  color: #14532d !important;
+  font-weight: 600;
+}
+html[data-theme="light"] .jobs-page .job-evidence-chip--declared {
+  background: #e0f2fe !important;
+  border-color: #7dd3fc !important;
+  color: #0369a1 !important;
+  font-weight: 600;
+}
+html[data-theme="light"] .jobs-page .job-evidence-chip--unverified {
+  background: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #475569 !important;
+  font-weight: 500;
+}
+
+.jobs-page .target-roles-card {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+html[data-theme="light"] .jobs-page .target-roles-card {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
 .jobs-page :is(button,a,input,select,summary):focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
 @media(max-width:1150px) { .jobs-page .jobs-layout { grid-template-columns:minmax(270px,340px) minmax(0,1fr); gap:22px; } .jobs-page .jobs-detail-rail { padding-left:22px; } .jobs-page .jobs-toolbar { flex-wrap:wrap; } }
 @media(max-width:900px) { .jobs-page .jobs-layout { grid-template-columns:minmax(0,1fr); } .jobs-page .job-list { max-height:none; } .jobs-page .jobs-detail-rail { border-left:0; border-top:1px solid var(--line); padding:24px 0 0; } }
