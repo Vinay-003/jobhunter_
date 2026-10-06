@@ -10,7 +10,7 @@ export type ParsedJobDescription = {
 };
 const DOMAINS = ['fintech', 'healthcare', 'e-commerce', 'ecommerce', 'saas', 'cloud', 'ai', 'ml', 'machine learning', 'data', 'security', 'devops', 'blockchain', 'gaming', 'edtech'];
 const HEADINGS: Array<[RegExp, 'required' | 'preferred' | 'responsibilities' | 'other']> = [
-  [/^(?:key |job |primary )?(?:responsibilities|duties|what you(?:'|’)?ll do|what you will do|the role|your role|day.to.day|what you will be doing)$/i, 'responsibilities'],
+  [/^(?:(?:key|job|primary|core|roles?\s*(?:and|&)\s*)?(?:responsibilities|duties)|what you(?:'|’)?ll do|what you will do|the role|your role|day.to.day|what you will be doing)$/i, 'responsibilities'],
   [/^(?:required|minimum|must.have|essential)(?: skills| qualifications| requirements| experience)?$/i, 'required'],
   [/^core requirements(?: skills| qualifications| experience)?$/i, 'required'],
   [/^(?:requirements|qualifications(?:\s*&\s*experience)?|qualifications\s+and\s+experience|technical skills|what you bring|who you are|your qualifications|what we(?:'|’)?re looking for)$/i, 'required'],
@@ -60,8 +60,19 @@ export function parseJd(jdText: string): ParsedJobDescription {
     if (inline) section = /preferred|desired|nice|good|bonus/i.test(inline[1]) ? 'preferred' : 'required';
     const content = (inline?.[2] ?? line.raw).replace(/^\s*(?:[-*•◦▪]\s+|\d+[.)]\s+)/, '').trim();
     const isBullet = /^\s*(?:[-*•◦▪]\s+|\d+[.)]\s+)/.test(line.raw);
-    if ((section === 'responsibilities' && (isBullet || /^(?:you will|design|build|develop|maintain|implement|collaborate|own)\b/i.test(content)) || /^(?:you will|you(?:'|’)ll|responsible for|in this role,? you will)\b/i.test(content)) && content.length > 10) {
-      responsibilityEvidence.push({ text: content, start: line.start, end: line.end, confidence: 1 });
+    if ((section === 'responsibilities' && (isBullet || /^(?:you will|design|build|develop|maintain|implement|collaborate|own|assist|work|support|learn|participate|contribute|help|create|write|test|debug|integrate|deploy|optimize|analyze|manage|handle|coordinate|review|document|setup|configure)\b/i.test(content)) || /^(?:you will|you(?:'|’)ll|responsible for|in this role,? you will)\b/i.test(content)) && content.length > 10) {
+      if (content.includes(' – ') || content.includes(' - ')) {
+        const subItems = content.split(/\s+[–—-]\s+/).map(s => s.trim()).filter(s => s.length > 10);
+        if (subItems.length > 1) {
+          for (const sub of subItems) {
+            responsibilityEvidence.push({ text: sub, start: line.start, end: line.end, confidence: 1 });
+          }
+        } else {
+          responsibilityEvidence.push({ text: content, start: line.start, end: line.end, confidence: 1 });
+        }
+      } else {
+        responsibilityEvidence.push({ text: content, start: line.start, end: line.end, confidence: 1 });
+      }
     }
     if (section !== 'required' && section !== 'preferred') continue;
     const parent = line.raw.match(/^(\s*)(?:[-*•◦▪]\s+|\d+[.)]\s+)/);
