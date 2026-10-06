@@ -64,4 +64,34 @@ describe('recommendation ranking regressions', () => {
     expect(rank.scoreDetails?.scoreCapReasons).toContain('Senior role exceeds entry-level profile');
     expect(rank.scoreDetails?.responsibilityMatches[0]).toEqual(expect.objectContaining({ rawCosine: expect.any(Number), supported: expect.any(Boolean) }));
   });
+  test('semantically matches synonymous skills without requiring exact string equality', async () => {
+    const p = profile({ skills: ['REST API'], skillsNormalized: ['REST API'] });
+    const j = job('Backend Engineer', 'Responsibilities:\n- Design microservice architectures\nRequired:\n- API Designing');
+    // Provider returns vectors where "REST API" and "API Designing" are close [1, 0] vs [0.95, 0.31] (cos > 0.9)
+    const provider = {
+      embed: async ({ texts }: any) => ({
+        vectors: texts.map((t: string) => /api design|rest api/i.test(t) ? [0.95, 0.31] : [0, 1]),
+        modelId: 'semantic-synonym-test',
+        dimension: 2,
+      }),
+    };
+    const [rank] = await rankJobsBatch(p, [j], { embeddingProvider: provider });
+    expect(rank.matchedSkills).toContain('API Design');
+    expect(rank.missingSkills).not.toContain('API Design');
+    expect(rank.breakdown.requiredSkill).toBeGreaterThan(0);
+  });
+  test('evaluates all responsibilities without a cap when JD has more than 10 bullets', async () => {
+    const bullets = Array.from({ length: 14 }, (_, i) => `- Deliver technical responsibility item number ${i + 1}`).join('\n');
+    const p = profile();
+    const j = job('Platform Engineer', `Responsibilities:\n${bullets}\nRequired:\n- React`);
+    const provider = {
+      embed: async ({ texts }: any) => ({
+        vectors: texts.map(() => [1, 0]),
+        modelId: 'uncapped-test',
+        dimension: 2,
+      }),
+    };
+    const [rank] = await rankJobsBatch(p, [j], { embeddingProvider: provider });
+    expect(rank.scoreDetails?.responsibilityMatches.length).toBe(14);
+  });
 });
