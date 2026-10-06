@@ -11,7 +11,7 @@ import { ArbeitnowProvider, arbeitnowCacheHours } from '../../providers/jobs/Arb
 import { JobsPipeProvider } from '../../providers/jobs/JobsPipeProvider.js';
 import { JobQueryPlanner } from '../../modules/jobs/queryPlanner.js';
 import { rankJobsBatch, VERSION as algorithmVersion } from '../../modules/jobs/ranking.js';
-import { deduplicateJobs, upsertJob } from '../../providers/jobs/jobStore.js';
+import { deduplicateJobs, upsertJob, upsertJobsBatch } from '../../providers/jobs/jobStore.js';
 import { reserveDailyCall } from '../../providers/jobs/providerBudgets.js';
 import type { NormalizedJob, JobProvider, ProviderSearchResult } from '../../providers/jobs/JobProvider.js';
 import { retrievalPlan, sourceEnvelope } from '../../providers/jobs/retrievalPlan.js';
@@ -193,12 +193,13 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
     await executeRetrieval(retrieval, async (step, cursor) => {
       const entry = providers[step.provider];
       if (!entry) return {};
-      // The executor is intentionally bounded; eligibility can stop later rounds without
-      // starving the first-page coverage round for the other titles.
-      if (step.page > 1 && deduplicateJobs(all).filter(job => eligibleJob(job, profile.seniority, {...searchPreferences,verifiedOpenOnly:false}, profile).status !== 'ineligible').length >= 50) return {};
+      // Skip page > 1 if we already have sufficient candidates loaded
+      if (step.page > 1 && deduplicateJobs(all).length >= 25) return {};
+      // If retrieval has taken > 15s and we already have results, avoid starting further searches
+      if (Date.now() - retrievalStarted >= 15_000 && all.length >= 15) return {};
       const next = await runSearch(step.provider, entry[0], step.keywords, step.location, step.page, entry[1], cursor);
       return { nextCursor: next };
-    }, { globalConcurrency: 4, perProviderConcurrency: 1, maxCalls: 18, timeoutMs: 20_000 });
+    }, { globalConcurrency: 4, perProviderConcurrency: 1, maxCalls: 15, timeoutMs: 18_000 });
     const distinct = deduplicateJobs(all);
     const closedUrls=await recentClosedUrls(userId);
     for(const job of distinct) if(job.url&&closedUrls.has(job.url))job.availability={status:'closed',checkedAt:new Date().toISOString(),reason:'Previously confirmed/reported closed for this account within 24 hours',source:'saved-closure'};
@@ -234,12 +235,44 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
       await client.query('BEGIN');
       const still = await client.query('SELECT id FROM resumes WHERE id=$1 AND user_id=$2 FOR KEY SHARE', [resumeId,userId]);
       if (!still.rows[0]) { await client.query('ROLLBACK'); return res.status(409).json({ success:false, message:'Resume removed during ranking', runId, persisted:false }); }
-      for (let index=0; index<ranked.length; index++) {
-        const job = ranked[index];
-        const jobId = await upsertJob(job,client);
-        const snapshot = { id:jobId, jobId, ...recommendationSnapshot(job) };
-        await client.query(`INSERT INTO recommendations (run_id,job_id,rank,fit_score,confidence,breakdown_json,evidence_json,job_snapshot_json,matched_skills_json,missing_skills_json,eligibility_json)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [runId,jobId,index+1,job.fitScore,job.confidence,JSON.stringify(job.breakdown),JSON.stringify(job.evidence),JSON.stringify(snapshot),JSON.stringify(job.matchedSkills),JSON.stringify(job.missingSkills),JSON.stringify(job.eligibility)]);
+      
+      const jobIdMap = await upsertJobsBatch(ranked, client);
+
+      const CHUNK_REC = 50;
+      for (let c = 0; c < ranked.length; c += CHUNK_REC) {
+        const chunk = ranked.slice(c, c + CHUNK_REC);
+        const valPlaceholders: string[] = [];
+        const recParams: any[] = [];
+        let rIdx = 1;
+
+        for (let i = 0; i < chunk.length; i++) {
+          const job = chunk[i];
+          const rank = c + i + 1;
+          const jobId = jobIdMap.get(`${job.source}:${job.externalId}`);
+          if (!jobId) continue;
+          const snapshot = { id: jobId, jobId, ...recommendationSnapshot(job) };
+
+          valPlaceholders.push(`($${rIdx},$${rIdx+1},$${rIdx+2},$${rIdx+3},$${rIdx+4},$${rIdx+5},$${rIdx+6},$${rIdx+7},$${rIdx+8},$${rIdx+9},$${rIdx+10})`);
+          recParams.push(
+            runId,
+            jobId,
+            rank,
+            job.fitScore,
+            job.confidence,
+            JSON.stringify(job.breakdown),
+            JSON.stringify(job.evidence),
+            JSON.stringify(snapshot),
+            JSON.stringify(job.matchedSkills),
+            JSON.stringify(job.missingSkills),
+            JSON.stringify(job.eligibility)
+          );
+          rIdx += 11;
+        }
+
+        if (valPlaceholders.length) {
+          await client.query(`INSERT INTO recommendations (run_id,job_id,rank,fit_score,confidence,breakdown_json,evidence_json,job_snapshot_json,matched_skills_json,missing_skills_json,eligibility_json)
+            VALUES ${valPlaceholders.join(', ')}`, recParams);
+        }
       }
       timings.persistenceMs=Date.now()-persistenceStarted;timings.totalMs=Date.now()-startedAt;
       await client.query(`UPDATE recommendation_runs SET status='completed',completed_at=now(),embedding_model_id=$2,query_plan_json=$3,provider_status_json=$4,candidate_count=$5,returned_count=$6 WHERE id=$1`, [runId,scored[0]?.embeddingModelId ?? 'none',JSON.stringify(diagnostics),JSON.stringify(sources),distinct.length,ranked.length]);

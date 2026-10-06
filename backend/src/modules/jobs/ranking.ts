@@ -146,30 +146,40 @@ export async function rankJobsBatch(
     ...((profile as any).projects ?? []).map((p: any) => p.title).filter((t: any): t is string => Boolean(t)),
   ])];
 
+  const profileSkillSet = normalizeSkillSet(profile.skills);
   const perJobTexts = jobs.map((job) => {
     const jobText = `${job.title} ${job.description ?? ''}`;
     const sentences = (job.description ?? '').split(/(?<=[.!?\n])\s+/);
     const eduSentences = sentences.filter(s =>
       /\b(?:bachelor(?:'s)?|master(?:'s)?|b\.?tech|b\.?e\.?|bca|mca|degree|ph\.?d|graduate|undergraduate|diploma)\b/i.test(s)
     );
-    const eduText = eduSentences.length ? eduSentences.slice(0, 3).join(' ').trim().slice(0, 400) : null;
+    const eduText = eduSentences.length ? eduSentences.slice(0, 2).join(' ').trim().slice(0, 250) : null;
     const jobSkills = extractSkills(jobText.toLowerCase());
+    const responsibilities = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`).responsibilities.slice(0, 4);
+    const missingSkills = jobSkills.filter((s) => !profileSkillSet.has(s.toLowerCase())).slice(0, 3);
+    const jobDescSnippet = redactProfessionalText(job.description ?? job.title).slice(0, 600);
 
     return {
-      jobDesc: redactProfessionalText(job.description ?? job.title).slice(0, 5000),
+      jobDesc: jobDescSnippet,
       title: job.title,
-      responsibilities: parseJd(`Job title: ${job.title}\n${job.description ?? ''}`).responsibilities.slice(0, 12),
+      responsibilities,
       eduText,
       jobSkills,
+      missingSkills,
     };
   });
 
-  // Unique texts for a single embed call
+  // Unique texts for a single embed call: only embed needed texts, avoid full JD dumps when responsibilities exist
   const uniq = [...new Set([
     ...resumeChunks,
     ...eduChunks,
     ...profileRoles,
-    ...perJobTexts.flatMap((t) => [t.jobDesc, t.title, ...t.responsibilities, ...(t.eduText ? [t.eduText] : []), ...t.jobSkills]),
+    ...perJobTexts.flatMap((t) => [
+      t.title,
+      ...(t.responsibilities.length ? t.responsibilities : [t.jobDesc]),
+      ...(t.eduText ? [t.eduText] : []),
+      ...t.missingSkills,
+    ]),
   ].map((t) => t.trim()).filter(Boolean))];
 
   const provider = opts?.embeddingProvider ?? getRankingEmbeddingProvider();
@@ -183,7 +193,12 @@ export async function rankJobsBatch(
        const identity = 'modelRevision' in provider && typeof provider.modelRevision === 'string' && provider.modelRevision
          ? { modelId: String(provider.modelId), modelRevision: provider.modelRevision } : null;
        const resumeGroup = [...new Set([...resumeChunks, ...eduChunks, ...profileRoles].map(t => t.trim()).filter(Boolean))];
-       const jobGroup = [...new Set(perJobTexts.flatMap(t => [t.jobDesc, t.title, ...t.responsibilities, ...(t.eduText ? [t.eduText] : []), ...t.jobSkills]).map(t => t.trim()).filter(Boolean))];
+       const jobGroup = [...new Set(perJobTexts.flatMap(t => [
+         t.title,
+         ...(t.responsibilities.length ? t.responsibilities : [t.jobDesc]),
+         ...(t.eduText ? [t.eduText] : []),
+         ...t.missingSkills,
+       ]).map(t => t.trim()).filter(Boolean))];
        // Without an authenticated owner, never persist or read private resume vectors.
        const resp = opts?.ownerId && !opts.embeddingProvider ? await embedCached(pool, provider, [
          { purpose: 'resume', ownerId: opts.ownerId, texts: resumeGroup },
@@ -292,8 +307,7 @@ export async function rankJobsBatch(
     let responsibilitySemantic = 0;
     const responsibilityMatches: NonNullable<RankResult['scoreDetails']>['responsibilityMatches'] = [];
     {
-      const parsed = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`);
-      const responsibilities = parsed.responsibilities.slice(0, 12);
+      const responsibilities = perJobTexts[idx].responsibilities;
       for (const responsibility of responsibilities) {
         let best = 0, bestChunk: string | null = null;
         for (const rc of resumeChunks) {
@@ -389,7 +403,7 @@ export async function rankJobsBatch(
         } else {
           // If no explicit degree requirement is stated, measure alignment with job title & description domain
           for (const ec of eduChunks) {
-            const s = pairScore(ec, `${job.title} ${jobDesc.slice(0, 300)}`);
+            const s = pairScore(ec, job.title);
             if (s > semanticEduScore) semanticEduScore = s;
           }
         }

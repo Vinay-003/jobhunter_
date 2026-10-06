@@ -1,5 +1,4 @@
-import { describe, expect, test } from 'bun:test';
-import { canonicalJobUrl, deduplicateJobs, contentHash, upsertJob, markFallback, normalizedPostedAt } from '../providers/jobs/jobStore.js';
+import { canonicalJobUrl, deduplicateJobs, contentHash, upsertJob, upsertJobsBatch, markFallback, normalizedPostedAt } from '../providers/jobs/jobStore.js';
 import { detectJobSeniority, roleFamily } from '../modules/jobs/ranking.js';
 import { eligibleJob, effectivePreferences, countryCodeForLocation } from '../modules/jobs/eligibility.js';
 import { JobQueryPlanner } from '../modules/jobs/queryPlanner.js';
@@ -21,6 +20,20 @@ describe('recommendation integrity', () => {
     expect(sql).toContain('ON CONFLICT (source, external_id) DO UPDATE');
     expect(sql).toContain('RETURNING id');
     expect(upsertJob(job(), { query: async () => ({ rows: [] }) })).rejects.toThrow('did not return an id');
+  });
+  test('upsertJobsBatch handles multi-job arrays with single query and deduplication', async () => {
+    let sql = '';
+    const client = {
+      query: async (text: string) => {
+        sql = text;
+        return { rows: [{ id: 'id-1', source: 'jooble', external_id: 'a' }, { id: 'id-2', source: 'adzuna', external_id: 'b' }] };
+      },
+    };
+    const map = await upsertJobsBatch([job({ externalId: 'a' }), job({ source: 'adzuna', externalId: 'b' }), job({ externalId: 'a' })], client);
+    expect(sql).toContain('INSERT INTO jobs');
+    expect(sql).toContain('ON CONFLICT (source, external_id) DO UPDATE');
+    expect(map.get('jooble:a')).toBe('id-1');
+    expect(map.get('adzuna:b')).toBe('id-2');
   });
   test('title level ignores colleagues and school; role family excludes unrelated work', () => {
     expect(detectJobSeniority('Junior Data Engineer', 'Work with senior managers leading teams')).toBe('entry');

@@ -38,15 +38,27 @@ export class AwsSageMakerEmbeddingProvider implements EmbeddingProvider {
 
     // Validate limit
     if (truncated.length > MAX_TEXTS) {
-      // Batch into chunks of MAX_TEXTS
+      // Batch into chunks of MAX_TEXTS and invoke SageMaker concurrently (concurrency 3)
+      const chunks: string[][] = [];
+      for (let i = 0; i < truncated.length; i += MAX_TEXTS) {
+        chunks.push(truncated.slice(i, i + MAX_TEXTS));
+      }
+      const results: Array<{ vectors: number[][]; modelId: string; dimension: number }> = [];
+      const concurrency = 3;
+      for (let i = 0; i < chunks.length; i += concurrency) {
+        const batch = chunks.slice(i, i + concurrency);
+        const batchResults = await Promise.all(batch.map((chunk) => this.embedChunk(chunk, input.purpose)));
+        results.push(...batchResults);
+      }
       const allVectors: number[][] = [];
       let actualModelId: string | null = null;
       let actualDimension: number | null = null;
-      for (let i = 0; i < truncated.length; i += MAX_TEXTS) {
-        const chunk = truncated.slice(i, i + MAX_TEXTS);
-        const res = await this.embedChunk(chunk, input.purpose);
-        validateVectors(res.vectors, chunk.length, res.dimension);
-        if (actualModelId !== null && (actualModelId !== res.modelId || actualDimension !== res.dimension)) throw new Error('Embedding batches have different models or dimensions');
+      for (let i = 0; i < results.length; i++) {
+        const res = results[i];
+        validateVectors(res.vectors, chunks[i].length, res.dimension);
+        if (actualModelId !== null && (actualModelId !== res.modelId || actualDimension !== res.dimension)) {
+          throw new Error('Embedding batches have different models or dimensions');
+        }
         actualModelId = res.modelId;
         actualDimension = res.dimension;
         allVectors.push(...res.vectors);

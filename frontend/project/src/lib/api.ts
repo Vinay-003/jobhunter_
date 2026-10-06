@@ -92,11 +92,32 @@ api.interceptors.response.use(
 );
 
 export function getApiErrorMessage(err: unknown): string {
-  if (err && typeof err === 'object' && 'message' in err) {
-    return String((err as ApiError).message);
+  if (!err) return 'An unexpected error occurred';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    const apiErr = err as any;
+    if (typeof apiErr.message === 'string' && apiErr.message.trim() && apiErr.message !== '[object Object]') {
+      return apiErr.message;
+    }
+    if (apiErr.response?.data) {
+      const data = apiErr.response.data;
+      if (typeof data === 'string' && data.trim()) return data;
+      if (typeof data.message === 'string' && data.message.trim()) return data.message;
+      if (typeof data.error === 'string' && data.error.trim()) return data.error;
+      if (typeof data.message === 'object') {
+        try { return JSON.stringify(data.message); } catch { /* ignore */ }
+      }
+    }
+    if (typeof apiErr.error === 'string' && apiErr.error.trim()) return apiErr.error;
+    if (err instanceof Error && err.message && err.message !== '[object Object]') return err.message;
+    try {
+      const json = JSON.stringify(err);
+      if (json && json !== '{}') return json;
+    } catch {
+      // ignore serialization error
+    }
   }
-  if (err instanceof Error) return err.message;
-  return 'Unknown error';
+  return 'An unexpected error occurred';
 }
 
 export default api;
