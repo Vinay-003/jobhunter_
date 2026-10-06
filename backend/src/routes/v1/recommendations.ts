@@ -230,6 +230,13 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
     const candidates = eligible.map(({ job, eligibility }, i) => ({ ...job, eligibility, ...scored[i], confidence: (scored[i] as any).confidence ?? 'Low' })).sort(compare).slice(0,200);
     const availabilityStarted = Date.now();
     await checkJobsAvailability(candidates,{maxChecks:20,concurrency:4,batchDeadlineMs:15000});
+    const newlyEnriched = candidates.filter((c: any) => c.descriptionQuality === 'full' && (!c.scoreDetails?.skillEvidence || c.scoreDetails.skillEvidence.length === 0 || c.breakdown?.requiredSkill === 0));
+    if (newlyEnriched.length > 0) {
+      const rescored = await rankJobsBatch(profile, newlyEnriched, { preferences: searchPreferences, ownerId: userId });
+      newlyEnriched.forEach((c: any, idx) => {
+        Object.assign(c, rescored[idx]);
+      });
+    }
     await verifySemanticAvailability(candidates);
     for(const job of candidates) job.eligibility=eligibleJob(job,profile.seniority,searchPreferences,profile);
     const ranked = candidates.filter(job=>{

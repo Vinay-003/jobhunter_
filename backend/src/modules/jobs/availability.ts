@@ -6,9 +6,17 @@ import type { EmbeddingProvider } from '../../providers/embeddings/EmbeddingProv
 import { MockEmbeddingProvider } from '../../providers/embeddings/MockEmbeddingProvider.js';
 import { getRankingEmbeddingProvider } from './ranking.js';
 
+import { stripHtml } from '../../providers/jobs/jobStore.js';
+
 export type AvailabilityResponse={status:number;body:string;finalUrl?:string;location?:string};
 export type AvailabilityOptions={fetch?:(url:string,init:{signal:AbortSignal;redirect:'manual'})=>Promise<AvailabilityResponse>; concurrency?:number; deadlineMs?:number; batchDeadlineMs?:number; ttlMs?:number; now?:()=>string; allowHosts?:string[]; maxChecks?:number};
-export const DEFAULT_ALLOWED_HOSTS=['indeed.com','linkedin.com','jooble.org','adzuna.com','arbeitnow.com','greenhouse.io','lever.co','ashbyhq.com','myworkdayjobs.com','workday.com'];
+export const DEFAULT_ALLOWED_HOSTS = [
+  'indeed.com', 'indeed.co.in', 'linkedin.com', 'jooble.org', 'jooble.com',
+  'adzuna.com', 'adzuna.in', 'adzuna.co.uk', 'adzuna.ca', 'adzuna.de', 'adzuna.fr',
+  'adzuna.com.au', 'adzuna.co.za', 'adzuna.sg', 'adzuna.nl', 'adzuna.pl', 'adzuna.it',
+  'adzuna.at', 'adzuna.ch', 'adzuna.com.br', 'adzuna.co.nz',
+  'arbeitnow.com', 'greenhouse.io', 'lever.co', 'ashbyhq.com', 'myworkdayjobs.com', 'workday.com'
+];
 const cache=new Map<string,{at:number;value:JobAvailability}>(); const MAX_CACHE=256;
 export const CLOSURE_PATTERN = /(?:not\s+(?:currently\s+)?accepting\s+(?:any\s+)?applications|not\s+accepting\s+applications|no\s+longer\s+accepting(?:\s+(?:any\s+)?applications)?|applications\s+(?:are\s+)?closed|applications?\s+no\s+longer\s+accepted|position\s+(?:has\s+been\s+)?filled|role\s+(?:has\s+been\s+)?filled|this\s+job\s+has\s+expired|job\s+has\s+expired|posting\s+has\s+expired|this\s+job\s+is\s+no\s+longer\s+available|this\s+position\s+is\s+no\s+longer\s+available|this\s+posting\s+is\s+closed|this\s+listing\s+is\s+no\s+longer\s+available|listing\s+is\s+no\s+longer\s+available|not\s+open\s+for\s+applications|no\s+longer\s+open\s+for\s+applications|submissions?\s+(?:are\s+)?closed|position\s+closed|job\s+is\s+closed|role\s+is\s+closed|no\s+longer\s+taking\s+applications|closed\s+for\s+applications|this\s+opening\s+is\s+closed|job\s+listing\s+is\s+closed)/i;
 const challenge=/captcha|cloudflare|access denied|verify you are human|bot detection|challenge/i;
@@ -22,7 +30,10 @@ export function isPublicAddress(address:string): boolean {
   const a=address.toLowerCase();
   return net.isIP(a)===6 && /^[23][0-9a-f]{3}:/.test(a) && !/^(?:2001:(?:db8|0|10|20):|2002:)/.test(a);
 }
-export function allowedHost(host:string,allow=DEFAULT_ALLOWED_HOSTS){const h=host.toLowerCase().replace(/\.$/,''); return allow.some(x=>h===x||h.endsWith('.'+x));}
+export function allowedHost(host:string,allow=DEFAULT_ALLOWED_HOSTS){
+  const h=host.toLowerCase().replace(/\.$/,'');
+  return allow.some(x=>h===x||h.endsWith('.'+x));
+}
 const uok=(raw:string,allow:string[])=>{try{const u=new URL(raw); if(u.protocol!=='https:'||u.port&&u.port!=='443'||u.username||u.password||!allowedHost(u.hostname,allow))return null; return u;}catch{return null;}};
 function result(status:JobAvailability['status'],reason:string,source:string,now:string):JobAvailability{return {status,reason,source,checkedAt:now};}
 export function parseAvailability(body:string,job:NormalizedJob,source:string,now:string,finalUrl?:string):JobAvailability{
@@ -32,6 +43,13 @@ export function parseAvailability(body:string,job:NormalizedJob,source:string,no
  if(/(?:verify you are human|access denied|cf-chl-|challenge-platform|just a moment)/i.test(body))return result('unknown','Bot challenge or access denied',source,now);
  const candidates:any[]=[]; for(const m of body.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){try{const x=JSON.parse(m[1]); const add=(v:any)=>{if(v?.['@type']==='JobPosting'||(Array.isArray(v?.['@type'])&&v['@type'].includes('JobPosting')))candidates.push(v); else if(v?.['@graph'])v['@graph'].forEach(add);}; Array.isArray(x)?x.forEach(add):add(x);}catch{}}
  const title=norm(job.title); const match=(v:any)=>{const t=norm(String(v.title??v.name??'')); const words=title.split(' ').filter(x=>x.length>2); return t===title||(words.length>=3&&words.filter(x=>t.includes(x)).length/words.length>=.67);}; const matched=candidates.find(match); if(candidates.length&&!matched)return result('unknown','Job page identity does not match',source,now);
+ if(matched?.description){
+   const clean = stripHtml(matched.description);
+   if (clean && clean.length > (job.description?.length ?? 0)) {
+     job.description = clean;
+     job.descriptionQuality = 'full';
+   }
+ }
  if(matched?.validThrough&&Date.parse(matched.validThrough)<=Date.parse(now))return result('closed','JSON-LD validThrough expired',source,now);
  const org=matched?.hiringOrganization?.name;
  if(org && norm(job.company) && !norm(String(org)).includes(norm(job.company)) && !norm(job.company).includes(norm(String(org)))) return result('unknown','Employer identity does not match',source,now);
