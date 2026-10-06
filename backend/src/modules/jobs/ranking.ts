@@ -138,15 +138,39 @@ export async function rankJobsBatch(
   // matching junior JD); max-over-chunks discriminates correctly.
   if (!jobs.length) return [];
   const resumeChunks = professionalEvidence({ ...profile, skills: [] });
+  const eduChunks = profile.education.map(e =>
+    `${e.degree ?? 'Degree'}${e.field ? ` in ${e.field}` : ''}${e.institution ? ` from ${e.institution}` : ''} ${e.raw ?? ''}`.trim()
+  ).filter(Boolean);
+  const profileRoles = [...new Set([
+    ...profile.experience.map(e => e.title).filter((t): t is string => Boolean(t)),
+    ...((profile as any).projects ?? []).map((p: any) => p.title).filter((t: any): t is string => Boolean(t)),
+  ])];
 
-  const perJobTexts = jobs.map((job) => ({
-     jobDesc: redactProfessionalText(job.description ?? job.title).slice(0, 5000),
-    title: job.title,
-    responsibilities: parseJd(`Job title: ${job.title}\n${job.description ?? ''}`).responsibilities.slice(0, 12),
-  }));
+  const perJobTexts = jobs.map((job) => {
+    const jobText = `${job.title} ${job.description ?? ''}`;
+    const sentences = (job.description ?? '').split(/(?<=[.!?\n])\s+/);
+    const eduSentences = sentences.filter(s =>
+      /\b(?:bachelor(?:'s)?|master(?:'s)?|b\.?tech|b\.?e\.?|bca|mca|degree|ph\.?d|graduate|undergraduate|diploma)\b/i.test(s)
+    );
+    const eduText = eduSentences.length ? eduSentences.slice(0, 3).join(' ').trim().slice(0, 400) : null;
+    const jobSkills = extractSkills(jobText.toLowerCase());
+
+    return {
+      jobDesc: redactProfessionalText(job.description ?? job.title).slice(0, 5000),
+      title: job.title,
+      responsibilities: parseJd(`Job title: ${job.title}\n${job.description ?? ''}`).responsibilities.slice(0, 12),
+      eduText,
+      jobSkills,
+    };
+  });
 
   // Unique texts for a single embed call
-  const uniq = [...new Set([...resumeChunks, ...perJobTexts.flatMap((t) => [t.jobDesc, t.title, ...t.responsibilities])].map((t) => t.trim()).filter(Boolean))];
+  const uniq = [...new Set([
+    ...resumeChunks,
+    ...eduChunks,
+    ...profileRoles,
+    ...perJobTexts.flatMap((t) => [t.jobDesc, t.title, ...t.responsibilities, ...(t.eduText ? [t.eduText] : []), ...t.jobSkills]),
+  ].map((t) => t.trim()).filter(Boolean))];
 
   const provider = opts?.embeddingProvider ?? getRankingEmbeddingProvider();
   const providerName = (provider as object).constructor?.name ?? 'unknown';
@@ -158,15 +182,17 @@ export async function rankJobsBatch(
     try {
        const identity = 'modelRevision' in provider && typeof provider.modelRevision === 'string' && provider.modelRevision
          ? { modelId: String(provider.modelId), modelRevision: provider.modelRevision } : null;
+       const resumeGroup = [...new Set([...resumeChunks, ...eduChunks, ...profileRoles].map(t => t.trim()).filter(Boolean))];
+       const jobGroup = [...new Set(perJobTexts.flatMap(t => [t.jobDesc, t.title, ...t.responsibilities, ...(t.eduText ? [t.eduText] : []), ...t.jobSkills]).map(t => t.trim()).filter(Boolean))];
        // Without an authenticated owner, never persist or read private resume vectors.
        const resp = opts?.ownerId && !opts.embeddingProvider ? await embedCached(pool, provider, [
-         { purpose: 'resume', ownerId: opts.ownerId, texts: [...new Set(resumeChunks.map(t => t.trim()).filter(Boolean))] },
-         { purpose: 'job', texts: [...new Set(perJobTexts.flatMap(t => [t.jobDesc, t.title, ...t.responsibilities]).map(t => t.trim()).filter(Boolean))] },
+         { purpose: 'resume', ownerId: opts.ownerId, texts: resumeGroup },
+         { purpose: 'job', texts: jobGroup },
        ], identity) : null;
        const direct = resp ? null : await provider.embed({ texts: uniq, purpose: 'job' });
        const embedded = resp ? new Map<string, number[]>([
-         ...[...new Set(resumeChunks.map(t => t.trim()).filter(Boolean))].map((text, i) => [text, resp.groups[0][i]] as const),
-         ...[...new Set(perJobTexts.flatMap(t => [t.jobDesc, t.title, ...t.responsibilities]).map(t => t.trim()).filter(Boolean))].map((text, i) => [text, resp.groups[1][i]] as const),
+         ...resumeGroup.map((text, i) => [text, resp.groups[0][i]] as const),
+         ...jobGroup.map((text, i) => [text, resp.groups[1][i]] as const),
        ]) : null;
        const result = direct ?? { vectors: uniq.map(text => embedded!.get(text)!), modelId: resp!.modelId, dimension: resp!.dimension };
        modelId = result.modelId;
@@ -190,47 +216,75 @@ export async function rankJobsBatch(
 
   return jobs.map((job, idx) => {
     const evidence: string[] = [];
-    const { jobDesc } = perJobTexts[idx];
+    const { jobDesc, jobSkills } = perJobTexts[idx];
 
-    // 1) Required skill 30 (same as rankJob) + matched/missing lists for UI
+    // 1) Required skill 30 (same as rankJob) + matched/missing lists for UI with semantic support
     let requiredSkillScore = 0;
     let matchedSkills: string[] = [];
-     let missingSkills: string[] = [];
-     const skillEvidence: NonNullable<RankResult['scoreDetails']>['skillEvidence'] = [];
+    let missingSkills: string[] = [];
+    const skillEvidence: NonNullable<RankResult['scoreDetails']>['skillEvidence'] = [];
     {
-      const jobText = `${job.title} ${job.description ?? ''}`.toLowerCase();
-       const demonstrated = normalizeSkillSet((profile as any).demonstratedSkills ?? []);
-       const declared = normalizeSkillSet((profile as any).declaredSkills ?? profile.skills ?? []);
-       const profileSet = normalizeSkillSet(profile.skills);
-       const jobSkills = extractSkills(jobText).map(s => s.toLowerCase());
+      const demonstrated = normalizeSkillSet((profile as any).demonstratedSkills ?? []);
+      const declared = normalizeSkillSet((profile as any).declaredSkills ?? profile.skills ?? []);
+      const profileSet = normalizeSkillSet(profile.skills);
       const parsed = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`);
       const structured = parsed.requirementGroups?.some(group => group.confidence >= .7);
       const display = (s: string) => normalizeSkill(s);
-       if (structured) {
-        const match = matchJd(profile, parsed);
-        requiredSkillScore = Math.round(match.overallScore / 100 * (job.descriptionQuality === 'full' ? 30 : 18));
-         matchedSkills = [...new Set([...match.matchedRequired, ...match.matchedPreferred].map(s => normalizeSkill(s)))];
-         missingSkills = match.missingRequired;
-         [...new Set([...matchedSkills, ...missingSkills])].forEach(skill => skillEvidence.push({ skill: display(skill), source: demonstrated.has(normalizeSkill(skill).toLowerCase()) ? 'demonstrated' : declared.has(normalizeSkill(skill).toLowerCase()) ? 'declared' : 'unverified' }));
-        evidence.push(`Structured requirement coverage ${Math.round(match.requiredCoverage * 100)}%; alternatives are grouped`);
+
+      // Raw exact matches
+      const rawMatched = jobSkills.filter((s) => profileSet.has(s.toLowerCase()));
+      const rawMissing = jobSkills.filter((s) => !profileSet.has(s.toLowerCase()));
+
+      // Check semantic support for missing skills
+      const semanticallySupported: string[] = [];
+      if (vec.size && resumeChunks.length && rawMissing.length) {
+        for (const miss of rawMissing) {
+          let bestSim = 0;
+          for (const rc of resumeChunks) {
+            const s = pairScore(rc, miss);
+            if (s > bestSim) bestSim = s;
+          }
+          if (bestSim >= 0.45) { // Raw cosine >= 0.52
+            semanticallySupported.push(miss);
+          }
+        }
+      }
+
+      const allMatched = [...rawMatched, ...semanticallySupported];
+      const finalMissing = rawMissing.filter(s => !semanticallySupported.includes(s));
+
+      const effectiveSkills = [...profile.skills, ...semanticallySupported];
+      const effectiveProfile: ResumeProfile = semanticallySupported.length ? {
+        ...profile,
+        skills: effectiveSkills,
+        skillsNormalized: effectiveSkills.map(normalizeSkill),
+      } : profile;
+
+      if (structured) {
+        const match = matchJd(effectiveProfile, parsed);
+        requiredSkillScore = Math.round((match.overallScore / 100) * (job.descriptionQuality === 'full' ? 30 : 18));
+        matchedSkills = [...new Set([...match.matchedRequired, ...match.matchedPreferred, ...semanticallySupported].map(s => normalizeSkill(s)))];
+        missingSkills = match.missingRequired.filter(s => !semanticallySupported.some(sup => normalizeSkill(sup).toLowerCase() === normalizeSkill(s).toLowerCase()));
+        [...new Set([...matchedSkills, ...missingSkills])].forEach(skill => {
+          const norm = normalizeSkill(skill).toLowerCase();
+          const src = demonstrated.has(norm) ? 'demonstrated' : declared.has(norm) ? 'declared' : semanticallySupported.some(s => normalizeSkill(s).toLowerCase() === norm) ? 'demonstrated' : 'unverified';
+          skillEvidence.push({ skill: display(skill), source: src });
+        });
+        evidence.push(`Structured requirement coverage ${Math.round(match.requiredCoverage * 100)}%${semanticallySupported.length ? ` (${semanticallySupported.length} via semantic alignment)` : ''}; alternatives are grouped`);
       } else if (jobSkills.length === 0) {
-         requiredSkillScore = 0;
-         evidence.push('Requirements unavailable; no skill points inferred');
+        requiredSkillScore = 0;
+        evidence.push('Requirements unavailable; no skill points inferred');
       } else if (jobSkills.length <= 2) {
-        // Thin Jooble snippets: 1-2 detected skills is noise, not signal.
-        const matchedThin = jobSkills.filter((s) => profileSet.has(s));
-        matchedSkills = matchedThin.map(display);
-        missingSkills = jobSkills.filter((s) => !profileSet.has(s)).map(display);
-         requiredSkillScore = Math.round(matchedThin.length / jobSkills.length * 15);
-         evidence.push(`Only ${jobSkills.length} skill signal${jobSkills.length === 1 ? '' : 's'} (${matchedThin.length} matched); limited evidence`);
+        matchedSkills = allMatched.map(display);
+        missingSkills = finalMissing.map(display);
+        requiredSkillScore = Math.round(allMatched.length / jobSkills.length * 15);
+        evidence.push(`Only ${jobSkills.length} skill signal${jobSkills.length === 1 ? '' : 's'} (${allMatched.length} matched); limited evidence`);
       } else {
-        const matched = jobSkills.filter((s) => profileSet.has(s));
-        const missing = jobSkills.filter((s) => !profileSet.has(s));
-        matchedSkills = matched.map(display);
-        missingSkills = missing.map(display);
+        matchedSkills = allMatched.map(display);
+        missingSkills = finalMissing.map(display);
         const maxSkill = job.descriptionQuality === 'full' ? 30 : 18;
-        requiredSkillScore = Math.round((matched.length / jobSkills.length) * maxSkill);
-        evidence.push(`Skill coverage ${matched.length}/${jobSkills.length}`);
+        requiredSkillScore = Math.round((allMatched.length / jobSkills.length) * maxSkill);
+        evidence.push(`Skill coverage ${allMatched.length}/${jobSkills.length}${semanticallySupported.length ? ` (${semanticallySupported.length} via semantic alignment)` : ''}`);
       }
     }
 
@@ -265,16 +319,31 @@ export async function rankJobsBatch(
       }
     }
 
-    // 3) Role/title 15
+    // 3) Role/title 15 — Semantic alignment between demonstrated roles & job title
     let roleTitle = 0;
     {
-       const family = roleFamily(job.title);
-       const target = opts?.preferences?.targetRoles ?? [];
-       const actual=roleArea(job.title),areas=profileRoleAreas(profile),desired=target.map(roleArea);
-       const compatible=areas.has(actual)||(actual==='generic'&&areas.size>0);
-       const targeted=!desired.length||desired.includes(actual)||desired.includes('generic')||desired.includes('fullstack')&&['backend','frontend'].includes(actual);
-       roleTitle=family==='other'||!compatible||!targeted?0:actual==='generic'?9:areas.has('fullstack')&&actual!=='fullstack'?12:15;
-       evidence.push(`Role ${actual}: ${roleTitle?`supported by demonstrated ${[...areas].join(', ')} work; ${areas.has('fullstack')&&actual!=='fullstack'?'partial specialization of full-stack evidence':'direct role evidence'}`:'specialization not demonstrated or outside target roles'}`);
+      const family = roleFamily(job.title);
+      const target = opts?.preferences?.targetRoles ?? [];
+      const actual = roleArea(job.title), areas = profileRoleAreas(profile), desired = target.map(roleArea);
+      const compatible = areas.has(actual) || (actual === 'generic' && areas.size > 0);
+      const targeted = !desired.length || desired.includes(actual) || desired.includes('generic') || desired.includes('fullstack') && ['backend', 'frontend'].includes(actual);
+      const rulePoints = family === 'other' || !compatible || !targeted ? 0 : actual === 'generic' ? 9 : areas.has('fullstack') && actual !== 'fullstack' ? 12 : 15;
+
+      let maxRoleSim = 0;
+      if (vec.size && profileRoles.length) {
+        for (const pr of profileRoles) {
+          const s = pairScore(pr, job.title);
+          if (s > maxRoleSim) maxRoleSim = s;
+        }
+      }
+
+      if (maxRoleSim >= 0.55 && rulePoints > 0) {
+        roleTitle = Math.max(rulePoints, Math.round(maxRoleSim * 15));
+      } else {
+        roleTitle = rulePoints;
+      }
+
+      evidence.push(`Role ${actual}: ${roleTitle ? `supported by demonstrated ${[...areas].join(', ')} work${maxRoleSim >= 0.50 ? ` (${Math.round(maxRoleSim * 100)}% semantic alignment)` : ''}` : 'specialization not demonstrated or outside target roles'}`);
     }
 
     // 4) Seniority 15
@@ -300,7 +369,7 @@ export async function rankJobsBatch(
       }
     }
 
-    // 5) Domain/education 10
+    // 5) Domain/education 10 — Semantic ML similarity with deterministic fallback
     let domainEducation = 0;
     {
       const jobLower = (job.description ?? '').toLowerCase();
@@ -309,51 +378,98 @@ export async function rankJobsBatch(
         (profileSen === 'intern' && /intern/i.test(job.title)) ||
         /\b(?:pursuing|student|intern|fresher|recent grad|new grad|in progress)\b/i.test(jobLower);
 
-      if (!hasEduReq) {
-        // No explicit degree required by job — award soft credit if candidate holds relevant tech education
-        const hasRelevantEdu = profile.education.some(entry => {
-          const text = `${entry.degree ?? ''} ${entry.field ?? ''} ${entry.raw ?? ''}`.toLowerCase();
-          return /\b(?:computer|software|information|technology|engineering|b\.?tech|b\.?e\.?|bca|mca|cs|cse|it)\b/i.test(text);
-        });
-        domainEducation = hasRelevantEdu ? 7 : 0;
-        evidence.push(hasRelevantEdu
-          ? 'Candidate holds relevant technical education; no strict degree requirement stated'
-          : 'No education requirement stated; no technical education verified');
-      } else {
-        const expected = /\b(?:phd|doctorate)\b/i.test(jobLower) ? 'doctorate' : /\bmaster\b/i.test(jobLower) ? 'master' : /\b(?:bachelor|degree|b\.?tech|b\.?e\.?|bca)\b/i.test(jobLower) ? 'bachelor' : null;
-        const matching = profile.education.find(entry => {
-          const degree = entry.degree ?? '';
-          const level = /phd|doctor/i.test(degree) ? 'doctorate' : /master|m\.?tech|m\.?sc|mca/i.test(degree) ? 'master' : /bachelor|b\.?tech|b\.?sc|b\.?e\.?|bca/i.test(degree) ? 'bachelor' : null;
-          const levelMatches = !expected || level === expected || (expected === 'bachelor' && (level === 'master' || level === 'doctorate'));
-          if (!levelMatches) return false;
-
-          const fLower = (entry.field ?? '').toLowerCase();
-          const rLower = (entry.raw ?? '').toLowerCase();
-          const isCandidateCs = /\b(?:computer science|cs|cse|information technology|it|software|computing|data science|computer applications)\b/i.test(`${fLower} ${rLower}`);
-          const isJdCs = /\b(?:computer science|cs|cse|information technology|it|software engineering|data science|computer applications)\b/i.test(jobLower);
-          const jdAcceptsRelated = /\b(?:related (?:field|degree|discipline)|or related|equivalent|stem|technical degree|engineering)\b/i.test(jobLower);
-
-          if (isCandidateCs && (isJdCs || jdAcceptsRelated || !isJdCs)) return true;
-
-          const jdField = jobLower.match(/\b(?:in|of)\s+([a-z\s]+(?:science|technology|engineering|mathematics))\b/i)?.[1]?.trim()?.toLowerCase();
-          if (!jdField) return true;
-          return fLower.includes(jdField) || jdField.includes(fLower);
-        });
-
-        if (matching) {
-          if (matching.completed === true) {
-            domainEducation = 10;
-            evidence.push('Verified completed education meets stated degree and field');
-          } else if (isEarlyCareer) {
-            domainEducation = 10;
-            evidence.push('Degree in progress/pursuing meets early-career or internship qualification');
-          } else {
-            domainEducation = 5;
-            evidence.push('Degree listed; completion unverified');
+      const jobEdu = perJobTexts[idx].eduText;
+      let semanticEduScore = 0;
+      if (vec.size && eduChunks.length) {
+        if (jobEdu) {
+          for (const ec of eduChunks) {
+            const s = pairScore(ec, jobEdu);
+            if (s > semanticEduScore) semanticEduScore = s;
           }
         } else {
-          domainEducation = 0;
-          evidence.push('Required degree or field not evidenced');
+          // If no explicit degree requirement is stated, measure alignment with job title & description domain
+          for (const ec of eduChunks) {
+            const s = pairScore(ec, `${job.title} ${jobDesc.slice(0, 300)}`);
+            if (s > semanticEduScore) semanticEduScore = s;
+          }
+        }
+      }
+
+      if (vec.size && eduChunks.length && semanticEduScore > 0) {
+        if (!hasEduReq) {
+          // No explicit degree required by job — award soft credit based on domain alignment
+          domainEducation = semanticEduScore >= 0.35 ? 7 : Math.round(semanticEduScore * 7);
+          evidence.push(domainEducation >= 5
+            ? `Candidate holds relevant technical education (${Math.round(semanticEduScore * 100)}% semantic domain alignment); no strict degree requirement stated`
+            : 'No education requirement stated; no technical education verified');
+        } else {
+          // Explicit education requirement stated in job
+          if (semanticEduScore >= 0.45) {
+            const matchingCompleted = profile.education.find(e => e.completed === true);
+            if (matchingCompleted || isEarlyCareer) {
+              domainEducation = 10;
+              evidence.push(isEarlyCareer && !matchingCompleted
+                ? `Degree in progress/pursuing meets early-career or internship qualification (${Math.round(semanticEduScore * 100)}% semantic alignment)`
+                : `Verified education meets stated degree and field (${Math.round(semanticEduScore * 100)}% semantic alignment)`);
+            } else {
+              domainEducation = 5;
+              evidence.push(`Degree listed (${Math.round(semanticEduScore * 100)}% semantic alignment); completion unverified`);
+            }
+          } else if (semanticEduScore >= 0.30) {
+            domainEducation = 5;
+            evidence.push(`Partial domain education alignment (${Math.round(semanticEduScore * 100)}%)`);
+          } else {
+            domainEducation = 0;
+            evidence.push('Required degree or field not evidenced');
+          }
+        }
+      } else {
+        // Deterministic fallback (when embeddings not available or mocked)
+        if (!hasEduReq) {
+          const hasRelevantEdu = profile.education.some(entry => {
+            const text = `${entry.degree ?? ''} ${entry.field ?? ''} ${entry.raw ?? ''}`.toLowerCase();
+            return /\b(?:computer|software|information|technology|engineering|b\.?tech|b\.?e\.?|bca|mca|cs|cse|it)\b/i.test(text);
+          });
+          domainEducation = hasRelevantEdu ? 7 : 0;
+          evidence.push(hasRelevantEdu
+            ? 'Candidate holds relevant technical education; no strict degree requirement stated'
+            : 'No education requirement stated; no technical education verified');
+        } else {
+          const expected = /\b(?:phd|doctorate)\b/i.test(jobLower) ? 'doctorate' : /\bmaster\b/i.test(jobLower) ? 'master' : /\b(?:bachelor|degree|b\.?tech|b\.?e\.?|bca)\b/i.test(jobLower) ? 'bachelor' : null;
+          const matching = profile.education.find(entry => {
+            const degree = entry.degree ?? '';
+            const level = /phd|doctor/i.test(degree) ? 'doctorate' : /master|m\.?tech|m\.?sc|mca/i.test(degree) ? 'master' : /bachelor|b\.?tech|b\.?sc|b\.?e\.?|bca/i.test(degree) ? 'bachelor' : null;
+            const levelMatches = !expected || level === expected || (expected === 'bachelor' && (level === 'master' || level === 'doctorate'));
+            if (!levelMatches) return false;
+
+            const fLower = (entry.field ?? '').toLowerCase();
+            const rLower = (entry.raw ?? '').toLowerCase();
+            const isCandidateCs = /\b(?:computer science|cs|cse|information technology|it|software|computing|data science|computer applications)\b/i.test(`${fLower} ${rLower}`);
+            const isJdCs = /\b(?:computer science|cs|cse|information technology|it|software engineering|data science|computer applications)\b/i.test(jobLower);
+            const jdAcceptsRelated = /\b(?:related (?:field|degree|discipline)|or related|equivalent|stem|technical degree|engineering)\b/i.test(jobLower);
+
+            if (isCandidateCs && (isJdCs || jdAcceptsRelated || !isJdCs)) return true;
+
+            const jdField = jobLower.match(/\b(?:in|of)\s+([a-z\s]+(?:science|technology|engineering|mathematics))\b/i)?.[1]?.trim()?.toLowerCase();
+            if (!jdField) return true;
+            return fLower.includes(jdField) || jdField.includes(fLower);
+          });
+
+          if (matching) {
+            if (matching.completed === true) {
+              domainEducation = 10;
+              evidence.push('Verified completed education meets stated degree and field');
+            } else if (isEarlyCareer) {
+              domainEducation = 10;
+              evidence.push('Degree in progress/pursuing meets early-career or internship qualification');
+            } else {
+              domainEducation = 5;
+              evidence.push('Degree listed; completion unverified');
+            }
+          } else {
+            domainEducation = 0;
+            evidence.push('Required degree or field not evidenced');
+          }
         }
       }
     }
