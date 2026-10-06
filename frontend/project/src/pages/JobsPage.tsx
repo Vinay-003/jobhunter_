@@ -473,7 +473,22 @@ export default function JobsPage() {
     // Run when the user switches the resume; filter changes are applied explicitly.
   }, [selectedResume]);
 
-   const visibleJobs = useMemo(() => jobs.filter((job) => scoreOf(job) >= prefs.minScore && (!searchText.trim() || `${job.title} ${job.company || ''}`.toLocaleLowerCase().includes(searchText.trim().toLocaleLowerCase())) && (!listLocation || (job.location || '').toLocaleLowerCase().includes(listLocation.toLocaleLowerCase()))), [jobs, prefs.minScore, searchText, listLocation]);
+  const visibleJobs = useMemo(() => {
+    const filtered = jobs.filter(
+      (job) =>
+        scoreOf(job) >= prefs.minScore &&
+        (!searchText.trim() || `${job.title} ${job.company || ''}`.toLocaleLowerCase().includes(searchText.trim().toLocaleLowerCase())) &&
+        (!listLocation || (job.location || '').toLocaleLowerCase().includes(listLocation.toLocaleLowerCase()))
+    );
+    return filtered.slice().sort((a, b) => {
+      if (sortBy === 'newest') {
+        const da = Date.parse(a.postedAt || '') || 0;
+        const db = Date.parse(b.postedAt || '') || 0;
+        return (db - da) || (scoreOf(b) - scoreOf(a));
+      }
+      return (scoreOf(b) - scoreOf(a)) || ((a.eligibility?.status === 'eligible' ? 0 : 1) - (b.eligibility?.status === 'eligible' ? 0 : 1));
+    });
+  }, [jobs, prefs.minScore, searchText, listLocation, sortBy]);
   const selected = visibleJobs[Math.min(selectedIndex, Math.max(0, visibleJobs.length - 1))];
   const topMatches = visibleJobs.filter((job) => scoreOf(job) >= 75).length;
   const selectedResumeName = resumes.find((resume) => resume.id === selectedResume)?.fileName ?? resumes.find((resume) => resume.id === selectedResume)?.file_name;
