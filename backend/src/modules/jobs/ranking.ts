@@ -146,7 +146,13 @@ export async function rankJobsBatch(
     ...((profile as any).projects ?? []).map((p: any) => p.title).filter((t: any): t is string => Boolean(t)),
   ])];
 
-  const profileSkillSet = normalizeSkillSet(profile.skills);
+  const candidateSkills = [...new Set([
+    ...(profile.skills ?? []),
+    ...(profile.skillsNormalized ?? []),
+    ...((profile as any).declaredSkills ?? []),
+    ...((profile as any).demonstratedSkills ?? []),
+  ].map((s) => s.trim()).filter(Boolean))];
+
   const perJobTexts = jobs.map((job) => {
     const jobText = `${job.title} ${job.description ?? ''}`;
     const sentences = (job.description ?? '').split(/(?<=[.!?\n])\s+/);
@@ -154,9 +160,13 @@ export async function rankJobsBatch(
       /\b(?:bachelor(?:'s)?|master(?:'s)?|b\.?tech|b\.?e\.?|bca|mca|degree|ph\.?d|graduate|undergraduate|diploma)\b/i.test(s)
     );
     const eduText = eduSentences.length ? eduSentences.slice(0, 2).join(' ').trim().slice(0, 250) : null;
-    const jobSkills = extractSkills(jobText.toLowerCase());
-    const responsibilities = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`).responsibilities.slice(0, 10);
-    const missingSkills = jobSkills.filter((s) => !profileSkillSet.has(s.toLowerCase()));
+    const parsed = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`);
+    const responsibilities = parsed.responsibilities;
+    const jobSkills = [...new Set([
+      ...extractSkills(jobText.toLowerCase()),
+      ...(parsed.requiredSkills ?? []),
+      ...(parsed.preferredSkills ?? []),
+    ].map((s) => s.trim()).filter(Boolean))];
     const jobDescSnippet = redactProfessionalText(job.description ?? job.title).slice(0, 1500);
 
     return {
@@ -165,21 +175,28 @@ export async function rankJobsBatch(
       responsibilities,
       eduText,
       jobSkills,
-      missingSkills,
+      parsed,
     };
   });
 
-  // Unique texts for a single embed call: only embed needed texts, avoid full JD dumps when responsibilities exist
-  const uniq = [...new Set([
+  // Unique texts for a single embed call: embed all candidate evidence & job criteria
+  const resumeGroup = [...new Set([
     ...resumeChunks,
     ...eduChunks,
     ...profileRoles,
-    ...perJobTexts.flatMap((t) => [
-      t.title,
-      ...(t.responsibilities.length ? t.responsibilities : [t.jobDesc]),
-      ...(t.eduText ? [t.eduText] : []),
-      ...t.missingSkills,
-    ]),
+    ...candidateSkills,
+  ].map((t) => t.trim()).filter(Boolean))];
+
+  const jobGroup = [...new Set(perJobTexts.flatMap((t) => [
+    t.title,
+    ...(t.responsibilities.length ? t.responsibilities : [t.jobDesc]),
+    ...(t.eduText ? [t.eduText] : []),
+    ...t.jobSkills,
+  ]).map((t) => t.trim()).filter(Boolean))];
+
+  const uniq = [...new Set([
+    ...resumeGroup,
+    ...jobGroup,
   ].map((t) => t.trim()).filter(Boolean))];
 
   const provider = opts?.embeddingProvider ?? getRankingEmbeddingProvider();
@@ -192,13 +209,6 @@ export async function rankJobsBatch(
     try {
        const identity = 'modelRevision' in provider && typeof provider.modelRevision === 'string' && provider.modelRevision
          ? { modelId: String(provider.modelId), modelRevision: provider.modelRevision } : null;
-       const resumeGroup = [...new Set([...resumeChunks, ...eduChunks, ...profileRoles].map(t => t.trim()).filter(Boolean))];
-       const jobGroup = [...new Set(perJobTexts.flatMap(t => [
-         t.title,
-         ...(t.responsibilities.length ? t.responsibilities : [t.jobDesc]),
-         ...(t.eduText ? [t.eduText] : []),
-         ...t.missingSkills,
-       ]).map(t => t.trim()).filter(Boolean))];
        // Without an authenticated owner, never persist or read private resume vectors.
        const resp = opts?.ownerId && !opts.embeddingProvider ? await embedCached(pool, provider, [
          { purpose: 'resume', ownerId: opts.ownerId, texts: resumeGroup },
@@ -231,7 +241,7 @@ export async function rankJobsBatch(
 
   return jobs.map((job, idx) => {
     const evidence: string[] = [];
-    const { jobDesc, jobSkills } = perJobTexts[idx];
+    const { jobDesc, jobSkills, parsed } = perJobTexts[idx];
 
     // 1) Required skill 30 (same as rankJob) + matched/missing lists for UI with semantic support
     let requiredSkillScore = 0;
@@ -242,34 +252,73 @@ export async function rankJobsBatch(
       const demonstrated = normalizeSkillSet((profile as any).demonstratedSkills ?? []);
       const declared = normalizeSkillSet((profile as any).declaredSkills ?? profile.skills ?? []);
       const profileSet = normalizeSkillSet(profile.skills);
-      const parsed = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`);
       const structured = parsed.requirementGroups?.some(group => group.confidence >= .7);
       const display = (s: string) => normalizeSkill(s);
 
-      // Raw exact matches
-      const rawMatched = jobSkills.filter((s) => profileSet.has(s.toLowerCase()));
-      const rawMissing = jobSkills.filter((s) => !profileSet.has(s.toLowerCase()));
+      // Evaluate every job skill semantically against candidate skills and resume chunks
+      const semanticallyMatchedSkills: string[] = [];
+      const skillEvidenceMap = new Map<string, { source: 'demonstrated' | 'declared' | 'unverified'; similarity: number }>();
 
-      // Check semantic support for missing skills
-      const semanticallySupported: string[] = [];
-      if (vec.size && resumeChunks.length && rawMissing.length) {
-        for (const miss of rawMissing) {
-          let bestSim = 0;
-          for (const rc of resumeChunks) {
-            const s = pairScore(rc, miss);
-            if (s > bestSim) bestSim = s;
-          }
-          if (bestSim >= 0.45) { // Raw cosine >= 0.52
-            semanticallySupported.push(miss);
+      for (const skill of jobSkills) {
+        const normSkill = normalizeSkill(skill).toLowerCase();
+        let bestSim = 0;
+        let matchedWith: string | null = null;
+        let isFromResumeChunk = false;
+
+        // Exact / normalized match
+        const hasExact = profileSet.has(normSkill) || candidateSkills.some(cs => cs.toLowerCase() === skill.toLowerCase() || normalizeSkill(cs).toLowerCase() === normSkill);
+        if (hasExact) {
+          bestSim = 1.0;
+          matchedWith = skill;
+        }
+
+        // Semantic match against all candidate skills
+        if (vec.size && candidateSkills.length) {
+          for (const cs of candidateSkills) {
+            const sim = pairScore(cs, skill);
+            if (sim > bestSim) {
+              bestSim = sim;
+              matchedWith = cs;
+              isFromResumeChunk = false;
+            }
           }
         }
+
+        // Semantic match against candidate resume chunks
+        if (vec.size && resumeChunks.length && bestSim < 0.85) {
+          for (const rc of resumeChunks) {
+            const sim = pairScore(rc, skill);
+            if (sim > bestSim) {
+              bestSim = sim;
+              matchedWith = rc;
+              isFromResumeChunk = true;
+            }
+          }
+        }
+
+        // Matched if exact or semantic similarity >= 0.40 (raw cosine >= ~0.50)
+        const isMatched = hasExact || bestSim >= 0.40;
+        if (isMatched) {
+          semanticallyMatchedSkills.push(skill);
+        }
+
+        let source: 'demonstrated' | 'declared' | 'unverified' = 'unverified';
+        if (isMatched) {
+          if (isFromResumeChunk) {
+            source = 'demonstrated';
+          } else if (matchedWith) {
+            const normMatched = normalizeSkill(matchedWith).toLowerCase();
+            source = demonstrated.has(normMatched) ? 'demonstrated' : declared.has(normMatched) ? 'declared' : 'demonstrated';
+          } else {
+            source = demonstrated.has(normSkill) ? 'demonstrated' : declared.has(normSkill) ? 'declared' : 'unverified';
+          }
+        }
+
+        skillEvidenceMap.set(normSkill, { source, similarity: bestSim });
       }
 
-      const allMatched = [...rawMatched, ...semanticallySupported];
-      const finalMissing = rawMissing.filter(s => !semanticallySupported.includes(s));
-
-      const effectiveSkills = [...profile.skills, ...semanticallySupported];
-      const effectiveProfile: ResumeProfile = semanticallySupported.length ? {
+      const effectiveSkills = [...new Set([...profile.skills, ...semanticallyMatchedSkills])];
+      const effectiveProfile: ResumeProfile = semanticallyMatchedSkills.length ? {
         ...profile,
         skills: effectiveSkills,
         skillsNormalized: effectiveSkills.map(normalizeSkill),
@@ -278,28 +327,33 @@ export async function rankJobsBatch(
       if (structured) {
         const match = matchJd(effectiveProfile, parsed);
         requiredSkillScore = Math.round((match.overallScore / 100) * (job.descriptionQuality === 'full' ? 30 : 18));
-        matchedSkills = [...new Set([...match.matchedRequired, ...match.matchedPreferred, ...semanticallySupported].map(s => normalizeSkill(s)))];
-        missingSkills = match.missingRequired.filter(s => !semanticallySupported.some(sup => normalizeSkill(sup).toLowerCase() === normalizeSkill(s).toLowerCase()));
+        matchedSkills = [...new Set([...match.matchedRequired, ...match.matchedPreferred, ...semanticallyMatchedSkills].map(s => normalizeSkill(s)))];
+        missingSkills = match.missingRequired
+          .filter(s => !semanticallyMatchedSkills.some(sup => normalizeSkill(sup).toLowerCase() === normalizeSkill(s).toLowerCase()))
+          .map(s => normalizeSkill(s));
         [...new Set([...matchedSkills, ...missingSkills])].forEach(skill => {
           const norm = normalizeSkill(skill).toLowerCase();
-          const src = demonstrated.has(norm) ? 'demonstrated' : declared.has(norm) ? 'declared' : semanticallySupported.some(s => normalizeSkill(s).toLowerCase() === norm) ? 'demonstrated' : 'unverified';
+          const ev = skillEvidenceMap.get(norm);
+          const src = ev?.source ?? (demonstrated.has(norm) ? 'demonstrated' : declared.has(norm) ? 'declared' : 'unverified');
           skillEvidence.push({ skill: display(skill), source: src });
         });
-        evidence.push(`Structured requirement coverage ${Math.round(match.requiredCoverage * 100)}%${semanticallySupported.length ? ` (${semanticallySupported.length} via semantic alignment)` : ''}; alternatives are grouped`);
+        const semanticCount = semanticallyMatchedSkills.filter(s => !profileSet.has(normalizeSkill(s).toLowerCase())).length;
+        evidence.push(`Structured requirement coverage ${Math.round(match.requiredCoverage * 100)}%${semanticCount ? ` (${semanticCount} via semantic alignment)` : ''}; alternatives are grouped`);
       } else if (jobSkills.length === 0) {
         requiredSkillScore = 0;
         evidence.push('Requirements unavailable; no skill points inferred');
       } else if (jobSkills.length <= 2) {
-        matchedSkills = allMatched.map(display);
-        missingSkills = finalMissing.map(display);
-        requiredSkillScore = Math.round(allMatched.length / jobSkills.length * 15);
-        evidence.push(`Only ${jobSkills.length} skill signal${jobSkills.length === 1 ? '' : 's'} (${allMatched.length} matched); limited evidence`);
+        matchedSkills = semanticallyMatchedSkills.map(display);
+        missingSkills = jobSkills.filter(s => !semanticallyMatchedSkills.includes(s)).map(display);
+        requiredSkillScore = Math.round(semanticallyMatchedSkills.length / jobSkills.length * 15);
+        evidence.push(`Only ${jobSkills.length} skill signal${jobSkills.length === 1 ? '' : 's'} (${semanticallyMatchedSkills.length} matched); limited evidence`);
       } else {
-        matchedSkills = allMatched.map(display);
-        missingSkills = finalMissing.map(display);
+        matchedSkills = semanticallyMatchedSkills.map(display);
+        missingSkills = jobSkills.filter(s => !semanticallyMatchedSkills.includes(s)).map(display);
         const maxSkill = job.descriptionQuality === 'full' ? 30 : 18;
-        requiredSkillScore = Math.round((allMatched.length / jobSkills.length) * maxSkill);
-        evidence.push(`Skill coverage ${allMatched.length}/${jobSkills.length}${semanticallySupported.length ? ` (${semanticallySupported.length} via semantic alignment)` : ''}`);
+        requiredSkillScore = Math.round((semanticallyMatchedSkills.length / jobSkills.length) * maxSkill);
+        const semanticCount = semanticallyMatchedSkills.filter(s => !profileSet.has(normalizeSkill(s).toLowerCase())).length;
+        evidence.push(`Skill coverage ${semanticallyMatchedSkills.length}/${jobSkills.length}${semanticCount ? ` (${semanticCount} via semantic alignment)` : ''}`);
       }
     }
 
@@ -351,8 +405,10 @@ export async function rankJobsBatch(
         }
       }
 
-      if (maxRoleSim >= 0.55 && rulePoints > 0) {
+      if (maxRoleSim >= 0.50 && rulePoints > 0) {
         roleTitle = Math.max(rulePoints, Math.round(maxRoleSim * 15));
+      } else if (maxRoleSim >= 0.55) {
+        roleTitle = Math.round(maxRoleSim * 15);
       } else {
         roleTitle = rulePoints;
       }

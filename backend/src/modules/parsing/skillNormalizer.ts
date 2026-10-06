@@ -32,7 +32,7 @@ export const CANONICAL_SKILL_ALIASES: Record<string, string> = {
   html: 'HTML', html5: 'HTML', css: 'CSS', css3: 'CSS',
   tailwind: 'Tailwind CSS', 'tailwind css': 'Tailwind CSS',
   sass: 'Sass', scss: 'Sass',
-  graphql: 'GraphQL', rest: 'REST', 'rest api': 'REST', restful: 'REST',
+  graphql: 'GraphQL', rest: 'REST', 'rest api': 'REST', restful: 'REST', 'restful api': 'REST', 'rest apis': 'REST', 'api design': 'API Design', 'api designing': 'API Design',
   // Platforms
   shopify: 'Shopify', razorpay: 'Razorpay',
   cloudinary: 'Cloudinary', render: 'Render',
