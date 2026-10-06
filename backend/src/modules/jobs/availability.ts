@@ -87,27 +87,34 @@ export const CLOSURE_SEMANTIC_ANCHORS = [
   'This job opening is closed and no longer accepting submissions.',
   'This position has been filled and applications are closed.',
   'Applications for this vacancy are now closed.',
-  'This job listing is closed and not taking any more applicants.'
+  'This job listing is closed and not taking any more applicants.',
+  'This opening is closed and we are no longer accepting candidates.',
+  'We have closed applications for this role.'
 ];
 
 export const ACTIVE_SEMANTIC_ANCHORS = [
   'We are currently hiring and actively accepting applications for this open role.',
   'Apply now to join our team for this open position.',
-  'This position is open and actively accepting applications.'
+  'This position is open and actively accepting applications.',
+  'We are actively seeking candidates to apply for this vacancy.'
 ];
 
 export function extractClosureCandidateSnippets(job: NormalizedJob): string[] {
   const raw = `${job.title}\n${job.description ?? ''}`;
-  const lines = raw.split(/(?:\r?\n)+|(?<=[.!?])\s+/);
+  const lines = raw.split(/(?:\r?\n)+|(?<=[.!?])\s+/)
+    .map(line => line.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(trimmed => trimmed.length >= 10 && trimmed.length <= 250);
+
   const matched: string[] = [];
+  const statusPattern = /(?:accept|apply|application|close|closed|conclude|ended|fill|expire|vacancy|opening|status|submission|available|listing|intake|hiring|rehire|interviewing)/i;
+
   for (const line of lines) {
-    const trimmed = line.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (trimmed.length < 10 || trimmed.length > 250) continue;
-    if (/(?:accept|application|closed?|fill(?:ed)?|expire|vacancy|opening|status|submission|available|listing)/i.test(trimmed)) {
-      matched.push(trimmed);
-      if (matched.length >= 6) break;
+    if (statusPattern.test(line)) {
+      matched.push(line);
+      if (matched.length >= 8) break;
     }
   }
+
   return matched;
 }
 
