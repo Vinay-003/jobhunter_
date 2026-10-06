@@ -24,16 +24,18 @@ const pool = new Pool({
     : undefined
 });
 
-// Test the connection
-pool.connect()
-  .then(client => {
-    client.release();
-    console.log('Successfully connected to PostgreSQL database!');
-  })
-  .catch(err => {
-    console.error('Error connecting to the database:', err);
-    process.exit(1);
-  });
+// Test the connection in runtime (not during tests)
+if (process.env.NODE_ENV !== 'test') {
+  pool.connect()
+    .then(client => {
+      client.release();
+      console.log('Successfully connected to PostgreSQL database!');
+    })
+    .catch(err => {
+      console.error('Error connecting to the database:', err);
+      process.exit(1);
+    });
+}
 
 // Idle hosted connections may be closed by the pooler. Let pg replace them;
 // active query failures still propagate to their caller.
