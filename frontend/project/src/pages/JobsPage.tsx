@@ -265,16 +265,24 @@ function JobDetail({ job, onRecheck, onReportClosed, checking }: { job: Job; onR
       {job.scoreDetails?.responsibilityMatches?.length ? <div className="rounded-xl border border-white/[0.055] bg-black/10 p-4"><p className="text-[11px] font-semibold text-slate-300">Responsibility evidence</p><div className="mt-2 space-y-2 text-[11px] text-slate-500">{job.scoreDetails.responsibilityMatches.map((item, index) => <p key={`${displayValue(item.responsibility)}-${index}`}><span className="text-slate-300">{displayValue(item.responsibility)}</span>: {item.supported === undefined ? 'support unavailable' : item.supported ? 'supported' : 'not supported'}{item.evidence ? ` — ${displayValue(item.evidence)}` : ''}{typeof item.rawCosine === 'number' ? ` (raw cosine ${item.rawCosine.toFixed(2)})` : typeof item.similarity === 'number' ? ` (similarity ${item.similarity.toFixed(2)})` : ''}</p>)}</div></div> : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="rounded-xl border border-emerald-400/10 bg-emerald-400/[0.03] p-4">
-          <div className="flex items-center gap-2 text-[11px] font-semibold text-emerald-200"><Check size={13} /> Matched skills</div>
+        <div className="job-skill-card job-skill-card--matched rounded-xl border p-4">
+          <div className="job-skill-card__title flex items-center gap-2 text-[11px] font-semibold"><Check size={13} /> Matched skills</div>
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {job.matchedSkills?.length ? job.matchedSkills.map((skill) => <span key={displayValue(skill)} className="rounded-full border border-emerald-400/10 bg-emerald-400/[0.04] px-2 py-1 text-[9px] text-emerald-100/70">{displayValue(skill)}</span>) : <span className="text-[10px] text-slate-600">No explicit matched-skill list returned.</span>}
+            {job.matchedSkills?.length ? job.matchedSkills.map((skill) => (
+              <span key={displayValue(skill)} className="job-skill-pill job-skill-pill--matched">
+                {displayValue(skill)}
+              </span>
+            )) : <span className="text-[11px] text-slate-500">No explicit matched-skill list returned.</span>}
           </div>
         </div>
-        <div className="rounded-xl border border-rose-400/10 bg-rose-400/[0.03] p-4">
-          <div className="flex items-center gap-2 text-[11px] font-semibold text-rose-200"><AlertCircle size={13} /> Skill gaps</div>
+        <div className="job-skill-card job-skill-card--missing rounded-xl border p-4">
+          <div className="job-skill-card__title flex items-center gap-2 text-[11px] font-semibold"><AlertCircle size={13} /> Skill gaps</div>
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {job.missingSkills?.length ? job.missingSkills.map((skill) => <span key={displayValue(skill)} className="rounded-full border border-rose-400/10 bg-rose-400/[0.04] px-2 py-1 text-[9px] text-rose-100/70">{displayValue(skill)}</span>) : <span className="text-[10px] text-slate-600">No explicit required-skill gaps returned.</span>}
+            {job.missingSkills?.length ? job.missingSkills.map((skill) => (
+              <span key={displayValue(skill)} className="job-skill-pill job-skill-pill--missing">
+                {displayValue(skill)}
+              </span>
+            )) : <span className="text-[11px] text-slate-500">No explicit required-skill gaps returned.</span>}
           </div>
         </div>
       </div>

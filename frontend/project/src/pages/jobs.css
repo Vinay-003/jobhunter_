@@ -17,10 +17,11 @@
 .jobs-page .resume-chip .tag { flex:none; white-space:nowrap; }
 .jobs-page .jobs-list-heading button { background:transparent; border:0; min-height:36px; padding:4px 0; }
 .jobs-page .job-detail > div:not(.job-detail__hero):not(.job-detail__actions) { border:0; border-top:1px solid var(--line); border-radius:0; background:transparent; padding:20px 0 0; }
-.jobs-page .job-detail > .grid > div { border:0; border-radius:0; background:transparent; padding:0; }
+.jobs-page .job-detail > .grid > div:not(.job-skill-card) { border:0; border-radius:0; background:transparent; padding:0; }
 .jobs-page :is(.text-stone-300,.text-slate-300,.text-white) { color:var(--text); }
 .jobs-page :is(.text-slate-400,.text-slate-500,.text-slate-600,.text-stone-500) { color:var(--muted); }
 .jobs-page :is(.text-amber-300,.text-amber-200) { color:var(--amber); }
+.jobs-page :is(.text-emerald-200,.text-emerald-300,.text-emerald-400) { color:var(--green); }
 .jobs-page :is(.text-rose-200,.text-rose-300) { color:var(--red); }
 .jobs-page .jobs-filter-panel option { background:var(--surface); color:var(--text); }
 .jobs-page .jobs-filter-panel > .flex button { background:transparent; border:0; }
@@ -76,11 +77,98 @@
 .jobs-page .job-detail p,.jobs-page .job-detail li { line-height:1.65; }
 .jobs-page :is(.text-xs,.text-\[11px\],.text-\[10px\],.text-\[9px\]) { font-size:13px; }
 .jobs-page .job-detail .text-\[9px\] { font-size:11px; }
-.jobs-page :is(.job-detail,.job-card) :is(.text-white,.text-slate-300,.text-slate-400,.text-slate-500,.text-slate-600,.text-stone-500,.text-amber-200,.text-emerald-200,.text-rose-200) { color:var(--muted); }
+.jobs-page :is(.job-detail,.job-card) :is(.text-white,.text-slate-300,.text-slate-400,.text-slate-500,.text-slate-600,.text-stone-500,.text-amber-200) { color:var(--muted); }
 .jobs-page .job-detail .job-detail__hero h2 { color:var(--text); }
 .jobs-page .text-slate-700 { color:var(--muted); }
 .jobs-page .job-detail :is(.bg-black\/10,.bg-amber-400\/\[0\.04\],.bg-amber-400\/\[0\.06\],.bg-emerald-400\/\[0\.03\],.bg-rose-400\/\[0\.03\]) { background:var(--wash); }
 .jobs-page .job-detail :is(.border-white\/\[0\.055\],.border-amber-400\/15,.border-emerald-400\/10,.border-rose-400\/10) { border-color:var(--line); }
+
+/* Skill cards & pills for Matched Skills and Skill Gaps */
+.jobs-page .job-skill-card {
+  border-radius: 12px !important;
+  padding: 16px !important;
+  transition: all 0.2s ease;
+}
+
+.jobs-page .job-skill-card--matched {
+  border: 1px solid rgba(52, 211, 153, 0.2) !important;
+  background: rgba(16, 185, 129, 0.05) !important;
+}
+.jobs-page .job-skill-card--matched .job-skill-card__title {
+  color: #34d399 !important;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.jobs-page .job-skill-pill--matched {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  background: rgba(16, 185, 129, 0.12);
+  color: #a7f3d0;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+html[data-theme="light"] .jobs-page .job-skill-card--matched {
+  border: 1px solid #86efac !important;
+  background: #f0fdf4 !important;
+}
+html[data-theme="light"] .jobs-page .job-skill-card--matched .job-skill-card__title {
+  color: #15803d !important;
+}
+html[data-theme="light"] .jobs-page .job-skill-pill--matched {
+  border: 1px solid #86efac;
+  background: #dcfce7;
+  color: #14532d !important;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(20, 83, 45, 0.08);
+}
+
+.jobs-page .job-skill-card--missing {
+  border: 1px solid rgba(244, 63, 94, 0.2) !important;
+  background: rgba(244, 63, 94, 0.05) !important;
+}
+.jobs-page .job-skill-card--missing .job-skill-card__title {
+  color: #fb7185 !important;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.jobs-page .job-skill-pill--missing {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  background: rgba(244, 63, 94, 0.12);
+  color: #fecdd3;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+html[data-theme="light"] .jobs-page .job-skill-card--missing {
+  border: 1px solid #fca5a5 !important;
+  background: #fff1f2 !important;
+}
+html[data-theme="light"] .jobs-page .job-skill-card--missing .job-skill-card__title {
+  color: #be123c !important;
+}
+html[data-theme="light"] .jobs-page .job-skill-pill--missing {
+  border: 1px solid #fca5a5;
+  background: #fee2e2;
+  color: #881337 !important;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(136, 19, 55, 0.08);
+}
 .jobs-page :is(button,a,input,select,summary):focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
 @media(max-width:1150px) { .jobs-page .jobs-layout { grid-template-columns:minmax(270px,340px) minmax(0,1fr); gap:22px; } .jobs-page .jobs-detail-rail { padding-left:22px; } .jobs-page .jobs-toolbar { flex-wrap:wrap; } }
 @media(max-width:900px) { .jobs-page .jobs-layout { grid-template-columns:minmax(0,1fr); } .jobs-page .job-list { max-height:none; } .jobs-page .jobs-detail-rail { border-left:0; border-top:1px solid var(--line); padding:24px 0 0; } }
