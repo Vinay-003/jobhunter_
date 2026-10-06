@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
+import type { JobAvailability, JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
 import { env } from '../../config/env.js';
 import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
 import { reserveMonthlyCredits, reconcileMonthlyCredits } from './providerBudgets.js';
@@ -32,6 +32,10 @@ type JobsPipeJob = {
   min_annual_salary?: number | null;
   max_annual_salary?: number | null;
   salary_currency?: string | null;
+  status?: string;
+  closed_at?: string | null;
+  closed_reason?: string | null;
+  expires_at?: string | null;
 };
 
 export class JobsPipeProvider implements JobProvider {
@@ -67,8 +71,9 @@ export class JobsPipeProvider implements JobProvider {
       const words = query.keywords.split(/\s+/).filter(Boolean);
       const body: Record<string, unknown> = {
         job_title_or: [words.slice(0, 3).join(' ') || query.keywords],
-         limit,
-         posted_at_max_age_days: query.daysPosted ?? 30,
+        limit,
+        status: 'active',
+        posted_at_max_age_days: query.daysPosted ?? 30,
       };
        const country = query.country || this.country;
        if (country) body.job_country_code_or = [country.toUpperCase()];
@@ -119,6 +124,27 @@ export class JobsPipeProvider implements JobProvider {
       j.min_annual_salary || j.max_annual_salary
         ? { min: j.min_annual_salary ?? null, max: j.max_annual_salary ?? null, currency: j.salary_currency ?? null }
         : null;
+
+    let availability: JobAvailability | undefined = undefined;
+    const nowIso = new Date().toISOString();
+    const isExpired = j.expires_at && Number.isFinite(Date.parse(j.expires_at)) && Date.parse(j.expires_at) <= Date.now();
+    const isClosed = (j.status && j.status !== 'active') || Boolean(j.closed_at) || Boolean(j.closed_reason) || isExpired;
+    if (isClosed) {
+      availability = {
+        status: 'closed',
+        reason: j.closed_reason || (isExpired ? 'JobsPipe expires_at date in past' : 'JobsPipe status reports closed'),
+        source: 'jobspipe',
+        checkedAt: nowIso
+      };
+    } else if (j.status === 'active') {
+      availability = {
+        status: 'open',
+        reason: 'JobsPipe verified active listing',
+        source: 'jobspipe',
+        checkedAt: nowIso
+      };
+    }
+
     return {
       source: 'jobspipe',
       externalId: String(j.id ?? j.url ?? `${title}-${company}`).slice(0, 300),
@@ -128,12 +154,13 @@ export class JobsPipeProvider implements JobProvider {
       description: stripHtml(j.description),
       url: j.final_url ?? j.url ?? null,
       salary,
-        postedAt: j.date_posted && Number.isFinite(new Date(j.date_posted).getTime()) ? new Date(j.date_posted).toISOString() : null,
-        dateSource: 'posted',
-        lastFetchedAt: new Date().toISOString(),
-       workMode: j.remote ? 'remote' : null,
-       descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
-       retrieval: { status: 'live', requestedProvider: 'jobspipe' },
+      postedAt: j.date_posted && Number.isFinite(new Date(j.date_posted).getTime()) ? new Date(j.date_posted).toISOString() : null,
+      dateSource: 'posted',
+      lastFetchedAt: new Date().toISOString(),
+      workMode: j.remote ? 'remote' : null,
+      descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
+      retrieval: { status: 'live', requestedProvider: 'jobspipe' },
+      ...(availability ? { availability } : {}),
     };
   }
 }

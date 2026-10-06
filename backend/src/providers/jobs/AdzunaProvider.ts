@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
+import type { JobAvailability, JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
 import { env } from '../../config/env.js';
 import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
 import { reserveDailyCall } from './providerBudgets.js';
@@ -80,6 +80,7 @@ export class AdzunaProvider implements JobProvider {
         },
       });
       const jobs = (resp.data?.results ?? []).map((j) => this.normalize(j)).filter((j): j is NormalizedJob => j !== null);
+      await this.enrichAdzunaJobs(jobs);
       console.log(`[AdzunaProvider] returned ${jobs.length} jobs for "${query.keywords}"`);
       await storeJobsToDb(jobs).catch(() => {});
       if (!jobs.length) return { jobs: [], status: 'empty', fallbackReason: 'empty' };
@@ -89,6 +90,70 @@ export class AdzunaProvider implements JobProvider {
       const errorCode = status ? `ADZUNA_HTTP_${status}` : 'ADZUNA_REQUEST_FAILED';
       console.warn('[AdzunaProvider] request failed, falling back to DB');
       return this.fallbackResult(query, 'error', errorCode);
+    }
+  }
+
+  private async enrichAdzunaJobs(jobs: NormalizedJob[]): Promise<void> {
+    if (!jobs.length) return;
+    const enrichOne = async (job: NormalizedJob) => {
+      if (!job.url) return;
+      try {
+        const resp = await axios.get(job.url, {
+          timeout: 4000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          }
+        });
+        const html = typeof resp.data === 'string' ? resp.data : '';
+        const matches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+        for (const m of matches) {
+          try {
+            const parsed = JSON.parse(m[1]);
+            const add = (v: any) => {
+              if (v?.['@type'] === 'JobPosting') return v;
+              if (Array.isArray(v?.['@graph'])) return v['@graph'].find((g: any) => g?.['@type'] === 'JobPosting');
+              return null;
+            };
+            const jp = Array.isArray(parsed) ? parsed.map(add).find(Boolean) : add(parsed);
+            if (jp) {
+              if (jp.description) {
+                const fullDesc = stripHtml(jp.description);
+                if (fullDesc && fullDesc.length > (job.description?.length ?? 0)) {
+                  job.description = fullDesc;
+                  job.descriptionQuality = 'full';
+                }
+              }
+              const now = Date.now();
+              const nowIso = new Date().toISOString();
+              if (jp.validThrough) {
+                const exp = Date.parse(jp.validThrough);
+                if (Number.isFinite(exp) && exp <= now) {
+                  job.availability = {
+                    status: 'closed',
+                    reason: 'JSON-LD validThrough expired',
+                    source: 'adzuna',
+                    checkedAt: nowIso
+                  };
+                } else if (jp.directApply === true) {
+                  job.availability = {
+                    status: 'open',
+                    reason: 'Matching JobPosting has actionable application evidence',
+                    source: 'adzuna',
+                    checkedAt: nowIso
+                  };
+                }
+              }
+              break;
+            }
+          } catch {}
+        }
+      } catch {}
+    };
+
+    const chunkSize = 5;
+    for (let i = 0; i < jobs.length; i += chunkSize) {
+      await Promise.all(jobs.slice(i, i + chunkSize).map(enrichOne));
     }
   }
 
