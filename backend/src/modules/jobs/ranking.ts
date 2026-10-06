@@ -146,11 +146,18 @@ export async function rankJobsBatch(
     ...((profile as any).projects ?? []).map((p: any) => p.title).filter((t: any): t is string => Boolean(t)),
   ])];
 
+  const experienceSkills = extractSkills([
+    ...resumeChunks,
+    ...profile.experience.map(e => `${e.title || ''} ${e.description || ''}`),
+    ...((profile as any).projects ?? []).map((p: any) => `${p.title || ''} ${p.description || ''}`),
+  ].join('\n'));
+
   const candidateSkills = [...new Set([
     ...(profile.skills ?? []),
     ...(profile.skillsNormalized ?? []),
     ...((profile as any).declaredSkills ?? []),
     ...((profile as any).demonstratedSkills ?? []),
+    ...experienceSkills,
   ].map((s) => s.trim()).filter(Boolean))];
 
   const perJobTexts = jobs.map((job) => {
@@ -249,9 +256,15 @@ export async function rankJobsBatch(
     let missingSkills: string[] = [];
     const skillEvidence: NonNullable<RankResult['scoreDetails']>['skillEvidence'] = [];
     {
-      const demonstrated = normalizeSkillSet((profile as any).demonstratedSkills ?? []);
+      const demonstrated = normalizeSkillSet([
+        ...((profile as any).demonstratedSkills ?? []),
+        ...experienceSkills,
+      ]);
       const declared = normalizeSkillSet((profile as any).declaredSkills ?? profile.skills ?? []);
-      const profileSet = normalizeSkillSet(profile.skills);
+      const profileSet = normalizeSkillSet([
+        ...(profile.skills ?? []),
+        ...experienceSkills,
+      ]);
       const structured = parsed.requirementGroups?.some(group => group.confidence >= .7);
       const display = (s: string) => normalizeSkill(s);
 
@@ -266,7 +279,10 @@ export async function rankJobsBatch(
         let isFromResumeChunk = false;
 
         // Exact / normalized match
-        const hasExact = profileSet.has(normSkill) || candidateSkills.some(cs => cs.toLowerCase() === skill.toLowerCase() || normalizeSkill(cs).toLowerCase() === normSkill);
+        const hasExact = profileSet.has(normSkill) ||
+          demonstrated.has(normSkill) ||
+          declared.has(normSkill) ||
+          candidateSkills.some(cs => cs.toLowerCase() === skill.toLowerCase() || normalizeSkill(cs).toLowerCase() === normSkill);
         if (hasExact) {
           bestSim = 1.0;
           matchedWith = skill;
@@ -296,6 +312,17 @@ export async function rankJobsBatch(
           }
         }
 
+        // Direct containment in candidate experience / resume text (e.g. "40+ REST endpoints")
+        if (!hasExact && bestSim < 0.85) {
+          const escaped = normSkill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const skillRegex = new RegExp(`(?<![\\p{L}\\p{N}_+#])${escaped}(?![\\p{L}\\p{N}_+#])`, 'iu');
+          if (resumeChunks.some(rc => skillRegex.test(rc))) {
+            bestSim = Math.max(bestSim, 1.0);
+            matchedWith = skill;
+            isFromResumeChunk = true;
+          }
+        }
+
         // Matched if exact or semantic similarity >= 0.40 (raw cosine >= ~0.50)
         const isMatched = hasExact || bestSim >= 0.40;
         if (isMatched) {
@@ -304,13 +331,13 @@ export async function rankJobsBatch(
 
         let source: 'demonstrated' | 'declared' | 'unverified' = 'unverified';
         if (isMatched) {
-          if (isFromResumeChunk) {
+          if (isFromResumeChunk || demonstrated.has(normSkill)) {
             source = 'demonstrated';
           } else if (matchedWith) {
             const normMatched = normalizeSkill(matchedWith).toLowerCase();
             source = demonstrated.has(normMatched) ? 'demonstrated' : declared.has(normMatched) ? 'declared' : 'demonstrated';
           } else {
-            source = demonstrated.has(normSkill) ? 'demonstrated' : declared.has(normSkill) ? 'declared' : 'unverified';
+            source = demonstrated.has(normSkill) ? 'demonstrated' : declared.has(normSkill) ? 'declared' : 'demonstrated';
           }
         }
 

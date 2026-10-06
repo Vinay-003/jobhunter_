@@ -6,6 +6,10 @@ const job=(extra:any={})=>({source:'fixture',externalId:'1',title:'Frontend Engi
 const ld=(title:string,validThrough:string,directApply=true)=>`<script type="application/ld+json">${JSON.stringify({'@graph':[{'@type':'JobPosting',title,validThrough,directApply,hiringOrganization:{name:'Example'}}]})}</script>`;
 test('expired original posting and matching expired JSON-LD are closed, not high-fit opportunities',()=>{
  expect(parseAvailability('This job has expired on Indeed',job(),'indeed',now).status).toBe('closed');
+ expect(parseAvailability('Not currently accepting applications',job(),'linkedin',now).status).toBe('closed');
+ expect(parseAvailability('Applications are closed',job(),'greenhouse',now).status).toBe('closed');
+ expect(parseAvailability('',job(),'linkedin',now,'https://www.linkedin.com/jobs/search?trk=expired_jd_redirect').status).toBe('closed');
+ expect(parseAvailability('',job({description:'Note: This job is closed'}),'adzuna',now).status).toBe('closed');
  expect(parseAvailability(ld('Frontend Engineer','2000-01-01'),job(),'indeed',now).status).toBe('closed');
  expect(parseAvailability(ld('Unrelated Backend Architect','2000-01-01'),job(),'indeed',now).status).toBe('unknown');
 });

@@ -22,7 +22,7 @@ import { buildResumeProfile, PROFILE_VERSION } from '../../modules/parsing/resum
 import { downloadFile } from '../../modules/storage/supabaseStorage.js';
 import { recommendationCacheValid, recommendationDiagnostics, recommendationSnapshot } from '../../services/recommendationPersistence.js';
 import { discoverRoles, ROLE_DISCOVERY_VERSION } from '../../modules/jobs/roleDiscovery.js';
-import { checkJobsAvailability } from '../../modules/jobs/availability.js';
+import { checkJobsAvailability, CLOSURE_PATTERN } from '../../modules/jobs/availability.js';
 import rateLimit from 'express-rate-limit';
 
 const router = Router();
@@ -202,7 +202,13 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
     }, { globalConcurrency: 4, perProviderConcurrency: 1, maxCalls: 15, timeoutMs: 18_000 });
     const distinct = deduplicateJobs(all);
     const closedUrls=await recentClosedUrls(userId);
-    for(const job of distinct) if(job.url&&closedUrls.has(job.url))job.availability={status:'closed',checkedAt:new Date().toISOString(),reason:'Previously confirmed/reported closed for this account within 24 hours',source:'saved-closure'};
+    for(const job of distinct) {
+      if(job.url&&closedUrls.has(job.url)) {
+        job.availability={status:'closed',checkedAt:new Date().toISOString(),reason:'Previously confirmed/reported closed for this account within 24 hours',source:'saved-closure'};
+      } else if (CLOSURE_PATTERN.test(job.description ?? '') || CLOSURE_PATTERN.test(job.title)) {
+        job.availability={status:'closed',checkedAt:new Date().toISOString(),reason:'Posting indicates applications are closed',source:job.source};
+      }
+    }
     timings.retrievalMs = Date.now()-retrievalStarted;
     const checked = distinct.map((job) => ({ job, eligibility: eligibleJob(job,profile.seniority,{...searchPreferences,verifiedOpenOnly:false},profile) }));
     const rejectedReasons: Record<string,number> = {};
@@ -226,6 +232,10 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
     await checkJobsAvailability(candidates,{maxChecks:20,concurrency:4,batchDeadlineMs:15000});
     for(const job of candidates) job.eligibility=eligibleJob(job,profile.seniority,searchPreferences,profile);
     const ranked = candidates.filter(job=>{
+      if (job.availability?.status === 'closed') {
+        rejectedReasons['Job is closed'] = (rejectedReasons['Job is closed'] ?? 0) + 1;
+        return false;
+      }
       if(job.eligibility.status!=='ineligible') return true;
       for(const reason of job.eligibility.reasons) rejectedReasons[reason]=(rejectedReasons[reason]??0)+1;
       return false;
