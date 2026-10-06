@@ -146,6 +146,56 @@ Required:
     expect(result.evidence.some(e => e.includes('Job description semantic alignment'))).toBe(true);
   });
 
+  test('semantic vector similarity directly scores education when embedding vectors are available', async () => {
+    const jd = `Job Title: Backend Developer Intern
+Education Requirements:
+Pursuing B.Tech / B.E. in Computer Science or Information Technology.
+Required:
+Node.js, PostgreSQL`;
+
+    // Provider that simulates high semantic similarity for education vectors
+    const [result] = await rankJobsBatch(studentProfile(), [makeJob('Backend Developer Intern', jd)], {
+      preferences: { locations: ['Noida'] },
+      embeddingProvider: {
+        modelId: 'sbert-test',
+        embed: async ({ texts }: any) => ({
+          vectors: texts.map((t: string) =>
+            /b\.?tech|computer science|pursuing/i.test(t) ? [0.95, 0.31] : [0.1, 0.99]
+          ),
+          modelId: 'sbert-test',
+          dimension: 2,
+        }),
+      },
+    });
+
+    expect(result.breakdown.domainEducation).toBe(10);
+    expect(result.evidence.some(e => e.includes('semantic alignment'))).toBe(true);
+  });
+
+  test('semantically supported skills are recognized and awarded credit', async () => {
+    const jd = `Title: Full Stack Developer
+Required:
+RESTful APIs, React`;
+
+    // Provider that gives high cosine for RESTful APIs against candidate's REST API bullet
+    const [result] = await rankJobsBatch(studentProfile({ skills: ['React'] }), [makeJob('Full Stack Developer', jd)], {
+      preferences: { locations: ['Noida'] },
+      embeddingProvider: {
+        modelId: 'sbert-test',
+        embed: async ({ texts }: any) => ({
+          vectors: texts.map((t: string) =>
+            /rest|api/i.test(t) ? [0.9, 0.43] : [0.1, 0.99]
+          ),
+          modelId: 'sbert-test',
+          dimension: 2,
+        }),
+      },
+    });
+
+    expect(result.matchedSkills).toContain('REST');
+    expect(result.breakdown.requiredSkill).toBeGreaterThan(15);
+  });
+
   test('jdRubric awards education points and eligible status for in-progress student applying to intern role', () => {
     const jdText = `Job Title: Full Stack Developer Intern
 Qualifications:
