@@ -232,12 +232,227 @@ html[data-theme="light"] .jobs-page .job-evidence-chip--unverified {
 }
 
 .jobs-page .target-roles-card {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
 }
 html[data-theme="light"] .jobs-page .target-roles-card {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.jobs-page .target-roles-box {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 6px 10px;
+  min-height: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.jobs-page .target-roles-box:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+html[data-theme="light"] .jobs-page .target-roles-box {
   background: #f8fafc !important;
-  border-color: #e2e8f0 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+html[data-theme="light"] .jobs-page .target-roles-box:focus-within {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15) !important;
+}
+
+.jobs-page .job-selected-role-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  color: #93c5fd;
+  transition: all 0.15s ease;
+}
+.jobs-page .job-selected-role-tag .tag-remove-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 4px;
+  color: #93c5fd;
+  opacity: 0.8;
+  transition: all 0.15s ease;
+}
+.jobs-page .job-selected-role-tag .tag-remove-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+html[data-theme="light"] .jobs-page .job-selected-role-tag {
+  background: #eff6ff !important;
+  border: 1px solid #bfdbfe !important;
+  color: #1d4ed8 !important;
+  font-weight: 600;
+}
+html[data-theme="light"] .jobs-page .job-selected-role-tag .tag-remove-btn {
+  color: #2563eb !important;
+}
+html[data-theme="light"] .jobs-page .job-selected-role-tag .tag-remove-btn:hover {
+  background: #dbeafe !important;
+  color: #1e40af !important;
+}
+
+.jobs-page .target-roles-input {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  color: var(--text) !important;
+  font-size: 13px !important;
+  padding: 4px 6px;
+  min-width: 140px;
+  flex: 1;
+}
+.jobs-page .target-roles-input::placeholder {
+  color: var(--muted);
+}
+.jobs-page .target-roles-add-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.jobs-page .target-roles-add-btn:hover {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+html[data-theme="light"] .jobs-page .target-roles-add-btn {
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  border: 1px solid #bfdbfe !important;
+}
+html[data-theme="light"] .jobs-page .target-roles-add-btn:hover {
+  background: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #2563eb !important;
+}
+
+.jobs-page .job-suggested-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  min-height: 28px;
+}
+.jobs-page .job-suggested-pill--selected {
+  background: #2563eb !important;
+  border: 1px solid #3b82f6 !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
+  cursor: pointer !important;
+  opacity: 1 !important;
+}
+.jobs-page .job-suggested-pill--selected:hover {
+  background: #1d4ed8 !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.4);
+}
+html[data-theme="light"] .jobs-page .job-suggested-pill--selected {
+  background: #2563eb !important;
+  border: 1px solid #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.25) !important;
+}
+html[data-theme="light"] .jobs-page .job-suggested-pill--selected:hover {
+  background: #1e40af !important;
+}
+
+.jobs-page .job-suggested-pill--available {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e2e8f0;
+}
+.jobs-page .job-suggested-pill--available:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+html[data-theme="light"] .jobs-page .job-suggested-pill--available {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #1e293b !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+html[data-theme="light"] .jobs-page .job-suggested-pill--available:hover {
+  background: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+}
+
+.jobs-page .job-suggested-pill--disabled,
+.jobs-page button.job-suggested-pill:disabled {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  color: #64748b !important;
+  box-shadow: none !important;
+}
+html[data-theme="light"] .jobs-page .job-suggested-pill--disabled,
+html[data-theme="light"] .jobs-page button.job-suggested-pill:disabled {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #94a3b8 !important;
+}
+
+.jobs-page .role-evidence-box {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 12px;
+}
+.jobs-page .role-evidence-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px;
+}
+html[data-theme="light"] .jobs-page .role-evidence-box {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+}
+html[data-theme="light"] .jobs-page .role-evidence-card {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+html[data-theme="light"] .jobs-page .role-evidence-card-title {
+  color: #1e293b !important;
+  font-weight: 600;
+}
+html[data-theme="light"] .jobs-page .role-evidence-card-desc {
+  color: #64748b !important;
 }
 
 .jobs-page :is(button,a,input,select,summary):focus-visible { outline:2px solid var(--blue); outline-offset:3px; }

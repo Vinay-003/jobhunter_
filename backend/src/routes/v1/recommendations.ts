@@ -22,7 +22,7 @@ import { buildResumeProfile, PROFILE_VERSION } from '../../modules/parsing/resum
 import { downloadFile } from '../../modules/storage/supabaseStorage.js';
 import { recommendationCacheValid, recommendationDiagnostics, recommendationSnapshot } from '../../services/recommendationPersistence.js';
 import { discoverRoles, ROLE_DISCOVERY_VERSION } from '../../modules/jobs/roleDiscovery.js';
-import { checkJobsAvailability, CLOSURE_PATTERN } from '../../modules/jobs/availability.js';
+import { checkJobsAvailability, verifySemanticAvailability, CLOSURE_PATTERN } from '../../modules/jobs/availability.js';
 import rateLimit from 'express-rate-limit';
 
 const router = Router();
@@ -230,6 +230,7 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
     const candidates = eligible.map(({ job, eligibility }, i) => ({ ...job, eligibility, ...scored[i], confidence: (scored[i] as any).confidence ?? 'Low' })).sort(compare).slice(0,200);
     const availabilityStarted = Date.now();
     await checkJobsAvailability(candidates,{maxChecks:20,concurrency:4,batchDeadlineMs:15000});
+    await verifySemanticAvailability(candidates);
     for(const job of candidates) job.eligibility=eligibleJob(job,profile.seniority,searchPreferences,profile);
     const ranked = candidates.filter(job=>{
       if (job.availability?.status === 'closed') {

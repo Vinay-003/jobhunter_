@@ -1,5 +1,5 @@
 import {test,expect} from 'bun:test';
-import {checkJobsAvailability,parseAvailability,allowedHost,isPublicAddress} from '../modules/jobs/availability.js';
+import {checkJobsAvailability,parseAvailability,allowedHost,isPublicAddress,verifySemanticAvailability,extractClosureCandidateSnippets} from '../modules/jobs/availability.js';
 import {eligibleJob,effectivePreferences} from '../modules/jobs/eligibility.js';
 const now=new Date().toISOString();
 const job=(extra:any={})=>({source:'fixture',externalId:'1',title:'Frontend Engineer',company:'Example',description:'Build interfaces',descriptionQuality:'full',location:'Bengaluru, India',url:'https://www.indeed.com/viewjob?jk=test',postedAt:now,salary:null,workMode:null,...extra} as any);
@@ -46,3 +46,42 @@ test('India search excludes US and LATAM restrictions instead of treating remote
  expect(eligibleJob(job({location:'',title:'Backend Developer - Paris'}),'entry',p).status).toBe('ineligible');
  expect(eligibleJob(job({location:'Madurai, Tamil Nadu'}),'entry',p).status).toBe('eligible');
 });
+
+test('extractClosureCandidateSnippets finds closure-adjacent sentences', () => {
+  const j = job({
+    description: 'We are looking for a Senior Developer.\nApplications for this vacancy are now closed.\nRequirements: React and Node.js.'
+  });
+  const snippets = extractClosureCandidateSnippets(j);
+  expect(snippets.some(s => s.includes('Applications for this vacancy are now closed'))).toBe(true);
+  expect(snippets.some(s => s.includes('Senior Developer'))).toBe(false);
+});
+
+test('verifySemanticAvailability marks semantically closed jobs as closed', async () => {
+  const closedJob = job({
+    description: 'Great role at Acme Inc.\nApplications for this vacancy are now closed.\nGood luck.'
+  });
+  const activeJob = job({
+    description: 'Great role at Acme Inc.\nWe are actively hiring and accepting applications for this open role.\nJoin us.'
+  });
+
+  const stubProvider = {
+    embed: async ({ texts }: { texts: string[] }) => {
+      const vectors = texts.map(t => {
+        const lower = t.toLowerCase();
+        if (lower.includes('closed') || lower.includes('no longer accepting')) {
+          return [1, 0, 0, 0];
+        }
+        if (lower.includes('actively') || lower.includes('hiring') || lower.includes('apply now')) {
+          return [0, 1, 0, 0];
+        }
+        return [0.1, 0.1, 0, 0];
+      });
+      return { vectors, modelId: 'test-semantic-384', dimension: 4 };
+    }
+  };
+
+  const results = await verifySemanticAvailability([closedJob, activeJob], stubProvider as any);
+  expect(results[0].availability?.status).toBe('closed');
+  expect(results[1].availability?.status).not.toBe('closed');
+});
+
