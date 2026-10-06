@@ -43,15 +43,19 @@ export function scoreJdRubric(profile: ResumeProfile, jd: ParsedJobDescription, 
   const raw = jd.rawText;
   const degreeRequested = /\b(?:bachelor(?:'s)?|master(?:'s)?|b\.?tech|b\.?e\.?|degree|ph\.?d)\b/i.test(raw);
   const educationPossible = degreeRequested ? 10 : 0;
-  const educationEvidence = profile.education.some(e => /bachelor|b\.?tech|b\.?e\.?|master|m\.?tech|ph\.?d|degree/i.test(`${e.degree ?? ''} ${e.raw ?? ''}`));
+  const educationEvidence = profile.education.some(e => /bachelor|b\.?tech|b\.?e\.?|master|m\.?tech|ph\.?d|bca|mca|degree/i.test(`${e.degree ?? ''} ${e.raw ?? ''}`));
+  const candidateLevel = normalizeSeniority(profile.seniority);
+  const jobLevel = normalizeSeniority(jd.seniority);
+  const isEarlyCareerJob = /intern|fresher|trainee|apprentice/i.test(jd.title ?? '') ||
+    /\b(?:pursuing|student|intern|fresher|recent grad|new grad)\b/i.test(raw) ||
+    (candidateLevel === 'intern' && (!jobLevel || jobLevel === 'intern'));
   const educationStatus = !degreeRequested ? 'not_applicable' : !educationEvidence ? 'unverified' :
     profile.education.some(e => e.completed === true) ? 'evidenced' :
+    (isEarlyCareerJob && profile.education.some(e => e.completed === false || /in.progress|expected|pursuing/i.test(`${e.degree ?? ''} ${e.raw ?? ''}`) || (e.year && Number(e.year) >= new Date().getFullYear()))) ? 'evidenced' :
     profile.education.some(e => e.completed === false || /in.progress|expected|pursuing/i.test(`${e.degree ?? ''} ${e.raw ?? ''}`) || (e.year && Number(e.year) > new Date().getFullYear())) ? 'in_progress' : 'unverified';
   const education = educationPossible && educationStatus === 'evidenced' ? 10 : 0;
   const minYears = jd.minYears ?? jd.yearsExperience;
   const years = profile.totalExperienceYears;
-  const candidateLevel = normalizeSeniority(profile.seniority);
-  const jobLevel = normalizeSeniority(jd.seniority);
   // Internship evidence can qualify for entry roles; title alone is not a
   // barrier for that transition. Explicit advanced scope is a separate check.
   const seniorGap = ['intern', 'entry'].includes(candidateLevel ?? '') && ['mid', 'senior', 'principal'].includes(jobLevel ?? '');

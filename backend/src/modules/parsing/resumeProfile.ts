@@ -59,13 +59,21 @@ function extractEducation(body: string, evaluationDate: Date): EducationEntry[] 
     if (!degree) continue;
     const context = [lines[index - 1], line, lines[index + 1]].filter(Boolean).join(' | ');
     const period = context.match(RANGE);
-    const date = period?.[2] ?? context.match(new RegExp(DATE, 'i'))?.[0] ?? null;
+    const yearsInContext = context.match(/\b(?:19|20)\d{2}\b/g);
+    const lastYear = yearsInContext && yearsInContext.length ? yearsInContext[yearsInContext.length - 1] : null;
+    const date = period?.[2] ?? context.match(new RegExp(DATE, 'i'))?.[0] ?? lastYear;
     const institution = line.split(/\s*[|,]\s*/).find(part => /\b(?:university|institute|college|school)\b/i.test(part))
       ?? (lines[index - 1] && /\b(?:university|institute|college)\b/i.test(lines[index - 1]) ? lines[index - 1] : null);
-    const field = line.match(/\b(?:in|of)\s+(computer science(?: engineering)?|information technology|electrical engineering|mechanical engineering|software engineering|mathematics)\b/i)?.[1] ?? null;
+    const fieldRegex = /\b(?:in|of|,\s*|-|\/)\s*(computer science(?: engineering| and engineering| & engineering)?|information technology|electrical engineering|mechanical engineering|software engineering|mathematics|data science|artificial intelligence)\b/i;
+    const fieldMatch = line.match(fieldRegex)?.[1] ?? context.match(fieldRegex)?.[1];
+    const field = fieldMatch ?? (
+      /\b(?:cse|cs)\b/i.test(line) || /\b(?:cse|cs)\b/i.test(context) ? 'Computer Science' :
+      /\b(?:it)\b/i.test(line) && !/\b(?:split|hit|git)\b/i.test(line) ? 'Information Technology' :
+      null
+    );
     const completion = date ? parseMonth(date, evaluationDate) : null;
     const today = evaluationDate.getUTCFullYear() * 12 + evaluationDate.getUTCMonth();
-    result.push({ degree: degree[0], institution, field, year: date?.match(/\d{4}/)?.[0] ?? null, completionDate: date, completed: completion === null ? null : completion <= today, raw: context });
+    result.push({ degree: degree[0], institution, field, year: date?.match(/\d{4}/)?.[0] ?? lastYear, completionDate: date, completed: completion === null ? null : completion <= today, raw: context });
     if (result.length >= 5) break;
   }
   return result;
