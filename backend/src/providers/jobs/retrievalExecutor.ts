@@ -25,7 +25,10 @@ export async function executeRetrieval(
   const results: RetrievalResult[] = [];
   let calls = 0;
   let wave = 1;
+  const startedAt = Date.now();
+  const deadlineMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : 25_000;
   while (pending.length && calls < maxCalls) {
+    if (Date.now() - startedAt >= deadlineMs && results.length > 0) break;
     const candidates = pending.filter(s => s.page === wave || (wave === 1 && s.page === 1));
     for (const step of candidates) {
       const i = pending.indexOf(step); if (i >= 0) pending.splice(i, 1);

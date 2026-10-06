@@ -20,6 +20,9 @@ import {
   Target,
   X,
   Copy,
+  Sparkles,
+  Plus,
+  ChevronDown,
 } from 'lucide-react';
 
 type BreakdownItem = { label: string; value: number };
@@ -341,6 +344,19 @@ export default function JobsPage() {
   const discoverySequence = useRef(0);
   const manualRoles = useRef(false);
   const [discovering, setDiscovering] = useState(false);
+  const [newRoleInput, setNewRoleInput] = useState('');
+  const [showRoleEvidence, setShowRoleEvidence] = useState(false);
+
+  const handleAddCustomRole = () => {
+    const trimmed = newRoleInput.trim();
+    if (!trimmed) return;
+    if (targetRoles.length >= 3) return;
+    if (!targetRoles.includes(trimmed)) {
+      manualRoles.current = true;
+      setTargetRoles((current) => [...current, trimmed]);
+    }
+    setNewRoleInput('');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -500,12 +516,156 @@ export default function JobsPage() {
           <div className="mb-4 flex items-center justify-between"><div className="flex items-center gap-2 text-xs font-semibold text-stone-300"><Filter size={14} className="text-amber-300" /> Search profile</div><button onClick={() => setShowFilters(false)} className="rounded-lg p-1.5 text-stone-500 hover:bg-white/5 hover:text-white"><X size={14} /></button></div>
           <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 [&>div]:min-w-0">
              <div><label htmlFor="job-resume" className="text-[10px] font-medium text-slate-600">Resume</label><select id="job-resume" value={selectedResume} onChange={(event) => setSelectedResume(event.target.value)} className="jh-input mt-1.5">{resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.fileName ?? resume.file_name ?? resume.id.slice(0, 8)}</option>)}</select></div>
-              <div className="md:col-span-2"><label className="text-[10px] font-medium text-slate-600">Target roles (up to 3)</label>
-                {discovering && <p role="status" className="text-xs text-amber-300">Reading professional evidence to suggest roles…</p>}
-                <div className="mt-1.5 space-y-2">{targetRoles.map((role,index)=><div key={index} className="flex gap-2"><input aria-label={`Target role ${index+1}`} maxLength={80} value={role} onChange={event=>{manualRoles.current=true;setTargetRoles(current=>current.map((item,i)=>i===index?event.target.value:item));}} className="jh-input" /><button aria-label={`Remove role ${index+1}`} onClick={()=>{manualRoles.current=true;setTargetRoles(current=>current.filter((_,i)=>i!==index));}}>×</button></div>)}</div>
-                {targetRoles.length<3&&<button onClick={()=>{manualRoles.current=true;setTargetRoles(current=>[...current,'']);}} className="text-xs text-amber-300">+ Add role</button>}
-                {roleDiscovery?.roles?.length>0&&<><button className="ml-3 text-xs text-amber-300" onClick={()=>{manualRoles.current=false;setTargetRoles(roleDiscovery.roles.slice(0,3).map((r:any)=>r.title));}}>Use suggested roles</button><p className="mt-2 text-xs">Suggestions: {roleDiscovery.source} · {roleDiscovery.model || 'deterministic fallback'}</p>{roleDiscovery.roles.map((role:any)=><details key={role.title} className="mt-2 text-xs text-slate-400"><summary>{role.title}: {role.reason}</summary><p className="mt-1 whitespace-pre-wrap">{role.evidence.join('\n')}</p></details>)}</>}
-                {roleDiscoveryError&&<p className="mt-2 text-xs text-amber-300">{roleDiscoveryError}</p>}
+              <div className="md:col-span-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-medium text-slate-400">Target roles (up to 3)</label>
+                  <span className="text-[10px] text-slate-500">{targetRoles.length}/3 selected</span>
+                </div>
+
+                {discovering && (
+                  <div className="mt-1 flex items-center gap-1.5 text-xs text-amber-300">
+                    <Loader2 size={12} className="animate-spin shrink-0" />
+                    <span>Analyzing resume to suggest roles…</span>
+                  </div>
+                )}
+
+                {/* Selected Roles & Input Tag Container */}
+                <div className="mt-1.5 flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-black/20 p-2 focus-within:border-amber-400/40">
+                  {targetRoles.map((role, index) => (
+                    <span
+                      key={`${role}-${index}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/25 bg-amber-400/10 px-2.5 py-1 text-xs font-medium text-amber-200"
+                    >
+                      <Target size={12} className="shrink-0 text-amber-400" />
+                      <span className="max-w-[160px] truncate">{role}</span>
+                      <button
+                        type="button"
+                        aria-label={`Remove role ${role}`}
+                        onClick={() => {
+                          manualRoles.current = true;
+                          setTargetRoles((current) => current.filter((_, i) => i !== index));
+                        }}
+                        className="rounded p-0.5 text-amber-400/70 hover:bg-amber-400/20 hover:text-white"
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+
+                  {targetRoles.length < 3 && (
+                    <div className="flex min-w-[140px] flex-1 items-center gap-1">
+                      <input
+                        aria-label="Add target role"
+                        value={newRoleInput}
+                        maxLength={80}
+                        onChange={(e) => setNewRoleInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddCustomRole();
+                          }
+                        }}
+                        placeholder={targetRoles.length === 0 ? "Type role & press Enter" : "Add another role…"}
+                        className="w-full bg-transparent px-1.5 py-1 text-xs text-white placeholder:text-stone-500 focus:outline-none"
+                      />
+                      {newRoleInput.trim() && (
+                        <button
+                          type="button"
+                          onClick={handleAddCustomRole}
+                          className="shrink-0 rounded-md bg-amber-400/20 px-2 py-0.5 text-[11px] font-medium text-amber-300 hover:bg-amber-400/30"
+                        >
+                          Add
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* AI Role Suggestions */}
+                {roleDiscovery?.roles?.length > 0 && (
+                  <div className="mt-2.5 space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="flex items-center gap-1.5 font-medium text-stone-400">
+                        <Sparkles size={12} className="text-amber-300" /> Suggested from resume:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowRoleEvidence((prev) => !prev)}
+                        className="flex items-center gap-1 text-[10px] text-stone-500 transition-colors hover:text-stone-300"
+                      >
+                        {showRoleEvidence ? 'Hide reasoning' : 'Why these roles?'}
+                        <ChevronDown size={11} className={`transition-transform duration-200 ${showRoleEvidence ? 'rotate-180' : ''}`} />
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {roleDiscovery.roles.map((role: any) => {
+                        const isSelected = targetRoles.includes(role.title);
+                        return (
+                          <button
+                            key={role.title}
+                            type="button"
+                            disabled={isSelected || targetRoles.length >= 3}
+                            onClick={() => {
+                              if (!isSelected && targetRoles.length < 3) {
+                                manualRoles.current = true;
+                                setTargetRoles((current) => [...current, role.title]);
+                              }
+                            }}
+                            title={role.reason}
+                            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-all ${
+                              isSelected
+                                ? 'border border-amber-400/30 bg-amber-400/20 text-amber-300'
+                                : targetRoles.length >= 3
+                                ? 'border border-white/5 bg-white/[0.02] text-stone-600 cursor-not-allowed'
+                                : 'border border-white/10 bg-white/5 text-stone-300 hover:border-amber-400/40 hover:bg-white/10'
+                            }`}
+                          >
+                            {isSelected ? <Check size={11} className="text-amber-300" /> : <Plus size={11} className="text-stone-400" />}
+                            <span>{role.title}</span>
+                          </button>
+                        );
+                      })}
+                      {targetRoles.length === 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            manualRoles.current = false;
+                            setTargetRoles(roleDiscovery.roles.slice(0, 3).map((r: any) => r.title));
+                          }}
+                          className="rounded-full border border-dashed border-amber-400/30 px-2.5 py-1 text-[10px] text-amber-300/80 hover:bg-amber-400/10 hover:text-amber-200"
+                        >
+                          Select all
+                        </button>
+                      )}
+                    </div>
+
+                    {showRoleEvidence && (
+                      <div className="mt-2 space-y-2 rounded-xl border border-white/10 bg-black/40 p-3 text-xs">
+                        <div className="flex items-center justify-between border-b border-white/5 pb-1.5 text-[10px] text-stone-500">
+                          <span>Evidence discovery · {roleDiscovery.source} ({roleDiscovery.model || 'deterministic fallback'})</span>
+                        </div>
+                        {roleDiscovery.roles.map((role: any) => (
+                          <div key={role.title} className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-semibold text-amber-200">{role.title}</span>
+                              <span className="text-[10px] text-stone-400">— {role.reason}</span>
+                            </div>
+                            {role.evidence?.length > 0 && (
+                              <div className="space-y-0.5 border-l border-white/10 pl-2.5 text-[11px] text-stone-400">
+                                {role.evidence.map((ev: string, idx: number) => (
+                                  <p key={idx} className="line-clamp-2 leading-relaxed">{ev}</p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {roleDiscoveryError && <p className="mt-2 text-xs text-amber-300">{roleDiscoveryError}</p>}
               </div>
              <div><label htmlFor="job-location" className="text-[10px] font-medium text-slate-600">Location (semicolon-separated)</label><input id="job-location" value={prefs.location} onChange={(event) => setPrefs((current) => ({ ...current, location: event.target.value }))} className="jh-input mt-1.5" placeholder="India; Bengaluru" /></div>
              <div><label htmlFor="job-min-fit" className="text-[10px] font-medium text-slate-600">Minimum fit score</label><input id="job-min-fit" type="number" min={0} max={100} value={prefs.minScore} onChange={(event) => setPrefs((current) => ({ ...current, minScore: Math.max(0, Math.min(100, Number(event.target.value) || 0)) }))} className="jh-input mt-1.5" /></div>
@@ -518,7 +678,7 @@ export default function JobsPage() {
         </section>
       )}
 
-       {error && <div role="alert" className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] p-4 text-xs text-rose-200">{error}</div>}
+       {error && <div role="alert" className="rounded-2xl border border-rose-400/15 bg-rose-400/[0.05] p-4 text-xs text-rose-200">{typeof error === 'string' ? error : JSON.stringify(error)}</div>}
        {resumeLoadError && <div role="alert">Could not load your resumes: {resumeLoadError} <button type="button" className="jh-button-ghost" onClick={() => setResumeReload(value => value + 1)}>Retry loading resumes</button></div>}
       {showFilters&&<label className="block text-xs text-slate-400"><input type="checkbox" checked={includeUnknownLocations} onChange={e=>setIncludeUnknownLocations(e.target.checked)}/> Include jobs with unverified applicant location (may not accept applications from your country)</label>}
        {(runId || sources.length > 0 || Object.keys(rejectedReasons).length > 0) && <details className="jobs-diagnostics"><summary>Search coverage and provider details {sources.some(s => String(s.status).toLowerCase().includes('error')) ? '· some providers had issues' : ''}</summary><div className="jobs-diagnostics__body"><p>These are the results loaded from this search. Provider availability and exclusions can affect coverage.</p>{sources.length > 0 ? <div className="mt-1 space-y-1">{sources.map((source, index) => <p key={`${displayValue(source.provider)}-${index}`} className="break-words"><strong>{displayValue(source.provider) || 'Provider unavailable'}</strong>: {displayValue(source.status) || 'status unavailable'} · {source.cacheHit === undefined ? 'cache unknown' : `cache ${displayValue(source.cacheHit)}`} · fetched {source.fetchedCount === undefined ? 'unknown' : displayValue(source.fetchedCount)}{displayValue(source.location) ? ` · ${displayValue(source.location)}` : ''}{displayValue(source.page) ? ` · page ${displayValue(source.page)}` : ''}{displayValue(source.fallbackReason) ? ` · fallback: ${displayValue(source.fallbackReason)}` : ''}{displayValue(source.errorCode) ? ` · error: ${displayValue(source.errorCode)}` : ''}</p>)}</div> : <p>Sources unavailable.</p>}{Object.keys(rejectedReasons).length > 0 && <p>Excluded: {Object.entries(rejectedReasons).map(([reason, count]) => `${displayValue(reason)} (${count})`).join(', ')}</p>}{lastRunDiagnostics.queries?.length ? <details><summary>Queries used ({lastRunDiagnostics.queries.length})</summary><pre>{JSON.stringify(lastRunDiagnostics.queries, null, 2)}</pre></details> : null}</div></details>}

@@ -92,6 +92,75 @@ export async function upsertJob(job: NormalizedJob, client: { query: (sql: strin
   return result.rows[0].id;
 }
 
+/** Batch upsert jobs and return a map of `${source}:${externalId}` -> id in 1-2 queries. */
+export async function upsertJobsBatch(
+  jobs: NormalizedJob[],
+  client: { query: (sql: string, params?: any[]) => Promise<any> } = pool,
+): Promise<Map<string, string>> {
+  const idMap = new Map<string, string>();
+  if (!jobs.length) return idMap;
+
+  // Deduplicate by source:externalId within the batch to avoid ON CONFLICT duplicate key error
+  const uniqueJobs = new Map<string, NormalizedJob>();
+  for (const job of jobs) {
+    uniqueJobs.set(`${job.source}:${job.externalId}`, job);
+  }
+  const jobList = [...uniqueJobs.values()];
+
+  // Chunk into batches of 25 (12 parameters per job * 25 = 300 parameters, well under Postgres limit)
+  const CHUNK_SIZE = 25;
+  for (let c = 0; c < jobList.length; c += CHUNK_SIZE) {
+    const chunk = jobList.slice(c, c + CHUNK_SIZE);
+    const valuePlaceholders: string[] = [];
+    const params: any[] = [];
+    let pIdx = 1;
+
+    for (const job of chunk) {
+      valuePlaceholders.push(`($${pIdx},$${pIdx+1},$${pIdx+2},$${pIdx+3},$${pIdx+4},$${pIdx+5},$${pIdx+6},$${pIdx+7},$${pIdx+8},$${pIdx+9},$${pIdx+10},now(),$${pIdx+11})`);
+      params.push(
+        job.source,
+        job.externalId,
+        job.title,
+        job.company || '',
+        job.location,
+        stripHtml(job.description),
+        job.descriptionQuality ?? 'unknown',
+        job.url,
+        job.salary ? JSON.stringify(job.salary) : null,
+        job.workMode,
+        job.postedAt,
+        contentHash(job)
+      );
+      pIdx += 12;
+    }
+
+    const sql = `
+      INSERT INTO jobs (source, external_id, title, company, location, description, description_quality, url, salary, work_mode, posted_at, fetched_at, content_hash)
+      VALUES ${valuePlaceholders.join(', ')}
+      ON CONFLICT (source, external_id) DO UPDATE SET
+        title = EXCLUDED.title,
+        company = EXCLUDED.company,
+        location = EXCLUDED.location,
+        description = EXCLUDED.description,
+        description_quality = EXCLUDED.description_quality,
+        url = EXCLUDED.url,
+        salary = EXCLUDED.salary,
+        work_mode = EXCLUDED.work_mode,
+        posted_at = EXCLUDED.posted_at,
+        fetched_at = now(),
+        content_hash = EXCLUDED.content_hash
+      RETURNING id, source, external_id
+    `;
+
+    const result = await client.query(sql, params);
+    for (const row of result.rows) {
+      idMap.set(`${row.source}:${row.external_id}`, row.id);
+    }
+  }
+
+  return idMap;
+}
+
 /** Shared upsert for all non-Jooble providers (best-effort, per-row errors ignored). */
 export async function storeJobsToDb(jobs: NormalizedJob[]): Promise<void> {
   for (const j of jobs) {
