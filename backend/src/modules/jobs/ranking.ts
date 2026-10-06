@@ -155,9 +155,9 @@ export async function rankJobsBatch(
     );
     const eduText = eduSentences.length ? eduSentences.slice(0, 2).join(' ').trim().slice(0, 250) : null;
     const jobSkills = extractSkills(jobText.toLowerCase());
-    const responsibilities = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`).responsibilities.slice(0, 4);
-    const missingSkills = jobSkills.filter((s) => !profileSkillSet.has(s.toLowerCase())).slice(0, 3);
-    const jobDescSnippet = redactProfessionalText(job.description ?? job.title).slice(0, 600);
+    const responsibilities = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`).responsibilities.slice(0, 10);
+    const missingSkills = jobSkills.filter((s) => !profileSkillSet.has(s.toLowerCase()));
+    const jobDescSnippet = redactProfessionalText(job.description ?? job.title).slice(0, 1500);
 
     return {
       jobDesc: jobDescSnippet,

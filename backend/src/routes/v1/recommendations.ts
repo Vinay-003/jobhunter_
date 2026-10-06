@@ -215,7 +215,12 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
     const rankingStarted = Date.now();
     const scored = await rankJobsBatch(profile, eligible.map((entry) => entry.job), { preferences:searchPreferences, ownerId: userId });
     timings.rankingMs = Date.now()-rankingStarted;
-    const compare = (a:any,b:any) => (preferences.sortBy==='newest' ? ((Date.parse(b.postedAt)||0)-(Date.parse(a.postedAt)||0)) : ((a.eligibility.status==='eligible'?0:1)-(b.eligibility.status==='eligible'?0:1))) || b.fitScore-a.fitScore || `${a.source}:${a.externalId}`.localeCompare(`${b.source}:${b.externalId}`);
+    const compare = (a: any, b: any) =>
+      preferences.sortBy === 'newest'
+        ? ((Date.parse(b.postedAt) || 0) - (Date.parse(a.postedAt) || 0)) || (b.fitScore - a.fitScore)
+        : (b.fitScore - a.fitScore) ||
+          ((a.eligibility?.status === 'eligible' ? 0 : 1) - (b.eligibility?.status === 'eligible' ? 0 : 1)) ||
+          `${a.source}:${a.externalId}`.localeCompare(`${b.source}:${b.externalId}`);
     const candidates = eligible.map(({ job, eligibility }, i) => ({ ...job, eligibility, ...scored[i], confidence: (scored[i] as any).confidence ?? 'Low' })).sort(compare).slice(0,200);
     const availabilityStarted = Date.now();
     await checkJobsAvailability(candidates,{maxChecks:20,concurrency:4,batchDeadlineMs:15000});
