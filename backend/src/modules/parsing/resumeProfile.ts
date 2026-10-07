@@ -4,7 +4,7 @@ import { extractSkills } from './skillExtractor.js';
 import { buildDocumentBlocks, type DocumentBullet } from './documentBlocks.js';
 import { detectSeniority, type CanonicalSeniority } from '../jobs/seniority.js';
 
-export const PROFILE_VERSION = '5.1.0';
+export const PROFILE_VERSION = '5.2.0';
 
 export type ExperienceEntry = {
   title: string | null; company: string | null; startDate: string | null; endDate: string | null;
