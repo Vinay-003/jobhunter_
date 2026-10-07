@@ -7,6 +7,14 @@ export interface User {
   username: string;
   email: string;
   display_name?: string;
+  verified?: boolean;
+}
+
+export interface AuthResult {
+  requiresOtp?: boolean;
+  requiresVerification?: boolean;
+  email?: string;
+  user?: User;
 }
 
 interface AuthState {
@@ -14,8 +22,10 @@ interface AuthState {
   loading: boolean;
   error: string | null;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (username: string, email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<AuthResult>;
+  signup: (username: string, email: string, password: string) => Promise<AuthResult>;
+  verifyOtp: (email: string, otp: string, purpose?: 'verification' | 'login') => Promise<void>;
+  resendOtp: (email: string, purpose?: 'verification' | 'login') => Promise<void>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -28,23 +38,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Issue 3 fix 3: single-flight — StrictMode's double mount (and any concurrent
-  // caller) shares ONE /auth/session request instead of issuing duplicates.
+  // Single-flight session fetch to prevent duplicate requests
   const inflight = useRef<Promise<void> | null>(null);
   const refresh = useCallback(async () => {
     if (inflight.current) return inflight.current;
     const run = (async () => {
       try {
         setLoading(true);
-        // 8s cap (Issue 3): a sleeping backend must not hold the UI hostage to the
-        // global 60s axios timeout — on timeout we resolve as guest.
         await ensureCsrfToken();
         const res = await api.get('/auth/session', { timeout: 8000 });
         const u = (res.data as { user?: User })?.user ?? null;
         setUser(u);
         setError(null);
       } catch {
-        // No session / timeout / network failure → unauthenticated (guest)
+        // No session / timeout / network failure -> unauthenticated (guest)
         setUser(null);
       } finally {
         setLoading(false);
@@ -62,16 +69,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refresh();
   }, [refresh]);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string): Promise<AuthResult> => {
     setLoading(true);
     setError(null);
     try {
       await ensureCsrfToken();
       const res = await api.post('/auth/login', { email, password });
-      const data = res.data as { user?: User };
+      const data = res.data as { user?: User; requiresOtp?: boolean; requiresVerification?: boolean; email?: string };
+      if (data.requiresOtp || data.requiresVerification) {
+        return {
+          requiresOtp: data.requiresOtp,
+          requiresVerification: data.requiresVerification,
+          email: data.email || email,
+        };
+      }
       if (data.user) setUser(data.user);
       else await refresh();
-    } catch (err) {
+      return { user: data.user };
+    } catch (err: any) {
+      if (err?.details?.requiresVerification) {
+        return {
+          requiresVerification: true,
+          email: err.details.email || email,
+        };
+      }
       const msg = getApiErrorMessage(err);
       setError(msg);
       throw new Error(msg);
@@ -80,18 +101,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signup = async (username: string, email: string, password: string) => {
+  const signup = async (username: string, email: string, password: string): Promise<AuthResult> => {
     setLoading(true);
     setError(null);
     try {
       await ensureCsrfToken();
-      await api.post('/auth/signup', { username, email, password });
-    } catch (err) {
+      const res = await api.post('/auth/signup', { username, email, password });
+      const data = res.data as { user?: User; requiresVerification?: boolean; email?: string };
+      return {
+        requiresVerification: data.requiresVerification ?? true,
+        email: data.email || email,
+        user: data.user,
+      };
+    } catch (err: any) {
       const msg = getApiErrorMessage(err);
       setError(msg);
       throw new Error(msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const verifyOtp = async (email: string, otp: string, purpose?: 'verification' | 'login') => {
+    setLoading(true);
+    setError(null);
+    try {
+      await ensureCsrfToken();
+      const res = await api.post('/auth/verify-otp', { email, otp, purpose });
+      const data = res.data as { user?: User };
+      if (data.user) {
+        setUser(data.user);
+      } else {
+        await refresh();
+      }
+    } catch (err: any) {
+      const msg = getApiErrorMessage(err);
+      setError(msg);
+      throw new Error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendOtp = async (email: string, purpose?: 'verification' | 'login') => {
+    try {
+      await ensureCsrfToken();
+      await api.post('/auth/resend-otp', { email, purpose });
+    } catch (err: any) {
+      const msg = getApiErrorMessage(err);
+      throw new Error(msg);
     }
   };
 
@@ -121,6 +179,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!user,
         login,
         signup,
+        verifyOtp,
+        resendOtp,
         logout,
         logoutAll,
         refresh,
