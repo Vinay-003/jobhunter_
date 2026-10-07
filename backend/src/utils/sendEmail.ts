@@ -98,7 +98,7 @@ export async function sendEmail(email: string, subject: string, message: string)
       host: SMTP_HOST,
       port,
       secure: port === 465,
-      auth: { user: SMTP_USER, pass: SMTP_PASSWORD },
+      auth: { user: SMTP_USER.trim(), pass: SMTP_PASSWORD.replace(/\s+/g, '') },
       connectionTimeout: TIMEOUT_MS,
       greetingTimeout: TIMEOUT_MS,
       socketTimeout: TIMEOUT_MS,

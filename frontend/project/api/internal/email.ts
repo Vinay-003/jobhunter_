@@ -62,7 +62,7 @@ export default async function handler(req: any, res: any) {
   }
 
   const user = process.env.SMTP_USER?.trim();
-  const password = process.env.SMTP_PASSWORD;
+  const password = process.env.SMTP_PASSWORD?.replace(/\s+/g, '');
   const host = process.env.SMTP_HOST?.trim() || 'smtp.gmail.com';
   const port = Number(process.env.SMTP_PORT || 587);
   const from = process.env.SMTP_FROM?.trim() || user;
