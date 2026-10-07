@@ -244,6 +244,10 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
         rejectedReasons['Job is closed'] = (rejectedReasons['Job is closed'] ?? 0) + 1;
         return false;
       }
+      if (job.fitScore < 20) {
+        rejectedReasons['Low match score (<20%)'] = (rejectedReasons['Low match score (<20%)'] ?? 0) + 1;
+        return false;
+      }
       if(job.eligibility.status!=='ineligible') return true;
       for(const reason of job.eligibility.reasons) rejectedReasons[reason]=(rejectedReasons[reason]??0)+1;
       return false;

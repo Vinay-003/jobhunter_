@@ -3,6 +3,7 @@ import type { JobAvailability, JobProvider, JobSearchQuery, NormalizedJob, Provi
 import { env } from '../../config/env.js';
 import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
 import { reserveMonthlyCredits, reconcileMonthlyCredits } from './providerBudgets.js';
+import { normalizeSkill } from '../../modules/parsing/skillNormalizer.js';
 
 /**
  * JobsPipe provider — unified 30+ source API (Greenhouse, Lever, Ashby,
@@ -36,6 +37,9 @@ type JobsPipeJob = {
   closed_at?: string | null;
   closed_reason?: string | null;
   expires_at?: string | null;
+  technology_slugs?: string[];
+  keyword_slugs?: string[];
+  esco_skills?: Array<{ id: string; label: string }>;
 };
 
 export class JobsPipeProvider implements JobProvider {
@@ -145,6 +149,12 @@ export class JobsPipeProvider implements JobProvider {
       };
     }
 
+    const providerSkills = [
+      ...(j.technology_slugs ?? []),
+      ...(j.keyword_slugs ?? []),
+      ...(j.esco_skills ?? []).map((s) => s.label),
+    ].map(s => normalizeSkill(s)).filter(Boolean);
+
     return {
       source: 'jobspipe',
       externalId: String(j.id ?? j.url ?? `${title}-${company}`).slice(0, 300),
@@ -158,8 +168,9 @@ export class JobsPipeProvider implements JobProvider {
       dateSource: 'posted',
       lastFetchedAt: new Date().toISOString(),
       workMode: j.remote ? 'remote' : null,
-      descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
+      descriptionQuality: j.description && stripHtml(j.description)!.length > 400 ? 'full' : 'snippet',
       retrieval: { status: 'live', requestedProvider: 'jobspipe' },
+      ...(providerSkills.length > 0 ? { providerSkills: [...new Set(providerSkills)] } : {}),
       ...(availability ? { availability } : {}),
     };
   }

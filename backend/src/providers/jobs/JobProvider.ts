@@ -22,6 +22,7 @@ export type NormalizedJob = {
   /** Retrieval origin is separate from canonical posting source; DB fallback may have the same source. */
   retrieval?: { status: 'live' | 'fallback'; requestedProvider: string; fallbackSource?: string };
   availability?: JobAvailability;
+  providerSkills?: string[];
 };
 
 export type JobAvailability = { status: 'open' | 'closed' | 'unknown'; checkedAt: string | null; reason: string; source: string };

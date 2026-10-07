@@ -170,9 +170,10 @@ export async function rankJobsBatch(
     const parsed = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`);
     const responsibilities = parsed.responsibilities;
     const jobSkills = [...new Set([
-      ...extractSkills(jobText.toLowerCase()),
       ...(parsed.requiredSkills ?? []),
       ...(parsed.preferredSkills ?? []),
+      ...(job.providerSkills ?? []),
+      ...extractSkills(jobText.toLowerCase()),
     ].map((s) => s.trim()).filter(Boolean))];
     const jobDescSnippet = redactProfessionalText(job.description ?? job.title).slice(0, 1500);
 
@@ -278,18 +279,15 @@ export async function rankJobsBatch(
         let matchedWith: string | null = null;
         let isFromResumeChunk = false;
 
-        // Exact / normalized match
-        const hasExact = profileSet.has(normSkill) ||
-          demonstrated.has(normSkill) ||
-          declared.has(normSkill) ||
-          candidateSkills.some(cs => cs.toLowerCase() === skill.toLowerCase() || normalizeSkill(cs).toLowerCase() === normSkill);
-        if (hasExact) {
+        // Direct skill identity check
+        const isDirectSkill = candidateSkills.some(cs => cs.toLowerCase() === skill.toLowerCase() || normalizeSkill(cs).toLowerCase() === normSkill);
+        if (isDirectSkill) {
           bestSim = 1.0;
           matchedWith = skill;
         }
 
         // Semantic match against all candidate skills
-        if (vec.size && candidateSkills.length) {
+        if (vec.size && candidateSkills.length && bestSim < 0.95) {
           for (const cs of candidateSkills) {
             const sim = pairScore(cs, skill);
             if (sim > bestSim) {
@@ -301,7 +299,7 @@ export async function rankJobsBatch(
         }
 
         // Semantic match against candidate resume chunks
-        if (vec.size && resumeChunks.length && bestSim < 0.85) {
+        if (vec.size && resumeChunks.length && bestSim < 0.95) {
           for (const rc of resumeChunks) {
             const sim = pairScore(rc, skill);
             if (sim > bestSim) {
@@ -312,27 +310,8 @@ export async function rankJobsBatch(
           }
         }
 
-        // Direct containment in candidate experience / resume text (e.g. "40+ REST endpoints")
-        if (!hasExact && bestSim < 0.85) {
-          if (ambiguousShortWords.has(normSkill)) {
-            if (resumeChunks.some(rc => extractSkillMatches(rc).some(m => normalizeSkill(m.skill).toLowerCase() === normSkill))) {
-              bestSim = Math.max(bestSim, 1.0);
-              matchedWith = skill;
-              isFromResumeChunk = true;
-            }
-          } else {
-            const escaped = normSkill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const skillRegex = new RegExp(`(?<![\\p{L}\\p{N}_+#])${escaped}(?![\\p{L}\\p{N}_+#])`, 'iu');
-            if (resumeChunks.some(rc => skillRegex.test(rc))) {
-              bestSim = Math.max(bestSim, 1.0);
-              matchedWith = skill;
-              isFromResumeChunk = true;
-            }
-          }
-        }
-
-        // Matched if exact or semantic similarity >= 0.40 (raw cosine >= ~0.50)
-        const isMatched = hasExact || bestSim >= 0.40;
+        // Matched if direct or semantic similarity >= 0.40 (raw cosine >= ~0.50)
+        const isMatched = isDirectSkill || bestSim >= 0.40;
         if (isMatched) {
           semanticallyMatchedSkills.push(skill);
         }
@@ -372,7 +351,7 @@ export async function rankJobsBatch(
           const src = ev?.source ?? (demonstrated.has(norm) ? 'demonstrated' : declared.has(norm) ? 'declared' : 'unverified');
           skillEvidence.push({ skill: display(skill), source: src });
         });
-        const semanticCount = semanticallyMatchedSkills.filter(s => !profileSet.has(normalizeSkill(s).toLowerCase())).length;
+        const semanticCount = semanticallyMatchedSkills.filter(s => !candidateSkills.some(cs => normalizeSkill(cs).toLowerCase() === normalizeSkill(s).toLowerCase())).length;
         evidence.push(`Structured requirement coverage ${Math.round(match.requiredCoverage * 100)}%${semanticCount ? ` (${semanticCount} via semantic alignment)` : ''}; alternatives are grouped`);
       } else if (jobSkills.length === 0) {
         requiredSkillScore = 0;
@@ -385,10 +364,11 @@ export async function rankJobsBatch(
       } else {
         matchedSkills = semanticallyMatchedSkills.map(display);
         missingSkills = jobSkills.filter(s => !semanticallyMatchedSkills.includes(s)).map(display);
-        const maxSkill = job.descriptionQuality === 'full' ? 30 : 18;
+        const hasStructuredGroups = Boolean(parsed.requirementGroups && parsed.requirementGroups.length > 0);
+        const maxSkill = hasStructuredGroups ? (job.descriptionQuality === 'full' ? 30 : 18) : 18;
         requiredSkillScore = Math.round((semanticallyMatchedSkills.length / jobSkills.length) * maxSkill);
-        const semanticCount = semanticallyMatchedSkills.filter(s => !profileSet.has(normalizeSkill(s).toLowerCase())).length;
-        evidence.push(`Skill coverage ${semanticallyMatchedSkills.length}/${jobSkills.length}${semanticCount ? ` (${semanticCount} via semantic alignment)` : ''}`);
+        const semanticCount = semanticallyMatchedSkills.filter(s => !candidateSkills.some(cs => normalizeSkill(cs).toLowerCase() === normalizeSkill(s).toLowerCase())).length;
+        evidence.push(`Skill coverage ${semanticallyMatchedSkills.length}/${jobSkills.length}${semanticCount ? ` (${semanticCount} via semantic alignment)` : ''}${!hasStructuredGroups ? ' (unstructured JD)' : ''}`);
       }
     }
 
@@ -408,14 +388,18 @@ export async function rankJobsBatch(
         responsibilityMatches.push({ responsibility: responsibility.slice(0, 180), evidence: supported ? bestChunk : null, similarity: best, rawCosine, supported });
       }
       if (responsibilityMatches.length) {
-        responsibilitySemantic = Math.round(responsibilityMatches.reduce((sum, r) => sum + r.similarity, 0) / responsibilityMatches.length * 25);
-        evidence.push(vec.size ? `Responsibility coverage ${responsibilityMatches.filter(r => r.supported).length}/${responsibilityMatches.length} via ${modelId}` : 'Keyword-only fallback; semantic responsibility evidence unavailable');
+        const supported = responsibilityMatches.filter(r => r.supported).length;
+        const avg = responsibilityMatches.reduce((sum, r) => sum + r.similarity, 0) / responsibilityMatches.length;
+        const effectiveAvg = avg >= 0.40 ? avg : avg * 0.5;
+        responsibilitySemantic = Math.round(effectiveAvg * 25);
+        evidence.push(vec.size ? `Responsibility coverage ${supported}/${responsibilityMatches.length} via ${modelId}` : 'Keyword-only fallback; semantic responsibility evidence unavailable');
       } else if (vec.size && resumeChunks.length) {
         // Unstructured JD or snippet: compute semantic similarity directly between resume chunks and jobDesc
         const scores = resumeChunks.map(rc => pairScore(rc, jobDesc)).sort((a, b) => b - a);
         const top = scores.slice(0, 3);
         const avg = top.length ? top.reduce((a, b) => a + b, 0) / top.length : 0;
-        responsibilitySemantic = Math.round(avg * 25);
+        const effectiveAvg = avg >= 0.55 ? avg * 0.75 : avg * 0.4;
+        responsibilitySemantic = Math.round(effectiveAvg * 25);
         evidence.push(`Job description semantic alignment: ${Math.round(avg * 100)}% via ${modelId}`);
       } else {
         evidence.push('Semantic responsibility evidence unavailable');
@@ -582,10 +566,13 @@ export async function rankJobsBatch(
     // 6) Location 5
     let location = 0;
     {
-      const prefLocs = opts?.preferences?.locations?.map((s) => s.toLowerCase()) ?? [];
-      if (!prefLocs.length || !job.location) { location = 0; evidence.push('Location eligibility unknown; no compatibility points'); }
-      else {
-        const { points, note } = locationScore(prefLocs, job.location, job.workMode);
+      const prefLocs = (opts?.preferences?.locations?.map((s) => s.toLowerCase()) ?? []).filter(Boolean);
+      const effectiveLocs = prefLocs.length ? prefLocs : ['india'];
+      if (!job.location) {
+        location = 0;
+        evidence.push('Location eligibility unknown; no compatibility points');
+      } else {
+        const { points, note } = locationScore(effectiveLocs, job.location, job.workMode);
         location = points;
         if (note) evidence.push(note);
       }
