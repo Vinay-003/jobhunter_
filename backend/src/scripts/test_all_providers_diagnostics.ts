@@ -160,7 +160,7 @@ console.log(`Unique Deduplicated Jobs: ${dedupedJobs.length}`);
 // Now Rank them with AWS SageMaker embeddings (or fallback)
 console.log('\n--- Ranking Jobs with Profile ---');
 const ranked = await rankJobsBatch(profile, dedupedJobs, {
-  preferences: { targetRoles: ['Backend Developer', 'Full Stack Developer', 'Frontend Developer'], locationPreference: 'India' },
+  preferences: { targetRoles: ['Backend Developer', 'Full Stack Developer', 'Frontend Developer'], locations: ['India'] },
   ownerId: userId
 });
 
@@ -181,7 +181,7 @@ const diagnostics = ranked.map((r, i) => {
     extractedSkillsFromJd: {
       required: [...new Set([...(parsed.requiredSkills ?? []), ...(orig.providerSkills ?? [])])],
       preferred: parsed.preferredSkills,
-      groupsCount: parsed.requirementGroups.length
+      groupsCount: parsed.requirementGroups?.length ?? 0
     },
     skillEvidence: r.scoreDetails?.skillEvidence,
     evidence: r.evidence,
