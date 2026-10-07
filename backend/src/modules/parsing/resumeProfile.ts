@@ -107,12 +107,12 @@ function entriesFor(body: string, kind: ExperienceEntry['kind'], bullets: Docume
       const withoutDate = line.replace(RANGE, '').replace(/\s*[|,;–—-]\s*$/, '').trim();
       const parts = withoutDate.split(/\s*[|,;]\s*/).filter(Boolean);
       const rolePart = parts.find(part => role.test(part));
-      const company = kind === 'project' ? null : parts.find(part => part !== rolePart) ?? (rolePart ? null : parts[0] ?? null);
-      const title = kind === 'project' ? withoutDate : rolePart ?? null;
+      const company = kind === 'project' ? null : (parts.length >= 2 ? (rolePart ? parts.find(part => part !== rolePart) ?? null : parts[1] ?? null) : (rolePart ? null : parts[0] ?? null));
+      const title = kind === 'project' ? withoutDate : (parts.length >= 2 ? (rolePart ?? parts[0] ?? null) : (rolePart ?? null));
       current = { title, company, startDate: range?.[1] ?? null, endDate: range?.[2] ?? null, isCurrent: /^(present|current|now)$/i.test(range?.[2] ?? ''), description: null, kind: kind === 'employment' && /intern/i.test(title ?? '') ? 'internship' : kind, bullets: [] };
       entries.push(current);
-    } else if (current && role.test(line) && !current.title && kind !== 'project') {
-      current.title = line;
+    } else if (current && (role.test(line) || !current.title) && kind !== 'project') {
+      current.title = current.title ?? line;
       current.kind = kind === 'employment' && /intern/i.test(line) ? 'internship' : kind;
     } else if (current && !/^\w+(?:\s+\w+){0,3}:/.test(line)) {
       current.description = [current.description, line].filter(Boolean).join(' ');
