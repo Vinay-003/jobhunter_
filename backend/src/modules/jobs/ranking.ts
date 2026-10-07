@@ -1,7 +1,7 @@
 import type { ResumeProfile } from '../parsing/resumeProfile.js';
 import type { NormalizedJob } from '../../providers/jobs/JobProvider.js';
 import { normalizeSkill } from '../parsing/skillNormalizer.js';
-import { extractSkills } from '../parsing/skillExtractor.js';
+import { extractSkills, extractSkillMatches, ambiguousShortWords } from '../parsing/skillExtractor.js';
 import { professionalEvidence, redactProfessionalText } from '../matching/evidenceBuilder.js';
 import { parseJd } from '../jd/jdParser.js';
 import { matchJd } from '../jd/matcher.js';
@@ -314,12 +314,20 @@ export async function rankJobsBatch(
 
         // Direct containment in candidate experience / resume text (e.g. "40+ REST endpoints")
         if (!hasExact && bestSim < 0.85) {
-          const escaped = normSkill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const skillRegex = new RegExp(`(?<![\\p{L}\\p{N}_+#])${escaped}(?![\\p{L}\\p{N}_+#])`, 'iu');
-          if (resumeChunks.some(rc => skillRegex.test(rc))) {
-            bestSim = Math.max(bestSim, 1.0);
-            matchedWith = skill;
-            isFromResumeChunk = true;
+          if (ambiguousShortWords.has(normSkill)) {
+            if (resumeChunks.some(rc => extractSkillMatches(rc).some(m => normalizeSkill(m.skill).toLowerCase() === normSkill))) {
+              bestSim = Math.max(bestSim, 1.0);
+              matchedWith = skill;
+              isFromResumeChunk = true;
+            }
+          } else {
+            const escaped = normSkill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const skillRegex = new RegExp(`(?<![\\p{L}\\p{N}_+#])${escaped}(?![\\p{L}\\p{N}_+#])`, 'iu');
+            if (resumeChunks.some(rc => skillRegex.test(rc))) {
+              bestSim = Math.max(bestSim, 1.0);
+              matchedWith = skill;
+              isFromResumeChunk = true;
+            }
           }
         }
 

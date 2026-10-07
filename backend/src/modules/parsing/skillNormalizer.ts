@@ -10,7 +10,8 @@ export const CANONICAL_SKILL_ALIASES: Record<string, string> = {
   'c#': 'C#',
   sql: 'SQL', javascript: 'JavaScript', js: 'JavaScript',
   typescript: 'TypeScript', ts: 'TypeScript',
-  go: 'Go', golang: 'Go',
+  go: 'Go', golang: 'Go', 'go lang': 'Go', 'go-lang': 'Go',
+  rust: 'Rust',
   // JS ecosystem
   'node.js': 'Node.js', nodejs: 'Node.js', 'node js': 'Node.js',
   'react.js': 'React', reactjs: 'React', react: 'React',

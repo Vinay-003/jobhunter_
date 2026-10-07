@@ -2,17 +2,24 @@ import { CANONICAL_SKILL_ALIASES } from './skillNormalizer.js';
 
 export type SkillEvidence = { skill: string; alias: string; start: number; end: number };
 
-const ambiguousShortWords = new Set(['go', 'next', 'express', 'rest', 'ts', 'py']);
+export const ambiguousShortWords = new Set(['go', 'next', 'express', 'rest', 'ts', 'py', 'c']);
 const aliases = Object.entries(CANONICAL_SKILL_ALIASES)
   .filter(([alias]) => !ambiguousShortWords.has(alias.toLowerCase()))
   .sort((a, b) => b[0].length - a[0].length);
 
-// Case-sensitive technical acronyms/words to extract real skills without common-noun false positives
+// Context-aware patterns for ambiguous words and short acronyms to eliminate false positives
+const goPattern = /(?<![\p{L}\p{N}_+#])Go(?!\s*(?:to|through|ahead|forward|over|on|for|back|down|up|off|away|out|into|live|getter|above|with|deep|market)\b)(?:(?=\s*(?:programming|language|lang|developer|engineer|backend|microservices?|services?|routines?|code|runtime|compiler|sdk|stack|api|apis)\b)|(?<=[\/,|•·:;\(\[]\s*Go)|(?<=Languages\b[^\n]*\bGo)|(?=\s*[\/,|•·\)\];])|(?=\s*,\s*(?:[\p{L}\p{N}_+#]))|(?<=\b(?:using|written in)\s+Go)|(?<=\b(?:and|or)\s+Go(?=[\s,.;]))|(?=\s+(?:and|or)\s+(?:Python|Java|Rust|C\+\+|TypeScript|JavaScript|Docker|Kubernetes|PostgreSQL|AWS|C|C#)\b))(?![\p{L}\p{N}_+#])/gu;
+
+const expressPattern = /(?<![\p{L}\p{N}_+#])Express(?!\s*(?:interest|ideas|gratitude|concern|opinions|satisfaction|delivery|mail|way|lane|train)\b)(?:(?=\s*(?:framework|server|backend|middleware|app|router|api|apis|\.js)\b)|(?<=[\/,|•·:;\(\[]\s*Express)|(?=\s*[\/,|•·\)\];])|(?<=\b(?:Node|React|MERN|MEAN)\s*[\/,]\s*Express)|(?<=Express\s*[\/,]\s*(?:Node|Mongo|Postgres))|(?=\s*,\s*(?:[\p{L}\p{N}_+#])))(?![\p{L}\p{N}_+#])/gui;
+
+const cPattern = /(?<![\p{L}\p{N}_+#])C(?!\s*(?:to|through|ahead|level|suite|corp|inc|llc|class|sharp|plus)\b)(?:(?=\s*(?:language|programming|developer|engineer|compiler|code)\b)|(?<=[\/,|•·:;\(\[]\s*C(?=[\/,|•·\)\];]|\s*$|\s+(?:and|or)\b))|(?<=\b(?:Languages|Programming Languages)\s*[:\-][^\n]*\bC(?=[\s,;]))|(?<=\b(?:ANSI|Embedded)\s+C\b))(?![\p{L}\p{N}_+#])/gu;
+
 const caseSensitiveTechnicalPatterns: Array<[RegExp, string]> = [
-  [/(?<![\p{L}\p{N}_+#])REST(?![\\p{L}\\p{N}_+#])/gu, 'REST'],
-  [/(?<![\p{L}\p{N}_+#])Go(?![\\p{L}\\p{N}_+#])/gu, 'Go'],
-  [/(?<![\p{L}\p{N}_+#])TS(?![\\p{L}\\p{N}_+#])/gu, 'TypeScript'],
-  [/(?<![\p{L}\p{N}_+#])Express(?![\\p{L}\\p{N}_+#])/gu, 'Express'],
+  [/(?<![\p{L}\p{N}_+#])REST(?![\p{L}\p{N}_+#])/gu, 'REST'],
+  [goPattern, 'Go'],
+  [/(?<![\p{L}\p{N}_+#])TS(?![\p{L}\p{N}_+#])/gu, 'TypeScript'],
+  [expressPattern, 'Express'],
+  [cPattern, 'C'],
 ];
 
 /** Longest non-overlapping alias spans; punctuation-bearing names are bounded by tokens, not \b. */
