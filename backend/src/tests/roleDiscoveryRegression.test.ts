@@ -59,7 +59,25 @@ describe('role discovery',()=>{
   });
   test('transport failure does not retry or expose response/key',async()=>{
     let calls=0;const r=await discoverRoles(profile,{ownerId:'unit-failed',transport:async()=>{calls++;throw Error('secret-bearing arbitrary error');}});
-    expect(calls).toBe(1);expect(r.source).toBe('fallback');expect(JSON.stringify(r)).not.toContain('secret-bearing');expect(JSON.stringify(r)).not.toContain('unit-test-placeholder');
+    expect(calls).toBe(2);expect(r.source).toBe('fallback');expect(JSON.stringify(r)).not.toContain('secret-bearing');expect(JSON.stringify(r)).not.toContain('unit-test-placeholder');
+  });
+  test('transport failure on Luna falls back to MiMo successfully',async()=>{
+    let calls=0;
+    const transport=async(q:any)=>{
+      calls++;
+      const model=JSON.parse(q.body).model;
+      if (model==='free/gpt-6-luna') throw Error('network timeout');
+      return response(valid);
+    };
+    const r=await discoverRoles(profile,{ownerId:'unit-luna-net-fail',transport});
+    expect(calls).toBe(2);expect(r.source).toBe('ai');expect(r.model).toBe('free/mimo-v2.6-pro');
+  });
+  test('alias free/mimo2.6 is accepted and normalizes to free/mimo-v2.6-pro',async()=>{
+    process.env.APINEX_ROLE_MODEL='free/mimo2.6';
+    let modelSent='';
+    const transport=async(q:any)=>{modelSent=JSON.parse(q.body).model;return response(valid);};
+    const r=await discoverRoles(profile,{ownerId:'unit-alias-mimo',transport});
+    expect(r.source).toBe('ai');expect(modelSent).toBe('free/mimo-v2.6-pro');
   });
   test('numbered evidence maps to actual passages and rejects unknown passage IDs',async()=>{
     const input={roles:valid.roles.map(r=>({title:r.title,reason:r.reason,evidenceIds:['P2']}))};
