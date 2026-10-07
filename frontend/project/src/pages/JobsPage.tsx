@@ -411,10 +411,9 @@ export default function JobsPage() {
   const [roleDiscovery, setRoleDiscovery] = useState<any>(null);
   const [roleDiscoveryError, setRoleDiscoveryError] = useState('');
   const [lastRunDiagnostics, setLastRunDiagnostics] = useState<any>({});
-  const [sortBy, setSortBy] = useState<'match' | 'newest'>('match');
-  const [includeUnknownDates, setIncludeUnknownDates] = useState(false);
+  const [includeUnknownDates, setIncludeUnknownDates] = useState(true);
   const [verifiedOpenOnly, setVerifiedOpenOnly] = useState(false);
-  const [includeUnknownLocations,setIncludeUnknownLocations]=useState(false);
+  const [includeUnknownLocations, setIncludeUnknownLocations] = useState(true);
   const discoverySequence = useRef(0);
   const manualRoles = useRef(false);
   const [discovering, setDiscovering] = useState(false);

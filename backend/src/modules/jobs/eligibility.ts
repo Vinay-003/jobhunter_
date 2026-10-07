@@ -43,12 +43,20 @@ export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | 
   if (job.availability?.status === 'unknown') unknown.push('Application availability unverified');
   const title = job.title.toLowerCase();
   const description = job.description ?? '';
-  if (roleFamily(job.title) === 'other') blockers.push('Unrelated role family');
+  const isDirectTargetMatch = prefs.targetRoles.some(tr => {
+    const trL = tr.toLowerCase(), jL = title.toLowerCase();
+    return jL.includes(trL) || trL.includes(jL) || trL.split(/\s+/).filter(w => w.length > 3).every(w => jL.includes(w));
+  });
+  if (roleFamily(job.title) === 'other' && !isDirectTargetMatch && !prefs.targetRoles.some(tr => roleFamily(tr) === 'other')) {
+    blockers.push('Unrelated role family');
+  }
   if (prefs.excludedRoles.some((role) => title.includes(role.toLowerCase()))) blockers.push('Excluded role');
-  if (prefs.targetRoles.length && roleFamily(job.title) !== 'other') {
+  if (prefs.targetRoles.length && !isDirectTargetMatch) {
     const wanted = prefs.targetRoles.map(roleArea);
     const actual = roleArea(job.title);
-     if (actual !== 'generic' && !wanted.includes('generic') && !wanted.includes(actual) && !(wanted.includes('fullstack') && ['backend','frontend'].includes(actual))) blockers.push('Outside requested role specialization');
+    if (actual !== 'generic' && !wanted.includes('generic') && !wanted.includes(actual) && !(wanted.includes('fullstack') && ['backend','frontend'].includes(actual))) {
+      blockers.push('Outside requested role specialization');
+    }
   }
   const level = detectJobSeniority(job.title, job.description);
   if (['intern', 'entry'].includes(normalizeSeniority(candidateLevel) ?? '') && (level === 'senior' || level === 'principal')) blockers.push('Explicit senior role');
@@ -65,24 +73,41 @@ export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | 
     const observed = candidate?.professionalYears ?? (fullTime ? candidate?.employmentYears : candidate?.totalExperienceYears) ?? (
       typeof candidate?.employmentYears === 'number'
         ? candidate.employmentYears
-        // Internships are useful evidence of activity, but never professional
-        // tenure; keep a numeric zero so a professional-years barrier fails.
         : typeof candidate?.internshipYears === 'number' ? 0
         : null
     );
     if (typeof observed !== 'number' || !Number.isFinite(observed)) unknown.push(`Professional tenure for ${years}+ years requirement unavailable`);
-    else if (observed < years) blockers.push(`Requires ${years}+ professional years; observed ${observed}`);
+    else if (observed < years) {
+      const gap = years - observed;
+      if (gap > 1.25 && (observed < 2 || observed < years * 0.75)) {
+        blockers.push(`Requires ${years}+ professional years; observed ${observed}`);
+      } else {
+        unknown.push(`Requires ${years}+ professional years; observed ${observed}`);
+      }
+    }
   }
   if (job.descriptionQuality === 'snippet' && years === null && !/\b(?:degree|bachelor|master|security clearance)\b/i.test(description)) unknown.push('Qualification details unavailable in snippet');
   if (/\b(?:completed|earned|obtained|graduated|hold(?:s|ing)?)\b.{0,45}\b(?:bachelor(?:'s)?|master(?:'s)?|degree|phd)\b|\b(?:bachelor(?:'s)?|master(?:'s)?|degree|phd)\b.{0,45}\b(?:completed|required|earned|obtained)\b/i.test(description)) {
     const education = candidate?.education ?? [];
-    const requestedLevel = /\b(?:master(?:'s)?|msc|mtech)\b/i.test(description) ? 'master' : /\b(?:phd|doctorate)\b/i.test(description) ? 'doctorate' : /\b(?:bachelor(?:'s)?|btech|bsc)\b/i.test(description) ? 'bachelor' : null;
-    const requestedField = description.match(/\b(?:in|of)\s+(computer science|information technology|software engineering|electrical engineering|mathematics)\b/i)?.[1]?.toLowerCase();
+    const requestedLevel = /\b(?:phd|doctorate)\b/i.test(description) ? 'doctorate' : /\b(?:master(?:'s)?|msc|m\.?s\.?|ms|mtech)\b/i.test(description) ? 'master' : /\b(?:bachelor(?:'s)?|btech|bsc|b\.?s\.?|bs)\b/i.test(description) ? 'bachelor' : null;
+    const requestedField = description.match(/\b(?:in|of)\s+([a-z\s]+(?:science|technology|engineering|mathematics|analytics|statistics))\b/i)?.[1]?.toLowerCase()?.trim();
     const completed = education.some(entry => {
       const degree = (entry.degree ?? '').toLowerCase();
-      const level = /\b(?:master|m\.?tech|m\.?sc|mba|mca)\b/.test(degree) ? 'master' : /\b(?:phd|doctor)\b/.test(degree) ? 'doctorate' : /\b(?:bachelor|b\.?tech|b\.?sc|b\.?e\.?|bca)\b/.test(degree) ? 'bachelor' : null;
+      const level = /\b(?:phd|doctor|d\.?phil)\b/i.test(degree)
+        ? 'doctorate'
+        : /\b(?:master|m\.?tech|m\.?sc|m\.?s\.?|ms|mba|mca)\b/i.test(degree)
+        ? 'master'
+        : /\b(?:bachelor|b\.?tech|b\.?sc|b\.?s\.?|bs|b\.?e\.?|bca)\b/i.test(degree)
+        ? 'bachelor'
+        : null;
       const field = (entry.field ?? '').toLowerCase();
-      return (entry.completed === true || (entry as any).status === 'completed') && (!requestedLevel || level === requestedLevel) && (!requestedField || field === requestedField);
+      const levelMatches = !requestedLevel || level === requestedLevel || (requestedLevel === 'bachelor' && (level === 'master' || level === 'doctorate'));
+      const fieldMatches = !requestedField ||
+        field.includes(requestedField) ||
+        requestedField.includes(field) ||
+        (/\b(?:computer|software|data|analytics|math|statistics|engineering|tech|stem)\b/i.test(field) &&
+         /\b(?:computer|software|data|analytics|math|statistics|engineering|tech|stem|related)\b/i.test(requestedField));
+      return (entry.completed === true || (entry as any).status === 'completed') && levelMatches && fieldMatches;
     });
     if (!completed) unknown.push('Completed degree, level or requested field unverified');
   }

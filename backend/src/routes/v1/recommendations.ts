@@ -142,7 +142,12 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
     const profile = await ownedProfile(resume.rows[0]);
     if (!profile || !Array.isArray(profile.skills) || !Array.isArray(profile.experience)) throw new Error('PROFILE_UNAVAILABLE');
     const roleDiscovery = await roleSuggestions(profile,resumeId,userId);
-    const searchPreferences = { ...preferences, targetRoles: preferences.targetRoles.length ? preferences.targetRoles : roleDiscovery.roles.map(r=>r.title) };
+    const searchPreferences = {
+      ...preferences,
+      targetRoles: preferences.targetRoles.length ? preferences.targetRoles : roleDiscovery.roles.map(r=>r.title),
+      includeUnknownDates: preferences.includeUnknownDates ?? true,
+      includeUnknownLocations: preferences.includeUnknownLocations ?? true,
+    };
     const planned = new JobQueryPlanner().plan({ targetRoles: searchPreferences.targetRoles, excludedRoles: preferences.excludedRoles, emphasizedSkills: preferences.emphasizedSkills }, profile);
     const queries = [...new Set(planned.map(q=>q.keywords))].slice(0,3);
     timings.rolesMs = Date.now() - startedAt;
