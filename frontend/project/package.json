@@ -17,6 +17,7 @@
     "caniuse-lite": "^1.0.30001754",
     "framer-motion": "^11.0.3",
     "lucide-react": "^0.344.0",
+    "nodemailer": "^10.0.16",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.18.4",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.1.1",

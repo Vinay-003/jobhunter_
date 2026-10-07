@@ -13,7 +13,9 @@ import { env } from '../../config/env.js';
  */
 
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || env.SESSION_COOKIE_NAME || 'jobhunter_session';
-const TTL_DAYS = Number(process.env.SESSION_TTL_DAYS || env.SESSION_TTL_DAYS || 7);
+// Default session TTL is 24 hours (configurable via SESSION_TTL_HOURS or SESSION_TTL_DAYS)
+export const TTL_HOURS = Number(process.env.SESSION_TTL_HOURS) || (Number(process.env.SESSION_TTL_DAYS || env.SESSION_TTL_DAYS || 1) * 24);
+export const TTL_MS = TTL_HOURS * 60 * 60 * 1000;
 
 export function generateToken(): string {
   return crypto.randomBytes(32).toString('hex'); // 64 chars
@@ -35,7 +37,7 @@ export type SessionRow = {
 export async function createSession(userId: string, userAgent?: string): Promise<{ token: string; session: SessionRow }> {
   const token = generateToken();
   const tokenHash = hashToken(token);
-  const expiresAt = new Date(Date.now() + TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + TTL_MS).toISOString();
   const userAgentHash = userAgent ? crypto.createHash('sha256').update(userAgent).digest('hex') : null;
 
   const { rows } = await pool.query<SessionRow>(
@@ -134,7 +136,7 @@ export function setSessionCookie(res: Response, token: string) {
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? 'none' as const : 'lax' as const,
-    maxAge: TTL_DAYS * 24 * 60 * 60 * 1000,
+    maxAge: TTL_MS,
     path: '/',
   });
 }

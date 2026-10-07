@@ -92,6 +92,14 @@ export const router = createBrowserRouter([{ element: <RouteFrame />, children: 
       </PublicOnly>
     ),
   },
+  {
+    path: '/verify-email',
+    element: (
+      <PublicOnly>
+        <LoginPage />
+      </PublicOnly>
+    ),
+  },
   { path: '/privacy', element: <PrivacyPage /> },
   { path: '/terms', element: <TermsPage /> },
   {
