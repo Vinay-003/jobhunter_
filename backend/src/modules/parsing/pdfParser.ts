@@ -32,7 +32,7 @@ export type ParsedDocument = {
 };
 
 const SECTION_HEADINGS = [
-  'summary', 'objective', 'profile', 'education', 'experience', 'work experience', 'employment', 'employment history',
+  'summary', 'objective', 'profile', 'education', 'education & certifications', 'education and certifications', 'academic background', 'experience', 'work experience', 'employment', 'employment history',
   'skills', 'technical skills', 'technical proficiencies', 'frameworks', 'frameworks & databases', 'automation & cloud', 'platforms & apis', 'core cs', 'tools', 'technologies', 'tools and technologies', 'frameworks & libraries', 'technical toolkit', 'projects', 'project', 'selected projects', 'certifications', 'certificates', 'awards', 'achievements',
   'publications', 'languages', 'interests', 'references', 'leadership', 'activities', 'volunteer',
 ];
@@ -43,6 +43,7 @@ const SECTION_ALIASES: Record<string, string> = {
   'employment history': 'experience', employment: 'experience', 'work history': 'experience',
   project: 'projects', 'selected projects': 'projects', 'personal projects': 'projects', activities: 'leadership', volunteering: 'leadership',
   'volunteer experience': 'leadership', 'professional summary': 'summary',
+  'education & certifications': 'education', 'education and certifications': 'education', 'academic background': 'education',
 };
 /** Normalize whole section bodies, not just their keys; never combine different section families. */
 export function canonicalizeSections(sections: Record<string, string>): Record<string, string> {
@@ -108,6 +109,9 @@ export function detectSections(normalizedText: string): Record<string, string> {
     activities: 'leadership',
     'volunteer experience': 'leadership',
     extracurricular: 'leadership',
+    'education & certifications': 'education',
+    'education and certifications': 'education',
+    'academic background': 'education',
   };
 
   const canonical = new Map<string, string>();

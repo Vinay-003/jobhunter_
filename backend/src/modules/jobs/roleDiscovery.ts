@@ -31,14 +31,14 @@ export type RoleDiscoveryTransport = (input: { url: string; headers: Record<stri
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const redact = (s: string) => s.replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/gi, '[email]').replace(/(?:https?:\/\/|www\.)\S+/gi, '[link]').replace(/(?:\+?\d[\d ()-]{8,}\d)/g, '[phone]');
 const normalized = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
-const FRONT = /\b(?:front[ -]?end|react(?:\.js)?|next\.js|vue(?:\.js)?|angular|html|css|user interfaces?)\b/i;
-const BACK = /\b(?:back[ -]?end|fastapi|node(?:\.js)?|express(?:\.js)?|django|spring|rest(?:ful)? apis?|database|postgres(?:ql)?|mongodb|server|authentication|payment integration)\b/i;
+const FRONT = /\b(?:front[ -]?end|react(?:\.js)?|next\.js|vue(?:\.js)?|angular|html|css|user interfaces?|\bui\b|\bux\b)\b/i;
+const BACK = /\b(?:back[ -]?end|fastapi|node(?:\.js)?|express(?:\.js)?|django|spring|rest(?:ful)? apis?|database|postgres(?:ql)?|mongodb|server(?:[- ]side)?|authentication|payment integration|queues?|python|apis?|\bssr\b|graphql)\b/i;
 export function roleArea(text: string): string {
   if (/\bfull[ -]?stack\b/i.test(text)) return 'fullstack';
-  if (/\b(?:data engineer|machine learning|ai engineer|ml engineer)\b/i.test(text)) return 'data';
-  if (/\b(?:devops|platform|cloud|sre)\b/i.test(text)) return 'platform';
+  if (/\b(?:data (?:engineer|scientist|analyst)|analytics engineer|data science|machine learning|ai engineer|ml engineer|ai forward|ai product|ai researcher|scientist|researcher)\b/i.test(text)) return 'data';
+  if (/\b(?:devops|platform|cloud|sre|site reliability|infrastructure)\b/i.test(text)) return 'platform';
   if (/\b(?:embedded|firmware|autosar)\b/i.test(text)) return 'embedded';
-  if (FRONT.test(text)) return 'frontend';
+  if (FRONT.test(text) || /\b(?:ui|ux|user interface)\b/i.test(text)) return 'frontend';
   if (/\b(?:back[ -]?end|api|server)\b/i.test(text)) return 'backend';
   return /\b(?:software|developer|engineer|web)\b/i.test(text) ? 'generic' : 'other';
 }
@@ -116,7 +116,14 @@ export function parseRoleOutput(content: string): { value: unknown; repaired: bo
   try {
     return { value: JSON.parse(text), repaired: false };
   } catch {
-    /* Only missing final delimiters may be repaired. */
+    /* Only missing final delimiters or excess trailing delimiters may be repaired. */
+  }
+  let t = text;
+  while (t.endsWith('}') || t.endsWith(']')) {
+    t = t.slice(0, -1).trim();
+    try {
+      return { value: JSON.parse(t), repaired: true };
+    } catch {}
   }
   const stack: string[] = [];
   let quoted = false, escaped = false;
@@ -204,7 +211,7 @@ export async function discoverRoles(profile: ResumeProfile, options: { ownerId: 
                 { role: 'user', content: material }
               ],
               reasoning_effort: 'low',
-              max_tokens: 4000
+              max_tokens: 16000
             }),
             timeoutMs,
             maxBytes: 96_000

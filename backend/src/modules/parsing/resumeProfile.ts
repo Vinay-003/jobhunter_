@@ -51,20 +51,22 @@ export function unionMonths(entries: ExperienceEntry[], evaluationDate: Date): n
   return months + end - start;
 }
 function extractEducation(body: string, evaluationDate: Date): EducationEntry[] {
-  const lines = body.split('\n').map(s => s.trim()).filter(Boolean).filter(s => !/^education$/i.test(s));
+  const rawLines = body.split('\n').map(s => s.trim()).filter(Boolean).filter(s => !/^(?:education|education & certifications|certifications)$/i.test(s));
+  const lines = rawLines.flatMap(line => line.includes(' | ') && /\b(?:b\.?s|m\.?s|bachelor|master|b\.?tech)/i.test(line) ? line.split(' | ').map(s => s.trim()) : [line]);
   const result: EducationEntry[] = [];
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
-    const degree = line.match(/\b(?:bachelor(?:'s)?(?: of (?:technology|science|engineering|arts))?|b\.?tech|b\.?sc|b\.?e\.?|bca|master(?:'s)?(?: of (?:technology|science|arts))?|m\.?tech|m\.?sc|mca|mba|ph\.?d|doctorate|diploma)\b/i);
+    const degree = line.match(/\b(?:bachelor(?:'s)?(?: of (?:technology|science|engineering|arts))?|b\.?tech|b\.?s(?:c|\.)?|b\.?e\.?|bca|master(?:'s)?(?: of (?:technology|science|arts))?|m\.?tech|m\.?s(?:c|\.)?|mca|mba|ph\.?d|doctorate|diploma)\b/i);
     if (!degree) continue;
     const context = [lines[index - 1], line, lines[index + 1]].filter(Boolean).join(' | ');
     const period = context.match(RANGE);
     const yearsInContext = context.match(/\b(?:19|20)\d{2}\b/g);
     const lastYear = yearsInContext && yearsInContext.length ? yearsInContext[yearsInContext.length - 1] : null;
     const date = period?.[2] ?? context.match(new RegExp(DATE, 'i'))?.[0] ?? lastYear;
-    const institution = line.split(/\s*[|,]\s*/).find(part => /\b(?:university|institute|college|school)\b/i.test(part))
+    const rawInst = line.split(/\s*[|,]\s*/).find(part => /\b(?:university|institute|college|school)\b/i.test(part))
       ?? (lines[index - 1] && /\b(?:university|institute|college)\b/i.test(lines[index - 1]) ? lines[index - 1] : null);
-    const fieldRegex = /\b(?:in|of|,\s*|-|\/)\s*(computer science(?: engineering| and engineering| & engineering)?|information technology|electrical engineering|mechanical engineering|software engineering|mathematics|data science|artificial intelligence)\b/i;
+    const institution = rawInst ? rawInst.replace(/\s*[-–—]\s*(?:19|20)\d{2}.*$/, '').trim() : null;
+    const fieldRegex = /\b(?:in|of|,\s*|-|\/|\.?\s+)\s*(computer science(?: engineering| and engineering| & engineering)?|information technology|electrical engineering|computer engineering|mechanical engineering|software engineering|applied mathematics|mathematics|data science|artificial intelligence)\b/i;
     const fieldMatch = line.match(fieldRegex)?.[1] ?? context.match(fieldRegex)?.[1];
     const field = fieldMatch ?? (
       /\b(?:cse|cs)\b/i.test(line) || /\b(?:cse|cs)\b/i.test(context) ? 'Computer Science' :
@@ -85,13 +87,19 @@ function entriesFor(body: string, kind: ExperienceEntry['kind'], bullets: Docume
   let current: ExperienceEntry | null = null;
   for (const rawLine of lines) {
     const line = rawLine.trim();
-    if (/^(?:experience|work experience|employment|projects?|leadership|activities|volunteer(?:ing)?)\s*:?$/i.test(line)) continue;
+    if (/^(?:experience|work experience|employment|projects?|selected projects|personal projects|leadership|activities|volunteer(?:ing)?|education|education & certifications)\s*:?$/i.test(line)) continue;
     if (/^[•◦▪▫‣⁃*\-–—]\s/.test(line)) {
       if (current) current.description = [current.description, line.replace(/^[•◦▪▫‣⁃*\-–—]\s*/, '')].filter(Boolean).join(' ');
       continue;
     }
     const range = line.match(RANGE);
-    const role = /\b(?:intern|engineer|developer|analyst|architect|designer|consultant|manager|lead|secretary|coordinator|editor)\b/i;
+    const role = /\b(?:intern|engineer|developer|scientist|analyst|architect|designer|consultant|manager|lead|specialist|administrator|secretary|coordinator|editor)\b/i;
+    const colonProject = kind === 'project' && /^([A-Z0-9][A-Za-z0-9\s/&–—-]{2,60}):\s*(.+)$/.exec(line);
+    if (colonProject) {
+      current = { title: colonProject[1].trim(), company: null, startDate: null, endDate: null, isCurrent: false, description: colonProject[2].trim(), kind: 'project', bullets: [] };
+      entries.push(current);
+      continue;
+    }
     const projectTitle = kind === 'project' && !current && (line.split('|')[0].trim().length < 100) && !/[.!?:]$/.test(line);
     const projectNextTitle = kind === 'project' && !!current && (line.length < 75 || (line.includes('|') && line.split('|')[0].trim().length < 75)) && !/[.!?:]$/.test(line)
       && !/^\s/.test(rawLine) && !/\b(?:built|developed|created|designed|implemented|integrated|deployed|maintained|optimized|using|with)\b/i.test(line);
