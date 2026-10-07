@@ -20,9 +20,8 @@ import { roleArea, profileRoleAreas } from './roleDiscovery.js';
 export const VERSION = '5.0.0';
 
 export function roleFamily(title: string): 'software' | 'data' | 'other' {
-  if (/\b(?:software|developer|frontend|front.end|backend|back.end|full.stack|web|react|javascript|typescript|swe|sde|programmer|devops)\b/i.test(title)) return 'software';
-  if (/\b(?:data engineer|machine learning engineer|ml engineer)\b/i.test(title)) return 'data';
-  if (/\b(?:ui|application|qa|sqa|sdet|platform|cloud|test|ai)\b.*\bengineer\b/i.test(title)) return 'software';
+  if (/\b(?:data|analytics|machine learning|ml|ai|artificial intelligence|deep learning|nlp|cv|computer vision|bi|business intelligence|statistician|quantitative)\b/i.test(title)) return 'data';
+  if (/\b(?:software|developer|frontend|front.end|backend|back.end|full.stack|web|react|javascript|typescript|swe|sde|programmer|devops|platform|cloud|sre|systems|infrastructure|qa|test|security|engineer|architect)\b/i.test(title)) return 'software';
   return 'other';
 }
 
@@ -142,9 +141,12 @@ export async function rankJobsBatch(
     `${e.degree ?? 'Degree'}${e.field ? ` in ${e.field}` : ''}${e.institution ? ` from ${e.institution}` : ''} ${e.raw ?? ''}`.trim()
   ).filter(Boolean);
   const profileRoles = [...new Set([
+    ...(opts?.preferences?.targetRoles ?? []),
+    ...((profile as any).roleDiscovery?.roles ?? []).map((r: any) => r.title),
     ...profile.experience.map(e => e.title).filter((t): t is string => Boolean(t)),
     ...((profile as any).projects ?? []).map((p: any) => p.title).filter((t: any): t is string => Boolean(t)),
-  ])];
+    (profile as any).title ? String((profile as any).title) : null,
+  ].filter((t): t is string => Boolean(t)))];
 
   const experienceSkills = extractSkills([
     ...resumeChunks,
@@ -389,16 +391,22 @@ export async function rankJobsBatch(
       }
       if (responsibilityMatches.length) {
         const supported = responsibilityMatches.filter(r => r.supported).length;
-        const avg = responsibilityMatches.reduce((sum, r) => sum + r.similarity, 0) / responsibilityMatches.length;
-        const effectiveAvg = avg >= 0.40 ? avg : avg * 0.5;
-        responsibilitySemantic = Math.round(effectiveAvg * 25);
+        const total = responsibilityMatches.length;
+        const coverageRatio = total > 0 ? supported / total : 0;
+        const avg = total > 0 ? responsibilityMatches.reduce((sum, r) => sum + r.similarity, 0) / total : 0;
+        if (supported === 0) {
+          responsibilitySemantic = 0;
+        } else {
+          const scoreRatio = (coverageRatio * 0.70) + (Math.min(1, Math.max(0, avg / 0.55)) * 0.30);
+          responsibilitySemantic = Math.round(scoreRatio * 25);
+        }
         evidence.push(vec.size ? `Responsibility coverage ${supported}/${responsibilityMatches.length} via ${modelId}` : 'Keyword-only fallback; semantic responsibility evidence unavailable');
       } else if (vec.size && resumeChunks.length) {
         // Unstructured JD or snippet: compute semantic similarity directly between resume chunks and jobDesc
         const scores = resumeChunks.map(rc => pairScore(rc, jobDesc)).sort((a, b) => b - a);
         const top = scores.slice(0, 3);
         const avg = top.length ? top.reduce((a, b) => a + b, 0) / top.length : 0;
-        const effectiveAvg = avg >= 0.55 ? avg * 0.75 : avg * 0.4;
+        const effectiveAvg = Math.min(1, Math.max(0, avg / 0.55));
         responsibilitySemantic = Math.round(effectiveAvg * 25);
         evidence.push(`Job description semantic alignment: ${Math.round(avg * 100)}% via ${modelId}`);
       } else {
@@ -409,12 +417,14 @@ export async function rankJobsBatch(
     // 3) Role/title 15 — Semantic alignment between demonstrated roles & job title
     let roleTitle = 0;
     {
-      const family = roleFamily(job.title);
       const target = opts?.preferences?.targetRoles ?? [];
-      const actual = roleArea(job.title), areas = profileRoleAreas(profile), desired = target.map(roleArea);
-      const compatible = areas.has(actual) || (actual === 'generic' && areas.size > 0);
-      const targeted = !desired.length || desired.includes(actual) || desired.includes('generic') || desired.includes('fullstack') && ['backend', 'frontend'].includes(actual);
-      const rulePoints = family === 'other' || !compatible || !targeted ? 0 : actual === 'generic' ? 9 : areas.has('fullstack') && actual !== 'fullstack' ? 12 : 15;
+      const titleLower = job.title.toLowerCase();
+
+      const isDirectMatch = profileRoles.some(r => {
+        const rL = r.toLowerCase();
+        return titleLower.includes(rL) || rL.includes(titleLower) ||
+          rL.split(/\s+/).filter(w => w.length > 3).every(w => titleLower.includes(w));
+      });
 
       let maxRoleSim = 0;
       if (vec.size && profileRoles.length) {
@@ -424,15 +434,29 @@ export async function rankJobsBatch(
         }
       }
 
-      if (maxRoleSim >= 0.50 && rulePoints > 0) {
-        roleTitle = Math.max(rulePoints, Math.round(maxRoleSim * 15));
-      } else if (maxRoleSim >= 0.55) {
+      if (profileRoles.length === 0) {
+        roleTitle = 0;
+      } else if (isDirectMatch) {
+        roleTitle = 15;
+      } else if (maxRoleSim >= 0.60) {
+        roleTitle = 15;
+      } else if (maxRoleSim >= 0.45) {
+        roleTitle = Math.max(12, Math.round(maxRoleSim * 15));
+      } else if (maxRoleSim >= 0.30) {
+        roleTitle = Math.max(8, Math.round(maxRoleSim * 15));
+      } else if (maxRoleSim >= 0.15) {
         roleTitle = Math.round(maxRoleSim * 15);
       } else {
-        roleTitle = rulePoints;
+        const actual = roleArea(job.title);
+        const areas = profileRoleAreas(profile);
+        const desired = target.map(roleArea);
+        const compatible = areas.has(actual) || (actual === 'generic' && areas.size > 0);
+        const targeted = !desired.length || desired.includes(actual) || desired.includes('generic') || (desired.includes('fullstack') && ['backend', 'frontend'].includes(actual));
+        roleTitle = !compatible || !targeted ? 0 : actual === 'generic' ? 9 : 15;
       }
 
-      evidence.push(`Role ${actual}: ${roleTitle ? `supported by demonstrated ${[...areas].join(', ')} work${maxRoleSim >= 0.50 ? ` (${Math.round(maxRoleSim * 100)}% semantic alignment)` : ''}` : 'specialization not demonstrated or outside target roles'}`);
+      const roleLabel = roleArea(job.title);
+      evidence.push(`Role ${roleLabel}: ${roleTitle ? `supported by candidate profile${maxRoleSim >= 0.30 ? ` (${Math.round(maxRoleSim * 100)}% semantic alignment)` : ''}` : 'specialization not demonstrated or outside target roles'}`);
     }
 
     // 4) Seniority 15
@@ -484,6 +508,33 @@ export async function rankJobsBatch(
         }
       }
 
+      const expected = /\b(?:phd|doctorate)\b/i.test(jobLower) ? 'doctorate' : /\bmaster\b/i.test(jobLower) ? 'master' : /\b(?:bachelor|degree|b\.?tech|b\.?e\.?|bca)\b/i.test(jobLower) ? 'bachelor' : null;
+      const technicalKeywords = /\b(?:computer science|cs|cse|information technology|it|software|computing|data science|data analytics|machine learning|artificial intelligence|mathematics|applied math|statistics|engineering|computer applications|physics|stem)\b/i;
+      const matchingDegree = profile.education.find(entry => {
+        const degree = entry.degree ?? '';
+        const level = /phd|doctor|d\.?phil/i.test(degree)
+          ? 'doctorate'
+          : /\b(?:master|m\.?tech|m\.?sc|m\.?s\.?|ms|mca|mba)\b/i.test(degree)
+          ? 'master'
+          : /\b(?:bachelor|b\.?tech|b\.?sc|b\.?s\.?|bs|b\.?e\.?|bca)\b/i.test(degree)
+          ? 'bachelor'
+          : null;
+        const levelMatches = !expected || level === expected || (expected === 'bachelor' && (level === 'master' || level === 'doctorate'));
+        if (!levelMatches) return false;
+
+        const fLower = (entry.field ?? '').toLowerCase();
+        const rLower = (entry.raw ?? '').toLowerCase();
+        const isCandidateStem = technicalKeywords.test(`${fLower} ${rLower}`);
+        const isJdStem = /\b(?:computer science|cs|cse|information technology|it|software|data science|analytics|statistics|mathematics|engineering|stem)\b/i.test(jobLower);
+        const jdAcceptsRelated = /\b(?:related (?:field|degree|discipline)|or related|equivalent|stem|technical degree|engineering)\b/i.test(jobLower);
+
+        if (isCandidateStem && (isJdStem || jdAcceptsRelated || !isJdStem)) return true;
+
+        const jdField = jobLower.match(/\b(?:in|of)\s+([a-z\s]+(?:science|technology|engineering|mathematics|analytics|statistics))\b/i)?.[1]?.trim()?.toLowerCase();
+        if (!jdField) return true;
+        return fLower.includes(jdField) || jdField.includes(fLower);
+      });
+
       if (vec.size && eduChunks.length && semanticEduScore > 0) {
         if (!hasEduReq) {
           // No explicit degree required by job — award soft credit based on domain alignment
@@ -493,18 +544,18 @@ export async function rankJobsBatch(
             : 'No education requirement stated; no technical education verified');
         } else {
           // Explicit education requirement stated in job
-          if (semanticEduScore >= 0.45) {
-            const matchingCompleted = profile.education.find(e => e.completed === true);
-            if (matchingCompleted || isEarlyCareer) {
+          if (semanticEduScore >= 0.35 || matchingDegree) {
+            const verified = (matchingDegree?.completed === true) || profile.education.some(e => e.completed === true);
+            if (verified || isEarlyCareer) {
               domainEducation = 10;
-              evidence.push(isEarlyCareer && !matchingCompleted
+              evidence.push(isEarlyCareer && !verified
                 ? `Degree in progress/pursuing meets early-career or internship qualification (${Math.round(semanticEduScore * 100)}% semantic alignment)`
                 : `Verified education meets stated degree and field (${Math.round(semanticEduScore * 100)}% semantic alignment)`);
             } else {
               domainEducation = 5;
               evidence.push(`Degree listed (${Math.round(semanticEduScore * 100)}% semantic alignment); completion unverified`);
             }
-          } else if (semanticEduScore >= 0.30) {
+          } else if (semanticEduScore >= 0.25) {
             domainEducation = 5;
             evidence.push(`Partial domain education alignment (${Math.round(semanticEduScore * 100)}%)`);
           } else {
@@ -517,35 +568,15 @@ export async function rankJobsBatch(
         if (!hasEduReq) {
           const hasRelevantEdu = profile.education.some(entry => {
             const text = `${entry.degree ?? ''} ${entry.field ?? ''} ${entry.raw ?? ''}`.toLowerCase();
-            return /\b(?:computer|software|information|technology|engineering|b\.?tech|b\.?e\.?|bca|mca|cs|cse|it)\b/i.test(text);
+            return /\b(?:computer|software|information|technology|engineering|b\.?tech|b\.?e\.?|bca|mca|cs|cse|it|data|analytics|math(?:ematics)?|statistics?|physics|stem|science)\b/i.test(text);
           });
           domainEducation = hasRelevantEdu ? 7 : 0;
           evidence.push(hasRelevantEdu
             ? 'Candidate holds relevant technical education; no strict degree requirement stated'
             : 'No education requirement stated; no technical education verified');
         } else {
-          const expected = /\b(?:phd|doctorate)\b/i.test(jobLower) ? 'doctorate' : /\bmaster\b/i.test(jobLower) ? 'master' : /\b(?:bachelor|degree|b\.?tech|b\.?e\.?|bca)\b/i.test(jobLower) ? 'bachelor' : null;
-          const matching = profile.education.find(entry => {
-            const degree = entry.degree ?? '';
-            const level = /phd|doctor/i.test(degree) ? 'doctorate' : /master|m\.?tech|m\.?sc|mca/i.test(degree) ? 'master' : /bachelor|b\.?tech|b\.?sc|b\.?e\.?|bca/i.test(degree) ? 'bachelor' : null;
-            const levelMatches = !expected || level === expected || (expected === 'bachelor' && (level === 'master' || level === 'doctorate'));
-            if (!levelMatches) return false;
-
-            const fLower = (entry.field ?? '').toLowerCase();
-            const rLower = (entry.raw ?? '').toLowerCase();
-            const isCandidateCs = /\b(?:computer science|cs|cse|information technology|it|software|computing|data science|computer applications)\b/i.test(`${fLower} ${rLower}`);
-            const isJdCs = /\b(?:computer science|cs|cse|information technology|it|software engineering|data science|computer applications)\b/i.test(jobLower);
-            const jdAcceptsRelated = /\b(?:related (?:field|degree|discipline)|or related|equivalent|stem|technical degree|engineering)\b/i.test(jobLower);
-
-            if (isCandidateCs && (isJdCs || jdAcceptsRelated || !isJdCs)) return true;
-
-            const jdField = jobLower.match(/\b(?:in|of)\s+([a-z\s]+(?:science|technology|engineering|mathematics))\b/i)?.[1]?.trim()?.toLowerCase();
-            if (!jdField) return true;
-            return fLower.includes(jdField) || jdField.includes(fLower);
-          });
-
-          if (matching) {
-            if (matching.completed === true) {
+          if (matchingDegree) {
+            if (matchingDegree.completed === true) {
               domainEducation = 10;
               evidence.push('Verified completed education meets stated degree and field');
             } else if (isEarlyCareer) {
