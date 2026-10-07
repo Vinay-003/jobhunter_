@@ -214,5 +214,14 @@ The first audit used the actual uploaded PDF, a newly signed-up audit account, r
 - Confirmed exact catalog ID at `https://apinex.bond/api/public/models`: `free/mimo-v2.6-pro`, live and `allowFree: true` at verification time.
 - The role-discovery chain is now Luna first, then one MiMo attempt only when a received Luna response fails output/evidence validation. Both use the same evidence checks; actual successful model identity is retained in output and cache. If both fail, the visible deterministic fallback remains.
 - Configuration/auth/rate-limit/network errors do not trigger another model call. No paid model and no same-model retry were added. Inference budget is 70 seconds total (45 Luna, 25 MiMo); UI discovery timeout is 90 seconds. Version/cache identity includes the ordered chain.
-- Tests: 142 backend tests passed, three opt-in skips; backend build passed. A controlled invalid Luna response triggered a **live** MiMo request using the actual contact-redacted professional resume material. MiMo returned validated Full Stack Developer, Backend Developer and Frontend Developer roles in approximately 15.7 seconds. The induced Luna failure is a test input, not a claim of a live Luna outage.
 - AWS/Render configuration and embedding models were not changed. No additional key is needed for the fallback.
+
+## APInex Role Discovery & MiMo Fallback Fix — 2026-10-07
+- Resolved issue where Luna transport failures (HTTP 429 rate limit, 5xx gateway errors, inference timeouts) escaped the model retry loop and aborted before attempting the fallback model.
+- The model loop now catches transport and network errors on `free/gpt-6-luna` and cleanly falls back to `free/mimo-v2.6-pro`.
+- Added model alias support: `free/mimo2.6` and `mimo2.6` automatically normalize to `free/mimo-v2.6-pro`.
+- Relaxed `APINEX_ROLE_MODEL` in `backend/src/config/env.ts` from `z.literal('free/gpt-6-luna')` to `z.string()`, and added `isAllowedFreeModel` guard preventing paid model invocation while allowing all authorized free models (`free/gpt-6-luna`, `free/mimo-v2.6-pro`, `free/mimo2.6`).
+- Enhanced `parseRoleOutput` to extract JSON from markdown fences (` ```json `) and strip conversational preambles/trailing commentary from LLM outputs.
+- Verified with live APInex key: `free/gpt-6-luna` and `free/mimo-v2.6-pro` both return validated occupational roles.
+- All 177 unit and regression tests pass without error; TypeScript compilation passes.
+
