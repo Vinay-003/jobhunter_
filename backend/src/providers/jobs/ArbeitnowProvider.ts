@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult } from './JobProvider.js';
 import { env } from '../../config/env.js';
 import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback, normalizedPostedAt } from './jobStore.js';
+import { normalizeSkill } from '../../modules/parsing/skillNormalizer.js';
 
 /**
  * Arbeitnow provider — public API, no key.
@@ -24,6 +25,7 @@ type ArbeitnowJob = {
   location?: string;
   created_at?: string | number;
   job_types?: string[];
+  tags?: string[];
 };
 
 export class ArbeitnowProvider implements JobProvider {
@@ -75,6 +77,7 @@ export class ArbeitnowProvider implements JobProvider {
     const title = j.title?.trim();
     const company = j.company_name?.trim();
     if (!title || !company) return null;
+    const providerSkills = (j.tags ?? []).map(t => normalizeSkill(t)).filter(Boolean);
     return {
       source: 'arbeitnow',
       externalId: String(j.slug ?? j.url ?? `${title}-${company}`).slice(0, 300),
@@ -88,6 +91,7 @@ export class ArbeitnowProvider implements JobProvider {
       workMode: j.remote ? 'remote' : null,
       descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
       retrieval: { status: 'live', requestedProvider: 'arbeitnow' },
+      ...(providerSkills.length > 0 ? { providerSkills: [...new Set(providerSkills)] } : {}),
     };
   }
 }

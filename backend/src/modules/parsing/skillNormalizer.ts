@@ -18,6 +18,7 @@ export const CANONICAL_SKILL_ALIASES: Record<string, string> = {
   'vue.js': 'Vue.js', vuejs: 'Vue.js',
   'next.js': 'Next.js', nextjs: 'Next.js', next: 'Next.js',
   'express.js': 'Express', expressjs: 'Express', express: 'Express',
+  nestjs: 'NestJS', 'nest.js': 'NestJS', 'nest js': 'NestJS',
   // Frameworks & DB
   fastapi: 'FastAPI', flask: 'Flask', django: 'Django',
   postgresql: 'PostgreSQL', postgres: 'PostgreSQL', psql: 'PostgreSQL',
@@ -26,14 +27,16 @@ export const CANONICAL_SKILL_ALIASES: Record<string, string> = {
   // Cloud & Tools
   docker: 'Docker', kubernetes: 'Kubernetes', k8s: 'Kubernetes',
   aws: 'AWS', gcp: 'GCP', azure: 'Azure',
+  ec2: 'AWS EC2', 'aws ec2': 'AWS EC2', s3: 'AWS S3', 'aws s3': 'AWS S3',
+  lambda: 'AWS Lambda', 'aws lambda': 'AWS Lambda',
   git: 'Git', github: 'GitHub',
   postman: 'Postman', linux: 'Linux', supabase: 'Supabase', sagemaker: 'SageMaker', 'amazon sagemaker': 'SageMaker', drizzle: 'Drizzle', 'drizzle orm': 'Drizzle', oauth: 'OAuth', 'oauth 2.0': 'OAuth',
   playwright: 'Playwright', selenium: 'Selenium',
-  // Web
+  // Web & Fullstack
   html: 'HTML', html5: 'HTML', css: 'CSS', css3: 'CSS',
   tailwind: 'Tailwind CSS', 'tailwind css': 'Tailwind CSS',
   sass: 'Sass', scss: 'Sass',
-  graphql: 'GraphQL',
+  graphql: 'GraphQL', mern: 'MERN Stack', 'mern stack': 'MERN Stack',
   rest: 'REST', 'rest api': 'REST', 'rest apis': 'REST', restful: 'REST', 'restful api': 'REST', 'restful apis': 'REST',
   'rest endpoint': 'REST', 'rest endpoints': 'REST', 'restful endpoint': 'REST', 'restful endpoints': 'REST',
   'rest service': 'REST', 'rest services': 'REST', 'restful service': 'REST', 'restful services': 'REST',
@@ -44,18 +47,27 @@ export const CANONICAL_SKILL_ALIASES: Record<string, string> = {
   // Platforms
   shopify: 'Shopify', razorpay: 'Razorpay',
   cloudinary: 'Cloudinary', render: 'Render',
-  // CS
+  // CS & Architecture
   'data structures': 'Data Structures and Algorithms',
   dsa: 'Data Structures and Algorithms',
   oop: 'OOP', dbms: 'DBMS',
   'object-oriented programming': 'OOP', 'object oriented programming': 'OOP',
   'operating systems': 'Operating Systems', 'computer networks': 'Computer Networks',
   'system design': 'System Design', 'distributed systems': 'Distributed Systems',
-  'ci/cd': 'CI/CD', '.net': '.NET', 'spring boot': 'Spring Boot',
+  'ci/cd': 'CI/CD', '.net': '.NET', 'asp.net': 'ASP.NET', '.net core': '.NET Core', 'entity framework': 'Entity Framework',
+  'spring boot': 'Spring Boot', spring: 'Spring Boot', 'spring mvc': 'Spring Boot', hibernate: 'Hibernate',
   terraform: 'Terraform', kafka: 'Kafka', 'apache kafka': 'Kafka',
+  rabbitmq: 'RabbitMQ', celery: 'Celery', grpc: 'gRPC', microservices: 'Microservices', elasticsearch: 'Elasticsearch',
   prometheus: 'Prometheus', grafana: 'Grafana', ansible: 'Ansible',
   'github actions': 'GitHub Actions', 'gitlab ci': 'GitLab CI',
   'pytorch': 'PyTorch', tensorflow: 'TensorFlow',
+  // SAP & Enterprise
+  abap: 'ABAP', 'sap abap': 'ABAP', 'oops abap': 'ABAP',
+  sap: 'SAP', 'sap hana': 'SAP HANA', hana: 'SAP HANA',
+  odata: 'OData', 'cds views': 'CDS', 'cds view': 'CDS', cds: 'CDS',
+  bapi: 'BAPI', idoc: 'IDocs', idocs: 'IDocs', ricef: 'RICEF',
+  fiori: 'SAP Fiori', 'sap fiori': 'SAP Fiori', sapui5: 'SAPUI5',
+  btp: 'SAP BTP', 'sap btp': 'SAP BTP',
 };
 
 const aliasLowerMap = new Map<string, string>();

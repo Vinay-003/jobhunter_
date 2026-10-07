@@ -3,6 +3,7 @@ import type { JobProvider, JobSearchQuery, NormalizedJob, ProviderSearchResult }
 import { env } from '../../config/env.js';
 import { stripHtml, storeJobsToDb, searchJobsFromDb, markFallback } from './jobStore.js';
 import { reserveDailyCall } from './providerBudgets.js';
+import { normalizeSkill } from '../../modules/parsing/skillNormalizer.js';
 
 /**
  * Remotive provider — public API, no key.
@@ -24,6 +25,7 @@ type RemotiveJob = {
   candidate_required_location?: string;
   salary?: string;
   description?: string;
+  tags?: string[];
 };
 
 export class RemotiveProvider implements JobProvider {
@@ -72,6 +74,7 @@ export class RemotiveProvider implements JobProvider {
     const title = j.title?.trim();
     const company = j.company_name?.trim();
     if (!title || !company) return null;
+    const providerSkills = (j.tags ?? []).map(t => normalizeSkill(t)).filter(Boolean);
     return {
       source: 'remotive',
       externalId: String(j.id ?? j.url ?? `${title}-${company}`).slice(0, 300),
@@ -85,6 +88,7 @@ export class RemotiveProvider implements JobProvider {
       workMode: 'remote',
       descriptionQuality: j.description && stripHtml(j.description)!.length > 300 ? 'full' : 'snippet',
       retrieval: { status: 'live', requestedProvider: 'remotive' },
+      ...(providerSkills.length > 0 ? { providerSkills: [...new Set(providerSkills)] } : {}),
     };
   }
 }

@@ -44,13 +44,14 @@ export class JoobleProvider implements JobProvider {
 
     try {
       const url = `${JOOBLE_ENDPOINT}/${this.apiKey}`;
+      const loc = query.location?.trim() || (query.country && /^(?:in|india)$/i.test(query.country) ? 'India' : (query.country ?? ''));
       const body = {
         keywords: query.keywords,
-        location: query.location ?? '',
+        location: loc,
         page: query.page ?? 1,
       };
 
-      console.log(`[JoobleProvider] searching Jooble keywords="${query.keywords}" location="${query.location ?? ''}" page=${query.page ?? 1}`);
+      console.log(`[JoobleProvider] searching Jooble keywords="${query.keywords}" location="${loc}" page=${query.page ?? 1}`);
       const resp = await axios.post<{ jobs?: JoobleJob[] }>(url, body, {
         timeout: TIMEOUT_MS,
         headers: { 'Content-Type': 'application/json' },
