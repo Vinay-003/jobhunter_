@@ -4,6 +4,7 @@ import nodemailer from 'nodemailer';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_SUBJECT = 200;
 const MAX_TEXT = 10_000;
+const MAX_HTML = 100_000;
 
 function matchesSecret(received: string | null | undefined, expected: string | undefined): boolean {
   if (!received || !expected) return false;
@@ -47,6 +48,7 @@ export default async function handler(req: any, res: any) {
   const to = typeof body.to === 'string' ? body.to.trim() : '';
   const subject = typeof body.subject === 'string' ? body.subject.trim() : '';
   const text = typeof body.text === 'string' ? body.text : '';
+  const html = typeof body.html === 'string' ? body.html : undefined;
 
   if (
     !EMAIL_REGEX.test(to) ||
@@ -56,7 +58,8 @@ export default async function handler(req: any, res: any) {
     subject.length > MAX_SUBJECT ||
     /[\r\n\x00-\x1f\x7f]/.test(subject) ||
     !text ||
-    text.length > MAX_TEXT
+    text.length > MAX_TEXT ||
+    (html !== undefined && html.length > MAX_HTML)
   ) {
     return res.status(400).json({ success: false, message: 'Invalid parameters' });
   }
@@ -85,7 +88,15 @@ export default async function handler(req: any, res: any) {
       tls: { minVersion: 'TLSv1.2' },
     });
 
-    await transporter.sendMail({ from, to, subject, text });
+    const mailOptions: nodemailer.SendMailOptions = {
+      from,
+      to,
+      subject,
+      text,
+      ...(html ? { html } : {}),
+    };
+
+    await transporter.sendMail(mailOptions);
     return res.status(200).json({ success: true, message: 'Accepted for sending' });
   } catch (error: any) {
     console.error('[email-relay] SMTP send error:', error?.message || error);
