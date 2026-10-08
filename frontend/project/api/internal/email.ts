@@ -88,7 +88,7 @@ export default async function handler(req: any, res: any) {
       tls: { minVersion: 'TLSv1.2' },
     });
 
-    const mailOptions: nodemailer.SendMailOptions = {
+    const mailOptions = {
       from,
       to,
       subject,
