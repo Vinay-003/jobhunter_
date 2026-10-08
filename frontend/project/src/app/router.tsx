@@ -14,6 +14,7 @@ import ProfilePage from '../pages/ProfilePage';
 import PrivacyPage from '../pages/PrivacyPage';
 import TermsPage from '../pages/TermsPage';
 import NotFoundPage from '../pages/NotFoundPage';
+import ErrorPage from '../pages/ErrorPage';
 
 const LandingPage = lazy(() => import('../pages/LandingPage'));
 const JobsPage = lazy(() => import('../pages/JobsPage'));
@@ -74,7 +75,10 @@ function RouteFrame() {
   return <Suspense fallback={<div className="session-skeleton library-skeleton" aria-busy="true" aria-label="Loading page"><div/><div/><div/></div>}><Outlet /></Suspense>;
 }
 
-export const router = createBrowserRouter([{ element: <RouteFrame />, children: [
+export const router = createBrowserRouter([{
+  element: <RouteFrame />,
+  errorElement: <ErrorPage />,
+  children: [
   { path: '/', element: <LandingPage /> },
   {
     path: '/login',
@@ -109,6 +113,7 @@ export const router = createBrowserRouter([{ element: <RouteFrame />, children: 
         <AppShell />
       </SessionGuard>
     ),
+    errorElement: <ErrorPage />,
     children: [
       { index: true, element: <Navigate to="/app/ats" replace /> },
       { path: 'ats', element: <AtsPage /> },

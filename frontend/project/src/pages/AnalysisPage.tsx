@@ -392,7 +392,7 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
   const location = useLocation();
   const locationState = location.state as AnalysisLocationState | null;
   const initial = initialView ?? locationState?.initialAnalysis;
-  const [view, setView] = useState<ViewModel | null>(() => initial ? { ...initial, readiness: initial.readiness ?? initial.analysis ?? {}, fileName: initial.fileName ?? locationState?.fileName, createdAt: initial.createdAt ?? locationState?.createdAt } : null);
+  const [view, setView] = useState<ViewModel | null>(() => initial ? { ...initial, readiness: initial.readiness ?? (initial as any).analysis ?? {}, fileName: initial.fileName ?? locationState?.fileName, createdAt: initial.createdAt ?? locationState?.createdAt } : null);
   const [loading, setLoading] = useState(!initial);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>('overview');
@@ -402,7 +402,7 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
     setError('');
     setTab('overview');
     if (initial) {
-      setView({ ...initial, readiness: initial.readiness ?? initial.analysis ?? {}, fileName: initial.fileName ?? locationState?.fileName, createdAt: initial.createdAt ?? locationState?.createdAt });
+      setView({ ...initial, readiness: initial.readiness ?? (initial as any).analysis ?? {}, fileName: initial.fileName ?? locationState?.fileName, createdAt: initial.createdAt ?? locationState?.createdAt });
       setLoading(false);
       return;
     }
