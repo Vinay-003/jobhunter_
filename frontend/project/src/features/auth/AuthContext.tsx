@@ -75,24 +75,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await ensureCsrfToken();
       const res = await api.post('/auth/login', { email, password });
-      const data = res.data as { user?: User; requiresOtp?: boolean; requiresVerification?: boolean; email?: string };
-      if (data.requiresOtp || data.requiresVerification) {
-        return {
-          requiresOtp: data.requiresOtp,
-          requiresVerification: data.requiresVerification,
-          email: data.email || email,
-        };
-      }
+      const data = res.data as { user?: User };
       if (data.user) setUser(data.user);
       else await refresh();
       return { user: data.user };
     } catch (err: any) {
-      if (err?.details?.requiresVerification) {
-        return {
-          requiresVerification: true,
-          email: err.details.email || email,
-        };
-      }
       const msg = getApiErrorMessage(err);
       setError(msg);
       throw new Error(msg);
