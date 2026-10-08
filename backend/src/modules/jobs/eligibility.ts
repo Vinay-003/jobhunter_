@@ -60,6 +60,13 @@ export function eligibleJob(job: NormalizedJob, candidateLevel: string | null | 
   }
   const level = detectJobSeniority(job.title, job.description);
   if (['intern', 'entry'].includes(normalizeSeniority(candidateLevel) ?? '') && (level === 'senior' || level === 'principal')) blockers.push('Explicit senior role');
+  const isExperienced = ['senior', 'principal', 'mid'].includes(normalizeSeniority(candidateLevel) ?? '') ||
+    (typeof candidate?.totalExperienceYears === 'number' && candidate.totalExperienceYears >= 2) ||
+    (typeof candidate?.employmentYears === 'number' && candidate.employmentYears >= 2) ||
+    (typeof candidate?.professionalYears === 'number' && candidate.professionalYears >= 2);
+  if (level === 'intern' && isExperienced && !prefs.seniority.includes('intern')) {
+    blockers.push('Internship role not applicable for experienced candidate');
+  }
   if (prefs.seniority.length && level && !prefs.seniority.map(s => normalizeSeniority(s) ?? s).includes(level)) blockers.push('Outside target seniority');
   if (prefs.keywords && !`${job.title} ${description}`.toLowerCase().includes(prefs.keywords.toLowerCase())) blockers.push('Keyword not found');
   const mode = /\b(remote|hybrid|onsite|on-site)\b/i.exec(job.workMode ?? job.location ?? '')?.[1].toLowerCase().replace('on-site','onsite') ?? null;

@@ -59,11 +59,13 @@ export function scoreJdRubric(profile: ResumeProfile, jd: ParsedJobDescription, 
   // Internship evidence can qualify for entry roles; title alone is not a
   // barrier for that transition. Explicit advanced scope is a separate check.
   const seniorGap = ['intern', 'entry'].includes(candidateLevel ?? '') && ['mid', 'senior', 'principal'].includes(jobLevel ?? '');
+  const overqualifiedIntern = jobLevel === 'intern' && (['mid', 'senior', 'principal'].includes(candidateLevel ?? '') || (typeof years === 'number' && years >= 2));
   const experienceGap = typeof minYears === 'number' && typeof years === 'number' && years < minYears;
   const missingQualification = (typeof minYears === 'number' && years === null) || (degreeRequested && educationStatus !== 'evidenced') || requiredCoverage === null || requiredCoverage < 1;
-  const eligibility = experienceGap || seniorGap ? 'ineligible' : missingQualification ? 'uncertain' : 'eligible';
+  const eligibility = experienceGap || seniorGap || overqualifiedIntern ? 'ineligible' : missingQualification ? 'uncertain' : 'eligible';
   const reasons = [experienceGap ? `Professional experience ${years} years below required ${minYears} years` : null,
     seniorGap ? `Junior career stage does not establish ${jd.seniority} engineering scope` : null,
+    overqualifiedIntern ? `Candidate career stage (${candidateLevel ?? `${years} yrs experience`}) exceeds internship role` : null,
     educationStatus === 'in_progress' ? 'Degree in progress; completion requirement needs confirmation' : null].filter(Boolean);
   const breakdown = { explicitMustHave, responsibilitySemantic, roleAlignment, domain, education };
   const weights = { explicitMustHave: 35, responsibilitySemantic: 30, roleAlignment: 15, domain: 10, education: 10 };

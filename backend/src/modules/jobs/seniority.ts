@@ -49,10 +49,33 @@ export function seniorityPenalty(candidate: string | null | undefined, job: stri
   if (!from || !to) return 0;
   const levels: CanonicalSeniority[] = ['intern', 'entry', 'mid', 'senior', 'principal'];
   const i = levels.indexOf(from), j = levels.indexOf(to);
-  if (j <= i) return 0;
-  const penalties: Record<CanonicalSeniority, number[]> = {
-    intern: [0, 0, 20, 40, 50], entry: [0, 0, 20, 35, 45],
-    mid: [0, 0, 0, 5, 20], senior: [0, 0, 0, 0, 5], principal: [0, 0, 0, 0, 0],
-  };
-  return penalties[from][j];
+  if (i === j) return 0;
+
+  if (j > i) {
+    // Underqualified (candidate lower than job)
+    const penalties: Record<CanonicalSeniority, number[]> = {
+      intern: [0, 0, 20, 40, 50],
+      entry:  [0, 0, 20, 35, 45],
+      mid:    [0, 0,  0,  5, 20],
+      senior: [0, 0,  0,  0,  5],
+      principal: [0, 0, 0, 0, 0],
+    };
+    return penalties[from][j];
+  }
+
+  // Overqualified (candidate higher than job, j < i)
+  // An internship is strictly for students/interns; experienced candidates face severe mismatch penalties.
+  if (to === 'intern') {
+    if (from === 'principal') return 50;
+    if (from === 'senior') return 40;
+    if (from === 'mid') return 30;
+    if (from === 'entry') return 10;
+  }
+
+  // Senior applying to entry-level has a moderate overqualification penalty
+  if (to === 'entry' && from === 'senior') {
+    return 15;
+  }
+
+  return 0;
 }
