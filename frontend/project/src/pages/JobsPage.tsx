@@ -414,6 +414,7 @@ export default function JobsPage() {
   const [includeUnknownDates, setIncludeUnknownDates] = useState(true);
   const [verifiedOpenOnly, setVerifiedOpenOnly] = useState(false);
   const [includeUnknownLocations, setIncludeUnknownLocations] = useState(true);
+  const [sortBy, setSortBy] = useState<'match' | 'newest'>('match');
   const discoverySequence = useRef(0);
   const manualRoles = useRef(false);
   const [discovering, setDiscovering] = useState(false);
