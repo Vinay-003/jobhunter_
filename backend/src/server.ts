@@ -13,7 +13,7 @@ import keepaliveRoutes from './routes/keepalive.js';
 import v1Router from './routes/v1/index.js';
 import fs from 'fs';
 import path from 'path';
-import { getDatabaseUrl } from './config/env.js';
+import { getDatabaseUrl, isAllowedOrigin } from './config/env.js';
 import { csrfProtection } from './middleware/csrf.js';
 import multer from 'multer';
 import db from './config/database.js';
@@ -39,10 +39,15 @@ const trustProxyHops = Number.isInteger(parsedProxyHops) && parsedProxyHops >= 0
   : defaultProxyHops;
 app.set('trust proxy', trustProxyHops);
 
-const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || process.env.FRONTEND_URL || '').split(',').map(s=>s.trim()).filter(Boolean);
 app.use(helmet());
 app.use(cors({
-  origin: allowedOrigins.length ? allowedOrigins : true,
+  origin: (origin, callback) => {
+    if (!origin || isAllowedOrigin(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Origin not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 app.use(cookieParser());
