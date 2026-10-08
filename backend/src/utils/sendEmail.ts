@@ -7,6 +7,7 @@ export interface SentEmailRecord {
   to: string;
   subject: string;
   text: string;
+  html?: string;
   sentAt: Date;
 }
 
@@ -17,7 +18,12 @@ export function clearEmailHistory(): void {
   sentEmailHistory.length = 0;
 }
 
-export async function sendEmail(email: string, subject: string, message: string): Promise<string> {
+export async function sendEmail(
+  email: string,
+  subject: string,
+  message: string,
+  html?: string
+): Promise<string> {
   const to = email.trim().toLowerCase();
   if (!EMAIL_REGEX.test(to) || !subject?.trim() || !message?.trim()) {
     throw new Error('Invalid email input');
@@ -27,7 +33,7 @@ export async function sendEmail(email: string, subject: string, message: string)
 
   // Test / mock mode
   if (provider === 'mock' || process.env.NODE_ENV === 'test') {
-    sentEmailHistory.push({ to, subject, text: message, sentAt: new Date() });
+    sentEmailHistory.push({ to, subject, text: message, html, sentAt: new Date() });
     return 'mock-email-id';
   }
 
@@ -45,13 +51,22 @@ export async function sendEmail(email: string, subject: string, message: string)
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
+      const payload: { to: string; subject: string; text: string; html?: string } = {
+        to,
+        subject,
+        text: message,
+      };
+      if (html) {
+        payload.html = html;
+      }
+
       const response = await fetch(relayUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${relayToken}`,
         },
-        body: JSON.stringify({ to, subject, text: message }),
+        body: JSON.stringify(payload),
         signal: controller.signal,
       });
 
@@ -72,7 +87,7 @@ export async function sendEmail(email: string, subject: string, message: string)
         throw new Error(data?.message || 'Email relay returned unsuccessful status');
       }
 
-      sentEmailHistory.push({ to, subject, text: message, sentAt: new Date() });
+      sentEmailHistory.push({ to, subject, text: message, html, sentAt: new Date() });
       return 'vercel-relay-accepted';
     } catch (err: any) {
       if (err.name === 'AbortError') {
@@ -104,8 +119,16 @@ export async function sendEmail(email: string, subject: string, message: string)
       socketTimeout: TIMEOUT_MS,
     });
 
-    const result = await transporter.sendMail({ from, to, subject, text: message });
-    sentEmailHistory.push({ to, subject, text: message, sentAt: new Date() });
+    const mailOptions = {
+      from,
+      to,
+      subject,
+      text: message,
+      ...(html ? { html } : {}),
+    };
+
+    const result = await transporter.sendMail(mailOptions);
+    sentEmailHistory.push({ to, subject, text: message, html, sentAt: new Date() });
     return result.messageId || 'smtp-delivered';
   }
 

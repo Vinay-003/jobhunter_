@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import pool from '../config/database.js';
 import { sendEmail } from './sendEmail.js';
+import { renderOtpEmailHtml } from './otpEmailTemplate.js';
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const OTP_RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds
@@ -26,9 +27,10 @@ export async function issueOtp(
     ? 'JobHunter sign-in verification code'
     : 'Your JobHunter verification code';
   const message = `Your JobHunter verification code is: ${code}\n\nThis code will expire in 5 minutes. If you did not request this, please ignore this email.`;
+  const html = renderOtpEmailHtml(code);
 
   // Send email FIRST. Only persist OTP if email sending was accepted.
-  await sendEmail(email, subject, message);
+  await sendEmail(email, subject, message, html);
 
   const client = await pool.connect();
   try {
