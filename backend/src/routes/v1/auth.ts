@@ -150,8 +150,8 @@ router.post('/login', validate({ body: loginSchema }), async (req, res) => {
       });
     }
 
-    // Login OTP verification
-    const requireLoginOtp = process.env.REQUIRE_LOGIN_OTP !== 'false';
+    // Login OTP verification (opt-in only via REQUIRE_LOGIN_OTP=true; signup verifies email)
+    const requireLoginOtp = process.env.REQUIRE_LOGIN_OTP === 'true';
     if (requireLoginOtp) {
       try {
         await issueOtp(normalizedEmail, 'login');

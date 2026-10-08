@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
-import { getCorsOrigins } from '../config/env.js';
+import { getCorsOrigins, isAllowedOrigin } from '../config/env.js';
 
 const COOKIE = 'jobhunter_csrf';
 const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -20,11 +20,8 @@ export function issueCsrfToken(req: Request, res: Response) {
 
 export function csrfProtection(req: Request, res: Response, next: NextFunction) {
   const origin = req.headers.origin;
-  if (origin) {
-    const allowed = getCorsOrigins();
-    if (!allowed?.length || !allowed.includes(origin)) {
-      return res.status(403).json({ success: false, message: 'Origin not allowed' });
-    }
+  if (origin && !isAllowedOrigin(origin)) {
+    return res.status(403).json({ success: false, message: 'Origin not allowed' });
   }
   if (safeMethods.has(req.method.toUpperCase())) return next();
 

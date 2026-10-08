@@ -88,3 +88,36 @@ export function getCorsOrigins(): string[] | undefined {
   if (!raw) return undefined;
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 }
+
+export function isAllowedOrigin(origin?: string | null): boolean {
+  if (!origin) return true;
+  const configured = getCorsOrigins();
+  if (configured && configured.length > 0) {
+    if (configured.includes('*')) return true;
+    if (configured.includes(origin)) return true;
+    for (const pattern of configured) {
+      if (pattern.startsWith('*.')) {
+        const domain = pattern.slice(2);
+        try {
+          const url = new URL(origin);
+          if (url.hostname === domain || url.hostname.endsWith('.' + domain)) return true;
+        } catch {}
+      }
+    }
+  }
+
+  try {
+    const url = new URL(origin);
+    // Allow localhost on any port for development/testing
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+    // Allow any Vercel deployment (production, preview, and branch URLs)
+    if (url.hostname.endsWith('.vercel.app')) return true;
+    // Allow custom domain and any subdomains
+    if (url.hostname === 'vinaybuilds.me' || url.hostname.endsWith('.vinaybuilds.me')) return true;
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
