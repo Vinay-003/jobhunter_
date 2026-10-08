@@ -4,7 +4,7 @@ import { buildDocumentBlocks } from '../parsing/documentBlocks.js';
 import { extractSkills } from '../parsing/skillExtractor.js';
 
 /**
- * Resume Health / ATS Readiness Scorer v3
+ * Resume Health / ATS Readiness Scorer v4.2
  *
  * Important product rule:
  * - This is a NO-JD score. It never uses embeddings, target-role similarity, job keywords,
@@ -24,10 +24,26 @@ import { extractSkills } from '../parsing/skillExtractor.js';
  *   5 Consistency & hygiene
  */
 
-export const VERSION = '4.1.0';
+export const VERSION = '4.2.0';
 
 export type RuleStatus = 'pass' | 'warn' | 'fail';
 export type Priority = 'high' | 'medium' | 'low';
+
+export type ResumeFinding = {
+  id: string;
+  type: 'repeated_verb' | 'weak_phrase' | 'unquantified' | 'quantified_strong' | 'typo' | 'formatting' | 'missing_section' | 'missing_contact';
+  category: 'writing' | 'impact' | 'completeness' | 'parseability' | 'hygiene';
+  severity: 'error' | 'warning' | 'info' | 'success';
+  section?: string;
+  bulletIndex?: number;
+  bulletText?: string;
+  targetWord?: string;
+  occurrenceCount?: number;
+  message: string;
+  recommendation: string;
+  suggestedAlternatives?: string[];
+  suggestedRewrite?: string;
+};
 
 export type RuleResult = {
   ruleId: string;
@@ -95,6 +111,7 @@ export type ReadinessResult = {
   metrics: ResumeHealthMetrics;
   issueCount: number;
   highPriorityIssueCount: number;
+  findings: ResumeFinding[];
   version: string;
   methodology: {
     mode: 'rule_based_no_jd';
@@ -115,14 +132,38 @@ type BulletCandidate = {
   leadVerb: string | null;
 };
 
-const ACTION_VERBS = new Set([
+export const ACTION_VERBS = new Set([
   'achieved', 'accelerated', 'automated', 'built', 'created', 'cut', 'decreased', 'delivered', 'designed',
   'developed', 'drove', 'enabled', 'engineered', 'established', 'executed', 'expanded', 'generated', 'grew',
   'implemented', 'improved', 'increased', 'launched', 'led', 'managed', 'migrated', 'optimized', 'owned',
   'reduced', 'refactored', 'resolved', 'saved', 'scaled', 'shipped', 'simplified', 'spearheaded', 'streamlined',
   'tested', 'trained', 'transformed', 'upgraded', 'wrote', 'analyzed', 'coordinated', 'integrated', 'deployed',
   'maintained', 'maintain', 'mentored', 'negotiated', 'planned', 'produced', 'restructured', 'secured', 'standardized',
+  'partnered', 'fine-tuned', 'architected', 'formulated', 'authored', 'constructed', 'pioneered', 'collaborated',
+  'orchestrated', 'directed', 'supervised', 'administered', 'conducted', 'evaluated', 'benchmarked', 'modeled',
+  'calibrated', 'quantified', 'instituted', 'modernized', 'published', 'presented', 'advised', 'championed',
+  'reworked', 'migrated', 'added', 'introduced', 'served', 'computed', 'productionized', 'defined',
 ]);
+
+export const VERB_ALTERNATIVES: Record<string, string[]> = {
+  built: ['Architected', 'Engineered', 'Formulated', 'Developed', 'Constructed', 'Implemented', 'Deployed'],
+  developed: ['Engineered', 'Authored', 'Spearheaded', 'Formulated', 'Programmed', 'Constructed', 'Crafted'],
+  created: ['Designed', 'Pioneered', 'Authored', 'Generated', 'Established', 'Launched', 'Initiated'],
+  led: ['Spearheaded', 'Directed', 'Orchestrated', 'Guided', 'Steered', 'Chaired', 'Mobilized'],
+  managed: ['Supervised', 'Coordinated', 'Administered', 'Orchestrated', 'Facilitated', 'Oversaw'],
+  designed: ['Architected', 'Drafted', 'Conceptualized', 'Modeled', 'Prototyped', 'Devised'],
+  implemented: ['Deployed', 'Executed', 'Integrated', 'Rolled out', 'Instituted', 'Installed'],
+  analyzed: ['Evaluated', 'Investigated', 'Audited', 'Quantified', 'Benchmarked', 'Examined'],
+  automated: ['Streamlined', 'Programmed', 'Modernized', 'Systematized', 'Engineered'],
+  improved: ['Optimized', 'Enhanced', 'Streamlined', 'Elevated', 'Upgraded', 'Refined'],
+  reduced: ['Decreased', 'Minimized', 'Curtailed', 'Trimmed', 'Lowered', 'Mitigated'],
+  increased: ['Amplified', 'Elevated', 'Expanded', 'Boosted', 'Maximized', 'Accelerated'],
+  partnered: ['Collaborated', 'Liaised', 'Aligned', 'Coordinated', 'Teamed'],
+  executed: ['Delivered', 'Completed', 'Carried out', 'Accomplished', 'Realized'],
+  maintained: ['Sustained', 'Preserved', 'Upheld', 'Managed', 'Supported', 'Stabilized'],
+  reworked: ['Refactored', 'Optimized', 'Modernized', 'Overhauled', 'Streamlined'],
+  shipped: ['Delivered', 'Released', 'Deployed', 'Launched', 'Published'],
+};
 
 const OUTCOME_TERMS = [
   'increased', 'improved', 'reduced', 'decreased', 'grew', 'saved', 'cut', 'boosted', 'accelerated', 'raised',
@@ -130,17 +171,46 @@ const OUTCOME_TERMS = [
   'throughput', 'latency', 'conversion', 'revenue', 'cost', 'time saved', 'accuracy', 'adoption', 'retention',
 ];
 
-const WEAK_PHRASES = [
+export const WEAK_PHRASES = [
   'responsible for', 'worked on', 'helped with', 'helped to', 'participated in', 'assisted with', 'duties included',
   'tasked with', 'involved in', 'hard working', 'hardworking', 'team player', 'go getter', 'self motivated',
   'detail oriented', 'results driven', 'results-oriented', 'excellent communication skills', 'good communication skills',
   'passionate about', 'dynamic professional', 'highly motivated', 'proven track record',
 ];
 
-const COMMON_TYPOS = [
-  'teh', 'recieve', 'occured', 'seperate', 'definately', 'experiance', 'responcible', 'managment', 'acheivement',
-  'profesional', 'adress', 'succesful',
-];
+export const WEAK_PHRASE_SUGGESTIONS: Record<string, { replacement: string; alternatives: string[] }> = {
+  'responsible for': { replacement: 'Directed / Owned', alternatives: ['Directed', 'Spearheaded', 'Executed', 'Managed', 'Delivered'] },
+  'worked on': { replacement: 'Engineered / Developed', alternatives: ['Engineered', 'Architected', 'Constructed', 'Contributed to'] },
+  'helped with': { replacement: 'Facilitated / Accelerated', alternatives: ['Facilitated', 'Collaborated on', 'Accelerated', 'Bolstered'] },
+  'helped to': { replacement: 'Enabled / Accelerated', alternatives: ['Enabled', 'Streamlined', 'Assisted in', 'Coordinated'] },
+  'participated in': { replacement: 'Collaborated on / Contributed to', alternatives: ['Collaborated on', 'Co-developed', 'Contributed to'] },
+  'assisted with': { replacement: 'Supported / Coordinated', alternatives: ['Supported', 'Coordinated', 'Facilitated'] },
+  'duties included': { replacement: 'Executed / Delivered', alternatives: ['Executed', 'Delivered', 'Spearheaded'] },
+  'tasked with': { replacement: 'Commissioned to / Owned', alternatives: ['Owned', 'Executed', 'Spearheaded'] },
+  'involved in': { replacement: 'Contributed to / Partnered on', alternatives: ['Contributed to', 'Co-engineered', 'Partnered on'] },
+  'team player': { replacement: 'Cross-functional partner', alternatives: ['Cross-functional collaborator', 'Collaborative partner'] },
+  'hard working': { replacement: '(Demonstrate through metrics)', alternatives: ['Consistently delivered', 'Exceeded targets'] },
+  'detail oriented': { replacement: '(Demonstrate through QA metrics)', alternatives: ['Maintained 99.9% accuracy', 'Standardized QA guardrails'] },
+  'results driven': { replacement: '(Demonstrate with business metrics)', alternatives: ['Drove X% revenue growth', 'Delivered measurable KPI gains'] },
+};
+
+export const COMMON_TYPOS: Record<string, string> = {
+  teh: 'the',
+  recieve: 'receive',
+  occured: 'occurred',
+  seperate: 'separate',
+  definately: 'definitely',
+  experiance: 'experience',
+  responcible: 'responsible',
+  managment: 'management',
+  acheivement: 'achievement',
+  profesional: 'professional',
+  adress: 'address',
+  succesful: 'successful',
+  enviroment: 'environment',
+  maintence: 'maintenance',
+  referance: 'reference',
+};
 
 const REQUIRED_HEADINGS = ['experience', 'education', 'skills'];
 const STANDARD_HEADINGS = new Set([
@@ -209,8 +279,9 @@ function hasMetric(text: string): boolean {
     /[$€£₹]\s*\d[\d,.]*\b/,
     /\b\d+(?:\.\d+)?\s*[xX]\b/,
     /\b\d+(?:\.\d+)?\s*(?:k|m|b|million|billion|thousand)\b/i,
-    /\b\d[\d,]*(?:\.\d+)?\+?\s*(?:(?:monthly|daily|weekly|annual)\s+)?(?:users?|customers?|clients?|requests?|records?|transactions?|files?|formats?|languages?|providers?|categories?|batches?|items?|services?|endpoints?|teams?|members?|developers?|hours?|days?|weeks?|months?|minutes?|seconds?)\b/i,
+    /\b\d[\d,]*(?:\.\d+)?\+?\s*(?:(?:monthly|daily|weekly|annual)\s+)?(?:users?|customers?|clients?|requests?|records?|transactions?|files?|formats?|languages?|providers?|categories?|batches?|items?|services?|endpoints?|teams?|members?|developers?|hours?|days?|weeks?|months?|minutes?|seconds?|datasets?|events?|models?|tickets?|experiments?)\b/i,
     /\b(?:from|to|by|under|over|within)\s+\d+(?:\.\d+)?\b/i,
+    /\b\d+\s*(?:ms|seconds|minutes|hours)\b/i,
   ];
   return patterns.some((r) => r.test(text));
 }
@@ -231,14 +302,58 @@ function outcomeLed(text: string): boolean {
 }
 
 function extractBulletCandidates(parsedDoc: ParsedDocument): BulletCandidate[] {
-  const blocks = buildDocumentBlocks(parsedDoc).bullets;
-  // Some PDF extractors flatten page text into one line while retaining line breaks in section bodies.
-  // Use those section bodies only when no visual bullets survived extraction.
-  const evidence = blocks.some(b => b.section === 'experience' || b.section === 'projects')
-    ? blocks
-    : Object.entries(parsedDoc.sections).filter(([name]) => /^(?:experience|projects?|work experience|professional experience)$/i.test(name))
+  let evidence = buildDocumentBlocks(parsedDoc).bullets;
+  if (!evidence.some(b => b.section === 'experience' || b.section === 'projects')) {
+    // Try visual bullet extraction from section text
+    const visualLines = Object.entries(parsedDoc.sections).filter(([name]) => /^(?:experience|projects?|work experience|professional experience)$/i.test(name))
       .flatMap(([name, body]) => body.split('\n').filter(line => /^\s*[•◦▪▫‣⁃*\-–—]\s+\S/.test(line))
         .map(line => ({ text: line, section: /project/i.test(name) ? 'projects' : 'experience' })));
+
+    if (visualLines.length) {
+      evidence = visualLines as any;
+    } else {
+      // Robust fallback for resumes without explicit bullet glyphs (e.g. line-separated
+      // achievements starting with verbs or capital letters under experience and projects)
+      const fallback: Array<{ text: string; section: string }> = [];
+      for (const [name, body] of Object.entries(parsedDoc.sections)) {
+        if (!/^(?:experience|projects?|work experience|professional experience)$/i.test(name)) continue;
+        const section = /project/i.test(name) ? 'projects' : 'experience';
+        const rawLines = body.split('\n').map(l => l.trim()).filter(Boolean);
+        let currentBullet = '';
+
+        for (const line of rawLines) {
+          if (/^(?:professional |work )?experience|selected projects|projects/i.test(line)) continue;
+          // Check if this is a role header line with dates or title pipes
+          const isRoleHeader = /\|.*(?:19|20)\d{2}|(?:19|20)\d{2}\s*[-–—]\s*(?:present|current|(?:19|20)\d{2})/i.test(line);
+          if (isRoleHeader) {
+            if (currentBullet.trim().length > 15) fallback.push({ text: currentBullet.trim(), section });
+            currentBullet = '';
+            continue;
+          }
+          // Project colon prefix
+          const colonMatch = /^([A-Z0-9][A-Za-z0-9\s/&–—-]{2,50}):\s*(.+)$/.exec(line);
+          if (colonMatch) {
+            if (currentBullet.trim().length > 15) fallback.push({ text: currentBullet.trim(), section });
+            currentBullet = colonMatch[2].trim();
+            continue;
+          }
+
+          const startsWithCapital = /^[A-Z]/.test(line);
+          const prevEndsWithTerminator = /[.!?:]$/.test(currentBullet.trim());
+
+          if (currentBullet && (!prevEndsWithTerminator || !startsWithCapital)) {
+            currentBullet += ' ' + line;
+          } else {
+            if (currentBullet.trim().length > 15) fallback.push({ text: currentBullet.trim(), section });
+            currentBullet = line;
+          }
+        }
+        if (currentBullet.trim().length > 15) fallback.push({ text: currentBullet.trim(), section });
+      }
+      evidence = fallback as any;
+    }
+  }
+
   return evidence
     .filter(b => b.section === 'experience' || b.section === 'projects')
     .map(b => {
@@ -260,7 +375,6 @@ function countDateTokens(text: string): number {
   return (text.match(re) || []).length;
 }
 
-
 function hasRecentExperience(profile: ResumeProfile): boolean {
   const currentYear = new Date().getFullYear();
   const cutoff = currentYear - 2;
@@ -272,21 +386,27 @@ function hasRecentExperience(profile: ResumeProfile): boolean {
   });
 }
 
-function countRepeatedLeadVerbs(bullets: BulletCandidate[]): number {
+function getRepeatedLeadVerbsMap(bullets: BulletCandidate[]): Map<string, number> {
   const counts = new Map<string, number>();
   for (const b of bullets) {
     if (!b.leadVerb) continue;
     counts.set(b.leadVerb, (counts.get(b.leadVerb) || 0) + 1);
   }
+  return counts;
+}
+
+function countRepeatedLeadVerbs(bullets: BulletCandidate[]): number {
+  const counts = getRepeatedLeadVerbsMap(bullets);
   let repeats = 0;
   for (const count of counts.values()) if (count > 3) repeats += count - 3;
   return repeats;
 }
 
-function skillEvidenceCount(parsedDoc: ParsedDocument, profile: ResumeProfile): number {
-  const evidence = buildDocumentBlocks(parsedDoc).bullets
-    .filter(b => b.section === 'experience' || b.section === 'projects').map(b => b.text).join(' ');
-  const present = new Set(extractSkills(evidence).map(skill => skill.toLowerCase()));
+function skillEvidenceCount(parsedDoc: ParsedDocument, profile: ResumeProfile, bullets: BulletCandidate[]): number {
+  const bulletText = bullets.map(b => b.text).join(' ');
+  const rawSecText = [parsedDoc.sections.experience || '', parsedDoc.sections.projects || ''].join(' ');
+  const combinedEvidence = (bulletText + ' ' + rawSecText).trim();
+  const present = new Set(extractSkills(combinedEvidence).map(skill => skill.toLowerCase()));
   return profile.skillsNormalized.filter(skill => present.has(skill.toLowerCase())).length;
 }
 
@@ -333,9 +453,123 @@ export function scoreReadiness(
   const outcomeBullets = bullets.filter((b) => b.outcomeLed);
   const weakPhraseHits = bullets.reduce((sum, b) => sum + b.weakPhraseHits, 0);
   const repeatedLeadVerbCount = countRepeatedLeadVerbs(bullets);
+  const repeatedMap = getRepeatedLeadVerbsMap(bullets);
   const dateTokens = countDateTokens(text);
   const standardSectionCount = new Set(Object.keys(parsedDoc.sections).filter(h => STANDARD_HEADINGS.has(h.toLowerCase())).map(h => h === 'technical skills' ? 'skills' : h === 'project' ? 'projects' : h === 'work experience' || h === 'employment' ? 'experience' : h)).size;
-  const skillsEvidence = skillEvidenceCount(parsedDoc, profile);
+  const skillsEvidence = skillEvidenceCount(parsedDoc, profile, bullets);
+
+  const findings: ResumeFinding[] = [];
+
+  // 1. Collect repeated lead verb findings
+  bullets.forEach((b, idx) => {
+    if (b.leadVerb && (repeatedMap.get(b.leadVerb) || 0) >= 2) {
+      const count = repeatedMap.get(b.leadVerb)!;
+      findings.push({
+        id: `repeat_${b.leadVerb}_${idx}`,
+        type: 'repeated_verb',
+        category: 'writing',
+        severity: count > 2 ? 'warning' : 'info',
+        section: b.source,
+        bulletIndex: idx,
+        bulletText: b.text,
+        targetWord: b.leadVerb,
+        occurrenceCount: count,
+        message: `Lead verb "${b.leadVerb}" is repeated ${count} times in the resume.`,
+        recommendation: `Vary this occurrence with a more distinctive action verb to showcase broader competency.`,
+        suggestedAlternatives: VERB_ALTERNATIVES[b.leadVerb] || ['Architected', 'Engineered', 'Formulated'],
+        suggestedRewrite: b.text.replace(new RegExp(`^${b.leadVerb}\\b`, 'i'), (VERB_ALTERNATIVES[b.leadVerb]?.[idx % (VERB_ALTERNATIVES[b.leadVerb]?.length || 1)] || 'Engineered')),
+      });
+    }
+  });
+
+  // 2. Collect weak phrase findings
+  bullets.forEach((b, idx) => {
+    for (const [phrase, info] of Object.entries(WEAK_PHRASE_SUGGESTIONS)) {
+      if (b.text.toLowerCase().includes(phrase)) {
+        findings.push({
+          id: `weak_${phrase.replace(/\s+/g, '_')}_${idx}`,
+          type: 'weak_phrase',
+          category: 'writing',
+          severity: 'warning',
+          section: b.source,
+          bulletIndex: idx,
+          bulletText: b.text,
+          targetWord: phrase,
+          message: `Weak phrase "${phrase}" reduces ownership and impact.`,
+          recommendation: `Replace "${phrase}" with an active impact verb (${info.replacement}) and state the outcome.`,
+          suggestedAlternatives: info.alternatives,
+        });
+      }
+    }
+  });
+
+  // 3. Collect quantification findings
+  bullets.forEach((b, idx) => {
+    if (!b.quantified) {
+      findings.push({
+        id: `unquantified_${idx}`,
+        type: 'unquantified',
+        category: 'impact',
+        severity: 'info',
+        section: b.source,
+        bulletIndex: idx,
+        bulletText: b.text,
+        message: `Accomplishment lacks quantified metrics, volume, or outcome scale.`,
+        recommendation: `Add credible numbers (e.g. % improvement, latency reduction, user volume, revenue or hours saved).`,
+        suggestedAlternatives: ['Add percentage improvement (e.g. +25%)', 'Add scale/user numbers (e.g. 10k users)', 'Add time saved (e.g. 5 hrs/week)'],
+      });
+    } else {
+      findings.push({
+        id: `quantified_${idx}`,
+        type: 'quantified_strong',
+        category: 'impact',
+        severity: 'success',
+        section: b.source,
+        bulletIndex: idx,
+        bulletText: b.text,
+        message: `Strong accomplishment: combines active verb with concrete metrics.`,
+        recommendation: `Maintain this evidence-backed pattern.`,
+      });
+    }
+  });
+
+  // 4. Collect typo findings
+  for (const [typo, correction] of Object.entries(COMMON_TYPOS)) {
+    if (new RegExp(`\\b${typo}\\b`, 'i').test(lower)) {
+      findings.push({
+        id: `typo_${typo}`,
+        type: 'typo',
+        category: 'hygiene',
+        severity: 'error',
+        targetWord: typo,
+        message: `Spelling mistake detected: "${typo}".`,
+        recommendation: `Correct spelling to "${correction}".`,
+        suggestedAlternatives: [correction],
+      });
+    }
+  }
+
+  // 5. Contact signals findings
+  if (!profile.contactSignals.hasEmail) {
+    findings.push({
+      id: 'missing_email',
+      type: 'missing_contact',
+      category: 'completeness',
+      severity: 'error',
+      message: 'Email address not detected in resume header.',
+      recommendation: 'Place a professional email address near your name in the contact header.',
+    });
+  }
+  if (!profile.contactSignals.hasPhone) {
+    findings.push({
+      id: 'missing_phone',
+      type: 'missing_contact',
+      category: 'completeness',
+      severity: 'warning',
+      message: 'Phone number not detected in resume header.',
+      recommendation: 'Include a reachable phone number in the contact header.',
+    });
+  }
 
   const metrics: ResumeHealthMetrics = {
     pageCount: parsedDoc.layoutSignals.pageCount,
@@ -455,21 +689,22 @@ export function scoreReadiness(
   const impactRules: RuleResult[] = [];
   {
     const ratio = bullets.length ? quantified.length / bullets.length : 0;
-    // Threshold: was 0.5->10, now 0.6->10, and 0.2->5 becomes 0.15->3
     const pts = bullets.length === 0 ? 0 : ratio >= 0.6 ? 10 : ratio >= 0.4 ? 7 : ratio >= 0.25 ? 4 : ratio >= 0.12 ? 2 : quantified.length >= 1 ? 1 : 0;
     impactRules.push(rule('impact_metrics', 'impact', 'Quantified achievements', pts, 10,
       bullets.length ? `${quantified.length} of ${bullets.length} evidence bullets contain a measurable result or scope signal.` : 'No reliable experience/project bullets were detected.', {
-        evidence: `quantifiedRatio=${metrics.quantifiedBulletRatio}%`,
-        recommendation: 'Add credible scale, speed, quality, revenue, cost, user, volume, or time metrics to the bullets where numbers genuinely exist.',
+        evidence: `quantifiedRatio=${metrics.quantifiedBulletRatio}% (${quantified.length}/${bullets.length} bullets)`,
+        recommendation: quantified.length < bullets.length
+          ? `Add concrete metrics, scale, %, user volume, or time saved to the ${bullets.length - quantified.length} bullet${bullets.length - quantified.length === 1 ? '' : 's'} that currently lack numbers.`
+          : 'Add credible scale, speed, quality, revenue, cost, user, volume, or time metrics to the bullets where numbers genuinely exist.',
         priority: pts < 4 ? 'high' : 'medium',
       }));
   }
   {
     const ratio = bullets.length ? outcomeBullets.length / bullets.length : 0;
-    // Threshold: 0.5->6 becomes 0.6->6, and 0.15->3 becomes 0.2->2
     const pts = bullets.length === 0 ? 0 : ratio >= 0.6 ? 6 : ratio >= 0.4 ? 4 : ratio >= 0.25 ? 2 : outcomeBullets.length >= 1 ? 1 : 0;
     impactRules.push(rule('impact_outcomes', 'impact', 'Outcome-oriented bullets', pts, 6,
       bullets.length ? `${outcomeBullets.length} bullet${outcomeBullets.length === 1 ? '' : 's'} communicate an outcome or improvement.` : 'No outcome evidence was detected.', {
+        evidence: `outcomeRatio=${bullets.length ? Math.round((outcomeBullets.length / bullets.length) * 100) : 0}% (${outcomeBullets.length}/${bullets.length} bullets)`,
         recommendation: 'Rewrite task-only bullets as action + context + outcome. Explain what changed because of your work.',
         priority: pts < 2 ? 'high' : 'medium',
       }));
@@ -483,6 +718,7 @@ export function scoreReadiness(
     else if (evidenceBullets.length >= 1) pts = 0.5;
     impactRules.push(rule('impact_evidence_volume', 'impact', 'Evidence density', pts, 4,
       `${evidenceBullets.length} substantive experience/project bullet${evidenceBullets.length === 1 ? '' : 's'} were detected.`, {
+        evidence: `bullets=${evidenceBullets.length}`,
         recommendation: 'Give your strongest roles/projects multiple concise bullets with concrete scope, action, and result.',
         priority: evidenceBullets.length < 4 ? 'high' : 'medium',
       }));
@@ -553,7 +789,6 @@ export function scoreReadiness(
   {
     const n = extractSkills(parsedDoc.sections.skills ?? parsedDoc.sections['technical skills'] ?? '').length;
     let pts = 0;
-    // Threshold: 12-20 ideal, not 8-24; 23 is now 2 not 3 (ResumeWorded would flag 23 as borderline high)
     if (n >= 12 && n <= 20) pts = 3;
     else if (n >= 8 && n < 12) pts = 2.5;
     else if (n > 20 && n <= 28) pts = 1.5;
@@ -572,7 +807,6 @@ export function scoreReadiness(
   {
     const n = profile.skillsNormalized.length;
     const ratio = n ? skillsEvidence / n : 0;
-    // Threshold: 0.5->4 becomes 0.6->4
     const pts = n === 0 ? 0 : ratio >= 0.6 ? 4 : ratio >= 0.4 ? 2.5 : ratio >= 0.2 ? 1 : skillsEvidence >= 1 ? 0.5 : 0;
     skillRules.push(rule('skills_evidence', 'skills', 'Skills backed by evidence', pts, 4,
       `${skillsEvidence} detected skill${skillsEvidence === 1 ? '' : 's'} also appear in experience/project evidence.`, {
@@ -587,28 +821,36 @@ export function scoreReadiness(
   const writingRules: RuleResult[] = [];
   {
     const ratio = bullets.length ? actionLed.length / bullets.length : 0;
-    // Threshold: 0.75->4 becomes 0.8->4
     const pts = bullets.length === 0 ? 0 : ratio >= 0.8 ? 4 : ratio >= 0.6 ? 2.5 : ratio >= 0.4 ? 1.5 : actionLed.length >= 1 ? 0.5 : 0;
     writingRules.push(rule('writing_action_verbs', 'writing', 'Action-led bullets', pts, 4,
       bullets.length ? `${actionLed.length} of ${bullets.length} bullets begin with a strong action verb.` : 'No reliable bullets were detected.', {
-        evidence: `actionLedRatio=${metrics.actionLedBulletRatio}%`,
+        evidence: `actionLedRatio=${metrics.actionLedBulletRatio}% (${actionLed.length}/${bullets.length} bullets)`,
         recommendation: 'Start accomplishment bullets with specific verbs such as Built, Reduced, Automated, Led, Improved, or Shipped.',
         priority: pts < 1.5 ? 'high' : 'medium',
       }));
   }
   {
     const pts = weakPhraseHits === 0 ? 3 : weakPhraseHits === 1 ? 2 : weakPhraseHits <= 3 ? 1 : 0;
+    const weakList = Object.keys(WEAK_PHRASE_SUGGESTIONS).filter(phrase => lower.includes(phrase));
     writingRules.push(rule('writing_weak_phrases', 'writing', 'Specific language', pts, 3,
-      weakPhraseHits === 0 ? 'No major weak responsibility phrases were detected.' : `${weakPhraseHits} weak or generic phrase signal${weakPhraseHits === 1 ? '' : 's'} were detected.`, {
-        recommendation: 'Replace phrases like “responsible for” or “worked on” with the exact action, object, and result.',
+      weakPhraseHits === 0 ? 'No major weak responsibility phrases were detected.' : `${weakPhraseHits} weak phrase signal${weakPhraseHits === 1 ? '' : 's'} detected (${weakList.map(w => `"${w}"`).join(', ')}).`, {
+        evidence: weakList.length ? `weakPhrases=${weakList.join(', ')}` : `weakHits=${weakPhraseHits}`,
+        recommendation: weakList.length
+          ? `Replace "${weakList[0]}" with a direct ownership verb (${WEAK_PHRASE_SUGGESTIONS[weakList[0]]?.replacement || 'e.g. Led, Engineered'}).`
+          : 'Replace phrases like “responsible for” or “worked on” with the exact action, object, and result.',
         priority: weakPhraseHits >= 2 ? 'high' : 'medium',
       }));
   }
   {
     const pts = repeatedLeadVerbCount === 0 ? 3 : repeatedLeadVerbCount === 1 ? 2 : repeatedLeadVerbCount <= 3 ? 1 : 0;
+    const repeatedEntries = Array.from(repeatedMap.entries()).filter(([, c]) => c > 2);
+    const repeatedSummary = repeatedEntries.map(([v, c]) => `"${v}" (${c}x)`).join(', ');
     writingRules.push(rule('writing_repetition', 'writing', 'Verb variety', pts, 3,
-      repeatedLeadVerbCount === 0 ? 'Lead verbs are reasonably varied.' : `${repeatedLeadVerbCount} repetitive lead-verb use${repeatedLeadVerbCount === 1 ? '' : 's'} beyond the recommended repetition threshold were detected.`, {
-        recommendation: 'Vary repeated lead verbs when different verbs more precisely describe the work. Do not vary words just for novelty.',
+      repeatedLeadVerbCount === 0 ? 'Lead verbs are reasonably varied.' : `${repeatedLeadVerbCount} repetitive lead-verb use${repeatedLeadVerbCount === 1 ? '' : 's'} beyond recommended threshold detected (${repeatedSummary || 'repeated verbs'}).`, {
+        evidence: repeatedEntries.length ? repeatedEntries.map(([v, c]) => `${v}=${c}`).join('; ') : `repeatedVerbs=${repeatedLeadVerbCount}`,
+        recommendation: repeatedEntries.length
+          ? `Vary repeated verbs: for example for "${repeatedEntries[0][0]}", try ${VERB_ALTERNATIVES[repeatedEntries[0][0]]?.slice(0, 3).join(', ') || 'other action verbs'}.`
+          : 'Vary repeated lead verbs when different verbs more precisely describe the work. Do not vary words just for novelty.',
         priority: repeatedLeadVerbCount >= 2 ? 'medium' : 'low',
       }));
   }
@@ -644,7 +886,7 @@ export function scoreReadiness(
   // 8) Consistency & hygiene — 5
   const hygieneRules: RuleResult[] = [];
   {
-    const typoHits = COMMON_TYPOS.filter((t) => new RegExp(`\\b${t}\\b`, 'i').test(lower)).length;
+    const typoHits = Object.keys(COMMON_TYPOS).filter((t) => new RegExp(`\\b${t}\\b`, 'i').test(lower)).length;
     const doubleSpaces = (text.match(/ {2,}/g) || []).length;
     let pts = 0;
     if (typoHits === 0 && doubleSpaces <= 2) pts = 3;
@@ -709,6 +951,7 @@ export function scoreReadiness(
     metrics,
     issueCount: rules.filter((r) => r.status !== 'pass').length,
     highPriorityIssueCount: priorityActions.filter((a) => a.priority === 'high').length,
+    findings,
     version: VERSION,
     methodology: {
       mode: 'rule_based_no_jd',

@@ -386,6 +386,10 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [selectedResume, setSelectedResume] = useState('');
+  const selectedResumeName = useMemo(() => {
+    const r = resumes.find(item => item.id === selectedResume);
+    return r?.fileName || r?.file_name || '';
+  }, [resumes, selectedResume]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -565,10 +569,24 @@ export default function JobsPage() {
   }, [jobs, prefs.minScore, searchText, listLocation, sortBy]);
   const selected = visibleJobs[Math.min(selectedIndex, Math.max(0, visibleJobs.length - 1))];
   const topMatches = visibleJobs.filter((job) => scoreOf(job) >= 75).length;
-  const selectedResumeName = resumes.find((resume) => resume.id === selectedResume)?.fileName ?? resumes.find((resume) => resume.id === selectedResume)?.file_name;
+  const [reportCopied, setReportCopied] = useState(false);
   const copyMatches = async () => {
-    try { await navigator.clipboard.writeText(buildMatchReport({ jobs: visibleJobs, resumeFileName:lastRunDiagnostics.resumeFileName || selectedResumeName, runId, run: lastRunDiagnostics, roleDiscovery:lastRunDiagnostics.roleDiscovery, scope: 'loaded', total, filteredCount: visibleJobs.length })); }
-    catch { setError('Could not copy the report. Allow clipboard access and try again.'); }
+    try {
+      await navigator.clipboard.writeText(buildMatchReport({
+        jobs: visibleJobs,
+        resumeFileName: lastRunDiagnostics.resumeFileName || selectedResumeName,
+        runId,
+        run: lastRunDiagnostics,
+        roleDiscovery: lastRunDiagnostics.roleDiscovery,
+        scope: 'loaded',
+        total,
+        filteredCount: visibleJobs.length,
+      }));
+      setReportCopied(true);
+      setTimeout(() => setReportCopied(false), 2500);
+    } catch {
+      setError('Could not copy the report. Allow clipboard access and try again.');
+    }
   };
   const recheckAvailability=async()=>{
     if(!runId||!selected)return;
@@ -807,7 +825,27 @@ export default function JobsPage() {
       ) : (
          <section className={`jobs-layout ${mobileDetail ? 'jobs-layout--detail' : ''}`}>
            <div className="job-list" aria-label="Ranked job matches">
-              <div className="jobs-list-heading"><p>Ranked opportunities</p><button onClick={copyMatches} title="Copy loaded match report as Markdown"><Copy size={14} /> Copy report</button></div>
+              <div className="jobs-list-heading">
+                <p>Ranked opportunities</p>
+                <button
+                  type="button"
+                  onClick={copyMatches}
+                  className={`jobs-copy-report-btn ${reportCopied ? 'is-copied' : ''}`}
+                  title="Copy loaded match report as Markdown"
+                >
+                  {reportCopied ? (
+                    <>
+                      <Check size={14} className="text-emerald-500" />
+                      <span>Copied report!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={14} />
+                      <span>Copy report</span>
+                    </>
+                  )}
+                </button>
+              </div>
              <div>{visibleJobs.map((job, index) => <JobCard key={String(job.id ?? job.jobId ?? `${job.title}-${job.company}-${index}`)} job={job} active={index === selectedIndex} onSelect={() => {setSelectedIndex(index);setMobileDetail(true);}} />)}</div>
              {nextOffset !== null && <button className="jh-button-ghost mt-4 w-full" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Loading…' : `Load more (${jobs.length} of ${total})`}</button>}
            </div>
