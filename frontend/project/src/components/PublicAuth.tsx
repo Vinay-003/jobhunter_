@@ -28,13 +28,15 @@ export default function PublicAuth({ mode }: { mode: 'login' | 'signup' }) {
   const [countdown, setCountdown] = useState(0);
 
   useEffect(() => {
-    const urlEmail = searchParams.get('email');
-    if (urlEmail) {
-      setEmail(urlEmail);
-      setStep('otp');
-      setCountdown(60);
+    if (mode === 'signup') {
+      const urlEmail = searchParams.get('email');
+      if (urlEmail) {
+        setEmail(urlEmail);
+        setStep('otp');
+        setCountdown(60);
+      }
     }
-  }, [searchParams]);
+  }, [searchParams, mode]);
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -94,14 +96,8 @@ export default function PublicAuth({ mode }: { mode: 'login' | 'signup' }) {
           navigate('/app/ats', { replace: true });
         }
       } else {
-        const res = await login(email, password);
-        if (res.requiresOtp || res.requiresVerification) {
-          setStep('otp');
-          setCountdown(60);
-          setInfoMessage('Verification code sent to your email.');
-        } else {
-          navigate('/app/ats', { replace: true });
-        }
+        await login(email, password);
+        navigate('/app/ats', { replace: true });
       }
     } catch (err) {
       setError(getApiErrorMessage(err));

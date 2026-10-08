@@ -135,42 +135,8 @@ router.post('/login', validate({ body: loginSchema }), async (req, res) => {
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
-    // If account was created but not yet verified
-    if (user.verified === false) {
-      try {
-        await issueOtp(normalizedEmail, 'verification');
-      } catch (err: any) {
-        // Rate limit is okay; code is still valid
-      }
-      return res.status(403).json({
-        success: false,
-        requiresVerification: true,
-        email: normalizedEmail,
-        message: 'Please verify your email before signing in. A verification code has been sent.',
-      });
-    }
-
-    // Login OTP verification (opt-in only via REQUIRE_LOGIN_OTP=true; signup verifies email)
-    const requireLoginOtp = process.env.REQUIRE_LOGIN_OTP === 'true';
-    if (requireLoginOtp) {
-      try {
-        await issueOtp(normalizedEmail, 'login');
-      } catch (err: any) {
-        if (err.message !== 'OTP_RATE_LIMIT') {
-          console.error('[login] Error issuing OTP:', err);
-          return res.status(503).json({ success: false, message: 'Unable to send sign-in verification code. Please check email configuration.' });
-        }
-      }
-      return res.json({
-        success: true,
-        requiresOtp: true,
-        email: normalizedEmail,
-        message: 'Sign-in verification code sent to your email',
-      });
-    }
-
-    // Direct login session creation (when REQUIRE_LOGIN_OTP=false)
-    await pool.query('UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=$1', [user.id]).catch(() => {});
+    // Direct login session creation - credentials verified via password
+    await pool.query('UPDATE users SET last_login=CURRENT_TIMESTAMP, verified=true WHERE id=$1', [user.id]).catch(() => {});
     const { token } = await Session.createSession(String(user.id), req.headers['user-agent']);
     Session.setSessionCookie(res, token);
     res.json({
@@ -181,7 +147,7 @@ router.post('/login', validate({ body: loginSchema }), async (req, res) => {
         username: user.username ?? user.display_name,
         email: user.email,
         display_name: user.display_name,
-        verified: user.verified ?? true,
+        verified: true,
       },
     });
   } catch (e) {
