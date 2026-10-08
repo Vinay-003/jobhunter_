@@ -5,7 +5,7 @@ import pool from '../../config/database.js';
 import { validate } from '../../middleware/validate.js';
 import { requireSession as authenticateAny } from '../../middleware/requireSession.js';
 import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
-import { buildResumeProfile, PROFILE_VERSION } from '../../modules/parsing/resumeProfile.js';
+import { buildResumeProfile, buildParsedResumeSections, PROFILE_VERSION } from '../../modules/parsing/resumeProfile.js';
 import { scoreReadiness, VERSION as SCORER_VERSION } from '../../modules/ats/readinessScorer.js';
 import { parseJd } from '../../modules/jd/jdParser.js';
 import { matchJd } from '../../modules/jd/matcher.js';
@@ -79,6 +79,7 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
       return res.status(400).json({ success:false, message:'We could not reliably extract text from this PDF. It may be scanned or image-based. Upload a text-based PDF for accurate ATS analysis.', code:'SCANNED_PDF' });
     }
     const profile = buildResumeProfile(parsed);
+    const parsedSectionsData = buildParsedResumeSections(parsed, profile);
     const readiness = scoreReadiness(parsed, profile, targetLevel);
     // ensure profile stored (cache only — analysis proceeds even if this fails, but the failure is visible)
     await pool.query('INSERT INTO resume_profiles (resume_id, profile_json, profile_version) VALUES ($1,$2,$3) ON CONFLICT (resume_id) DO UPDATE SET profile_json=$2, profile_version=$3', [row.id, JSON.stringify(profile), PARSER_VERSION]).catch((e)=>console.error('[analyses] resume_profile upsert failed:', e));
@@ -95,10 +96,15 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
       issueCount: readiness.issueCount,
       highPriorityIssueCount: readiness.highPriorityIssueCount,
       methodology: readiness.methodology,
+      findings: readiness.findings,
     };
     const createdAt = new Date().toISOString();
     const snapshot: ReportSnapshot = { success:true, resultSchemaVersion: REPORT_SCHEMA_VERSION, analysisId, resumeId: row.id,
-      fileName: row.original_filename ?? null, createdAt, readiness, profileContentHash: hashProfile(profile),
+      fileName: row.original_filename ?? null, createdAt, readiness,
+      parsedSections: parsedSectionsData.parsedSections,
+      extractedText: parsedSectionsData.extractedText,
+      contactInfo: parsedSectionsData.contactInfo,
+      profileContentHash: hashProfile(profile),
       versions: { scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION } };
     try {
       await pool.query(`INSERT INTO analyses (id,user_id,resume_id,analysis_type,readiness_score,score_breakdown_json,evidence_json,target_level,scorer_version,parser_version,result_schema_version,result_json,profile_version,profile_content_hash,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
@@ -133,6 +139,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     const parsed = await parsePdfBuffer(buf);
     if (parsed.detectedAsScanned) return res.status(400).json({ success:false, message:'Scanned PDF not supported for JD matching', code:'SCANNED_PDF'});
     const profile = buildResumeProfile(parsed);
+    const parsedSectionsData = buildParsedResumeSections(parsed, profile);
     const readiness = scoreReadiness(parsed, profile, targetLevel);
     const jd = parseJd(jobDescription);
     // deterministic match
@@ -213,12 +220,15 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     const jdHash = crypto.createHash('sha256').update(jobDescription).digest('hex');
     const snapshot: ReportSnapshot = { success:true, resultSchemaVersion: REPORT_SCHEMA_VERSION, analysisId, resumeId: row.id,
       fileName: row.original_filename ?? null, createdAt, readiness, jdMatch, confidence, confidenceReasons,
+      parsedSections: parsedSectionsData.parsedSections,
+      extractedText: parsedSectionsData.extractedText,
+      contactInfo: parsedSectionsData.contactInfo,
       profileContentHash: hashProfile(profile),
       versions: { scorerVersion: SCORER_VERSION, parserVersion: PARSER_VERSION, matcherVersion: JD_MATCHER_VERSION,
         embeddingModelId: modelId, dimension, usedMock: embeddingStatus === 'mock', embeddingStatus, modelRevision, rubricVersion: JD_RUBRIC_VERSION } };
     try {
       await pool.query(`INSERT INTO analyses (id,user_id,resume_id,analysis_type,readiness_score,jd_match_score,score_breakdown_json,evidence_json,target_level,jd_hash,scorer_version,parser_version,embedding_model_id,matching_version,result_schema_version,result_json,profile_version,profile_content_hash,embedding_status,embedding_dimension,embedding_model_revision,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
-        [analysisId,userId,row.id,'jd_match',readiness.score,rubric.score,JSON.stringify({readiness:readiness.breakdown,jdMatch:rubric.breakdown,deterministic}),JSON.stringify({ ...jdMatch, rules:readiness.rules }),targetLevel||null,jdHash,SCORER_VERSION,PARSER_VERSION,modelId,JD_MATCHER_VERSION,REPORT_SCHEMA_VERSION,saveSnapshot(snapshot),PARSER_VERSION,snapshot.profileContentHash,embeddingStatus,dimension,modelRevision,createdAt]);
+        [analysisId,userId,row.id,'jd_match',readiness.score,rubric.score,JSON.stringify({readiness:readiness.breakdown,jdMatch:rubric.breakdown,deterministic}),JSON.stringify({ ...jdMatch, rules:readiness.rules, findings:readiness.findings }),targetLevel||null,jdHash,SCORER_VERSION,PARSER_VERSION,modelId,JD_MATCHER_VERSION,REPORT_SCHEMA_VERSION,saveSnapshot(snapshot),PARSER_VERSION,snapshot.profileContentHash,embeddingStatus,dimension,modelRevision,createdAt]);
     } catch(e) {
       console.error('[analyses] jd-match insert failed:', e);
       return res.status(500).json({ success:false, message:'Failed to save analysis results' });
@@ -260,7 +270,73 @@ router.get('/:id', authenticateAny, async (req:any,res)=>{
   try {
     const r = await pool.query('SELECT * FROM analyses WHERE id=$1 AND user_id=$2', [id, userId]);
     if (!r.rows.length) return res.status(404).json({ success:false, message:'Analysis not found'});
-    res.json({ success:true, analysis: serializeRow(r.rows[0])});
+    let row = r.rows[0];
+
+    // On-demand enrichment: upgrade analyses lacking parsedSections or findings
+    const rawResult = typeof row.result_json === 'string' ? JSON.parse(row.result_json) : row.result_json;
+    if (rawResult && (!rawResult.parsedSections || !rawResult.readiness?.findings || row.scorer_version !== SCORER_VERSION)) {
+      try {
+        const resumeRes = await pool.query('SELECT * FROM resumes WHERE id=$1', [row.resume_id]);
+        if (resumeRes.rows[0]) {
+          const resumeRow = resumeRes.rows[0];
+          const buf = await loadResumeBuffer(resumeRow);
+          const parsed = await parsePdfBuffer(buf);
+          if (!parsed.detectedAsScanned) {
+            const profile = buildResumeProfile(parsed);
+            const parsedSectionsData = buildParsedResumeSections(parsed, profile);
+            const readiness = scoreReadiness(parsed, profile, row.target_level || undefined);
+            const updatedSnapshot: ReportSnapshot = {
+              ...rawResult,
+              readiness,
+              parsedSections: parsedSectionsData.parsedSections,
+              extractedText: parsedSectionsData.extractedText,
+              contactInfo: parsedSectionsData.contactInfo,
+              versions: {
+                ...(rawResult.versions || {}),
+                scorerVersion: SCORER_VERSION,
+                parserVersion: PARSER_VERSION,
+              },
+            };
+            const updatedEvidence = {
+              ...(typeof row.evidence_json === 'string' ? JSON.parse(row.evidence_json) : (row.evidence_json || {})),
+              rules: readiness.rules,
+              strengths: readiness.strengths,
+              warnings: readiness.warnings,
+              priorityActions: readiness.priorityActions,
+              metrics: readiness.metrics,
+              scoreLabel: readiness.scoreLabel,
+              scoreMessage: readiness.scoreMessage,
+              issueCount: readiness.issueCount,
+              highPriorityIssueCount: readiness.highPriorityIssueCount,
+              methodology: readiness.methodology,
+              findings: readiness.findings,
+            };
+            await pool.query(
+              `UPDATE analyses SET readiness_score=$1, score_breakdown_json=$2, evidence_json=$3, scorer_version=$4, parser_version=$5, result_json=$6 WHERE id=$7`,
+              [
+                readiness.score,
+                JSON.stringify(readiness.breakdown),
+                JSON.stringify(updatedEvidence),
+                SCORER_VERSION,
+                PARSER_VERSION,
+                saveSnapshot(updatedSnapshot),
+                row.id,
+              ]
+            );
+            row.readiness_score = readiness.score;
+            row.score_breakdown_json = readiness.breakdown;
+            row.evidence_json = updatedEvidence;
+            row.scorer_version = SCORER_VERSION;
+            row.parser_version = PARSER_VERSION;
+            row.result_json = updatedSnapshot;
+          }
+        }
+      } catch (enrichErr) {
+        console.warn('[analyses] on-demand enrichment failed:', enrichErr);
+      }
+    }
+
+    res.json({ success:true, analysis: serializeRow(row)});
   } catch(e:any){
     // a failing query is NOT "not found" — never mask DB errors as 404
     console.error('[analyses] get failed:', e);

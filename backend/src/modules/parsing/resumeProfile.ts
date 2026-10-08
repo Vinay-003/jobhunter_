@@ -159,4 +159,145 @@ export function buildResumeProfile(parsedDoc: ParsedDocument, evaluationDate = n
     summary: summary || null, languages: langMatch ? langMatch[1].split(/[,;]+/).map(s => s.trim()).filter(Boolean) : [],
   };
 }
+
+export type ParsedResumeSectionItem = {
+  title?: string;
+  company?: string;
+  date?: string;
+  text?: string;
+  bullets?: string[];
+};
+
+export type ParsedResumeSection = {
+  title: string;
+  heading: string;
+  content?: string;
+  text?: string;
+  bullets?: string[];
+  items?: ParsedResumeSectionItem[];
+};
+
+export type ContactInfo = {
+  name?: string | null;
+  title?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  location?: string | null;
+  links?: string[];
+};
+
+export function buildParsedResumeSections(doc: ParsedDocument, prof: ResumeProfile): {
+  parsedSections: ParsedResumeSection[];
+  contactInfo: ContactInfo;
+  extractedText: string;
+} {
+  const lines = doc.normalizedText.split('\n').map(l => l.trim()).filter(Boolean);
+  const email = doc.normalizedText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)?.[0] ?? null;
+  const phone = doc.normalizedText.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)?.[0] ?? null;
+  const headerLines: string[] = [];
+  for (const line of lines) {
+    if (/^(?:professional summary|summary|technical skills|skills|professional experience|experience)/i.test(line)) break;
+    headerLines.push(line);
+  }
+  const name = headerLines[0] || 'Candidate';
+  const targetRole = headerLines.length > 1 && !headerLines[1].includes('@') && !headerLines[1].includes('+') ? headerLines[1] : null;
+  const contactLine = headerLines.find(l => l.includes('@') || l.includes('|') || l.includes('+')) || '';
+  const parts = contactLine.split('|').map(s => s.trim());
+  const location = parts.find(p => !p.includes('@') && !p.includes('+') && !p.includes('.com') && !p.includes('http')) || null;
+  const links = parts.filter(p => p.includes('.com') || p.includes('http') || p.includes('github') || p.includes('linkedin'));
+
+  const contactInfo: ContactInfo = { name, title: targetRole, email, phone, location, links };
+
+  const parsedSections: ParsedResumeSection[] = [];
+
+  // 1. Summary
+  if (doc.sections.summary) {
+    const cleanSum = doc.sections.summary.replace(/^(?:professional summary|summary|career summary|objective)\s*:?\s*/i, '').trim();
+    parsedSections.push({
+      title: 'Professional Summary',
+      heading: 'Professional Summary',
+      content: cleanSum,
+      text: cleanSum,
+    });
+  }
+
+  // 2. Skills
+  if (doc.sections.skills) {
+    const skillLines = doc.sections.skills.split('\n').map(l => l.trim()).filter(l => !/^(?:technical skills|skills)$/i.test(l));
+    const skillItems: ParsedResumeSectionItem[] = skillLines.map(line => {
+      const col = line.match(/^([A-Za-z0-9\s&/]+):\s*(.+)$/);
+      if (col) {
+        const skillsList = col[2].split(',').map(s => s.trim()).filter(Boolean);
+        return { title: col[1].trim(), text: col[2].trim(), bullets: skillsList };
+      }
+      return { text: line };
+    });
+    parsedSections.push({
+      title: 'Technical Skills',
+      heading: 'Technical Skills',
+      content: doc.sections.skills.replace(/^(?:technical skills|skills)\s*:?\s*/i, '').trim(),
+      text: doc.sections.skills.replace(/^(?:technical skills|skills)\s*:?\s*/i, '').trim(),
+      items: skillItems,
+      bullets: prof.skills,
+    });
+  }
+
+  // 3. Experience
+  if (prof.experience && prof.experience.length) {
+    const expItems: ParsedResumeSectionItem[] = prof.experience.map(exp => {
+      const bullets = (exp.description || '').split(/(?<=[.!?])\s+(?=[A-Z])/).map(s => s.trim()).filter(s => s.length > 15);
+      return {
+        title: exp.title || 'Role',
+        company: exp.company || '',
+        date: [exp.startDate, exp.endDate || (exp.isCurrent ? 'Present' : '')].filter(Boolean).join(' – '),
+        text: exp.description || '',
+        bullets,
+      };
+    });
+    parsedSections.push({
+      title: 'Professional Experience',
+      heading: 'Professional Experience',
+      items: expItems,
+      bullets: expItems.flatMap(i => i.bullets || []),
+    });
+  }
+
+  // 4. Projects
+  if (prof.projects && prof.projects.length) {
+    const projItems: ParsedResumeSectionItem[] = prof.projects.map(proj => {
+      const bullets = (proj.description || '').split(/(?<=[.!?])\s+(?=[A-Z])/).map(s => s.trim()).filter(s => s.length > 15);
+      return {
+        title: proj.title || 'Project',
+        text: proj.description || '',
+        bullets,
+      };
+    });
+    parsedSections.push({
+      title: 'Selected Projects',
+      heading: 'Selected Projects',
+      items: projItems,
+      bullets: projItems.flatMap(i => i.bullets || []),
+    });
+  }
+
+  // 5. Education
+  if (doc.sections.education) {
+    const eduItems: ParsedResumeSectionItem[] = (prof.education || []).map(edu => ({
+      title: [edu.degree, edu.field].filter(Boolean).join(' in '),
+      company: edu.institution || '',
+      date: edu.year || '',
+      text: edu.raw,
+    }));
+    parsedSections.push({
+      title: 'Education & Certifications',
+      heading: 'Education & Certifications',
+      content: doc.sections.education.replace(/^(?:education & certifications|education)\s*:?\s*/i, '').trim(),
+      text: doc.sections.education.replace(/^(?:education & certifications|education)\s*:?\s*/i, '').trim(),
+      items: eduItems.length ? eduItems : undefined,
+    });
+  }
+
+  return { contactInfo, parsedSections, extractedText: doc.normalizedText };
+}
+
 export default buildResumeProfile;
