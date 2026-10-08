@@ -94,4 +94,31 @@ describe('recommendation ranking regressions', () => {
     const [rank] = await rankJobsBatch(p, [j], { embeddingProvider: provider });
     expect(rank.scoreDetails?.responsibilityMatches.length).toBe(14);
   });
+  test('experienced candidate (4+ yrs / senior) gets 0 seniority points, 40 penalty, and low cap on intern role', async () => {
+    const seniorProfile = profile({
+      seniority: 'senior',
+      totalExperienceYears: 4.5,
+      experience: [
+        { title: 'Senior Data Scientist', company: 'Northstar Labs', description: 'Built demand forecast and ML models', kind: 'employment' },
+        { title: 'Data Scientist', company: 'Aster Mobility', description: 'Developed demand and ETA models', kind: 'employment' },
+      ],
+      skills: ['Python', 'SQL', 'Git'],
+      skillsNormalized: ['Python', 'SQL', 'Git'],
+    });
+    const internJob = job('Data Scientist Intern', 'Responsibilities:\n- Assist with data analysis and machine learning models\nRequired:\n- Python\n- SQL\n- Git');
+    const [rank] = await rankJobsBatch(seniorProfile, [internJob], {
+      embeddingProvider: {
+        modelId: 'mock-test',
+        embed: async ({ texts }: any) => ({
+          vectors: texts.map(() => [1, 0]),
+          modelId: 'mock-test',
+          dimension: 2,
+        }),
+      },
+    });
+    expect(rank.breakdown.seniority).toBe(0);
+    expect(rank.scoreDetails?.seniorityPenalty).toBe(40);
+    expect(rank.fitScore).toBeLessThanOrEqual(35);
+    expect(eligibleJob(internJob, 'senior', prefs(), seniorProfile).status).toBe('ineligible');
+  });
 });

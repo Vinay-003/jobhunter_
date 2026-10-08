@@ -463,6 +463,9 @@ export async function rankJobsBatch(
     let seniority = 0;
     const jobSen: string | null = detectJobSeniority(job.title, job.description);
     const profileSen = normalizeSeniority(profile.seniority);
+    const isExperiencedCandidate = ['senior', 'principal', 'mid'].includes(profileSen ?? '') ||
+      (typeof profile.totalExperienceYears === 'number' && profile.totalExperienceYears >= 2) ||
+      (typeof (profile as any).employmentYears === 'number' && (profile as any).employmentYears >= 2);
     {
       const seniorityOrder = ['intern', 'entry', 'mid', 'senior', 'principal'];
       if (!profileSen || !jobSen) {
@@ -472,13 +475,34 @@ export async function rankJobsBatch(
         evidence.push(!profileSen
           ? 'Candidate level unknown — no seniority points awarded'
           : 'Level: general role without explicit seniority requirement — moderate fit assumed');
-      } else if (seniorityOrder.indexOf(profileSen) >= seniorityOrder.indexOf(jobSen)) {
+      } else if (profileSen === jobSen) {
         seniority = 15;
-        evidence.push(`Level ${profileSen} meets ${jobSen}; no downward penalty`);
+        evidence.push(`Level ${profileSen} matches job seniority (${jobSen})`);
       } else {
-        const diff = Math.abs(seniorityOrder.indexOf(profileSen) - seniorityOrder.indexOf(jobSen));
-        seniority = diff === 1 ? 8 : diff === 2 ? 3 : 0;
-        evidence.push(`Level penalty: ${15 - seniority} pts — your ${profileSen} vs job ${jobSen} (diff ${diff})`);
+        const candIdx = seniorityOrder.indexOf(profileSen);
+        const jobIdx = seniorityOrder.indexOf(jobSen);
+        const diff = candIdx - jobIdx;
+        if (diff > 0) {
+          // Candidate is more senior than job (overqualified)
+          if (jobSen === 'intern') {
+            seniority = 0;
+            evidence.push(`Seniority mismatch: experienced ${profileSen} candidate for an internship role (0/15 pts)`);
+          } else if (diff === 1) {
+            seniority = profileSen === 'principal' ? 12 : 11;
+            evidence.push(`Level ${profileSen} slightly exceeds ${jobSen} (${seniority}/15 pts)`);
+          } else if (diff === 2) {
+            seniority = 4;
+            evidence.push(`Level ${profileSen} significantly exceeds ${jobSen} (-11 pts)`);
+          } else {
+            seniority = 0;
+            evidence.push(`Level ${profileSen} severely exceeds ${jobSen} (0/15 pts)`);
+          }
+        } else {
+          // Candidate is less senior than job (underqualified, diff < 0)
+          const absDiff = Math.abs(diff);
+          seniority = absDiff === 1 ? 8 : absDiff === 2 ? 3 : 0;
+          evidence.push(`Level penalty: ${15 - seniority} pts — your ${profileSen} vs job ${jobSen} (diff ${absDiff})`);
+        }
       }
     }
 
@@ -623,7 +647,14 @@ export async function rankJobsBatch(
       const scoreCapReasons: string[] = [];
      let scoreCap = (profileSen === 'entry' || profileSen === 'intern') && (jobSen === 'senior' || jobSen === 'principal') ? (jobSen === 'principal' ? 25 : 35) : null;
      if (scoreCap !== null) { fitScore = Math.min(fitScore, scoreCap); scoreCapReasons.push(`${jobSen === 'principal' ? 'Principal' : 'Senior'} role exceeds entry-level profile`); }
-    if (penalty) evidence.push(`Seniority mismatch: -${penalty} points (${profileSen} → ${jobSen}); eligibility assessed separately`);
+
+     if (jobSen === 'intern' && isExperiencedCandidate) {
+       const internCap = profileSen === 'principal' ? 25 : profileSen === 'senior' ? 35 : 40;
+       scoreCap = scoreCap !== null ? Math.min(scoreCap, internCap) : internCap;
+       fitScore = Math.min(fitScore, scoreCap);
+       scoreCapReasons.push(`Internship role is severely misaligned for experienced candidate (${profileSen ?? '2+ yrs experience'}); capped at ${internCap}`);
+     }
+     if (penalty) evidence.push(`Seniority mismatch: -${penalty} points (${profileSen} → ${jobSen}); eligibility assessed separately`);
     const thin = !job.description || job.description.length < 120 || !resumeChunks.length;
      if (thin) { scoreCap=Math.min(scoreCap??100,55);fitScore = Math.min(fitScore, scoreCap); scoreCapReasons.push('Thin job or profile evidence caps score at 55'); }
      matchedSkills=[...new Set(matchedSkills.map(normalizeSkill))];missingSkills=[...new Set(missingSkills.map(normalizeSkill))];
