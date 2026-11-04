@@ -1,0 +1,251 @@
+```mermaid
+graph LR
+  n11["api/internal/email.ts"]
+  n14["backend/migrations/001_initial_v2.sql"]
+  n15["backend/migrations/002_add_fts.sql"]
+  n16["backend/migrations/003_storage_metadata.sql"]
+  n17["backend/migrations/004_job_search_cache.sql"]
+  n18["backend/migrations/005_keepalive.sql"]
+  n19["backend/migrations/006_analysis_integrity.sql"]
+  n20["backend/migrations/007_recommendation_integrity.sql"]
+  n21["backend/migrations/008_embedding_cache.sql"]
+  n22["backend/migrations/009_recommendation_profile_version.sql"]
+  n23["backend/migrations/010_auth_otp_and_verification.sql"]
+  n25["backend/python/app.py"]
+  n26["backend/python/job_matcher_ml.py"]
+  n27["backend/python/pdf_text_extract.py"]
+  n28["backend/python/resume_analyzer_ml.py"]
+  n29["backend/src/config/database.ts"]
+  n30["backend/src/config/env.ts"]
+  n31["backend/src/config/schema.sql"]
+  n32["backend/src/config/supabase_schema.sql"]
+  n33["backend/src/controllers/analysisController.ts"]
+  n34["backend/src/controllers/authController.ts"]
+  n35["backend/src/db/migrate.ts"]
+  n36["backend/src/db/migrations/create_resumes_table.sql"]
+  n37["backend/src/db/migrations/run_migration.ts"]
+  n38["backend/src/db/schemaReadiness.ts"]
+  n39["backend/src/middleware/auth.ts"]
+  n40["backend/src/middleware/csrf.ts"]
+  n41["backend/src/middleware/requireSession.ts"]
+  n42["backend/src/middleware/validate.ts"]
+  n43["backend/src/models/Resume.ts"]
+  n44["backend/src/modules/analysis/jdRubric.ts"]
+  n45["backend/src/modules/analysis/reportSchema.ts"]
+  n46["backend/src/modules/ats/readinessScorer.ts"]
+  n47["backend/src/modules/auth/session.ts"]
+  n48["backend/src/modules/evaluation/rankingEvaluation.ts"]
+  n49["backend/src/modules/evaluation/runEvaluation.ts"]
+  n50["backend/src/modules/jd/jdParser.ts"]
+  n51["backend/src/modules/jd/matcher.ts"]
+  n52["backend/src/modules/jobs/availability.ts"]
+  n53["backend/src/modules/jobs/eligibility.ts"]
+  n54["backend/src/modules/jobs/geography.ts"]
+  n55["backend/src/modules/jobs/queryPlanner.ts"]
+  n56["backend/src/modules/jobs/ranking.ts"]
+  n57["backend/src/modules/jobs/roleDiscovery.ts"]
+  n58["backend/src/modules/jobs/seniority.ts"]
+  n59["backend/src/modules/matching/evidenceBuilder.ts"]
+  n60["backend/src/modules/parsing/documentBlocks.ts"]
+  n61["backend/src/modules/parsing/pdfParser.ts"]
+  n62["backend/src/modules/parsing/resumeProfile.ts"]
+  n63["backend/src/modules/parsing/skillExtractor.ts"]
+  n64["backend/src/modules/parsing/skillNormalizer.ts"]
+  n65["backend/src/modules/storage/supabaseStorage.ts"]
+  n66["backend/src/providers/embeddings/AwsSageMakerEmbeddingProvider.ts"]
+  n67["backend/src/providers/embeddings/EmbeddingProvider.ts"]
+  n68["backend/src/providers/embeddings/LocalEmbeddingProvider.ts"]
+  n69["backend/src/providers/embeddings/MockEmbeddingProvider.ts"]
+  n70["backend/src/providers/embeddings/embeddingCache.ts"]
+  n71["backend/src/providers/embeddings/local_embedding_worker.py"]
+  n72["backend/src/providers/embeddings/validateVectors.ts"]
+  n73["backend/src/providers/jobs/AdzunaProvider.ts"]
+  n74["backend/src/providers/jobs/ArbeitnowProvider.ts"]
+  n75["backend/src/providers/jobs/JobProvider.ts"]
+  n76["backend/src/providers/jobs/JobsPipeProvider.ts"]
+  n77["backend/src/providers/jobs/JoobleProvider.ts"]
+  n78["backend/src/providers/jobs/RemotiveProvider.ts"]
+  n79["backend/src/providers/jobs/jobStore.ts"]
+  n80["backend/src/providers/jobs/providerBudgets.ts"]
+  n81["backend/src/providers/jobs/retrievalExecutor.ts"]
+  n82["backend/src/providers/jobs/retrievalPlan.ts"]
+  n83["backend/src/routes/analysis.ts"]
+  n84["backend/src/routes/auth.ts"]
+  n85["backend/src/routes/jobs.ts"]
+  n86["backend/src/routes/keepalive.ts"]
+  n87["backend/src/routes/upload.ts"]
+  n88["backend/src/routes/v1/analyses.ts"]
+  n89["backend/src/routes/v1/auth.ts"]
+  n90["backend/src/routes/v1/index.ts"]
+  n91["backend/src/routes/v1/profile.ts"]
+  n92["backend/src/routes/v1/recommendations.ts"]
+  n93["backend/src/routes/v1/resumes.ts"]
+  n94[["backend/src/scripts/test_all_providers_diagnostics.ts"]]
+  n95["backend/src/server.ts"]
+  n96["backend/src/services/analysisService.old.ts"]
+  n97["backend/src/services/analysisService.ts"]
+  n98["backend/src/services/jobRecommendationService.ts"]
+  n99["backend/src/services/joobleService.ts"]
+  n100["backend/src/services/recommendationPersistence.ts"]
+  n101[["backend/src/tests/adzunaProvider.test.ts"]]
+  n102[["backend/src/tests/analysisIntegrity.test.ts"]]
+  n103[["backend/src/tests/auditRegression.test.ts"]]
+  n104[["backend/src/tests/authOtp.test.ts"]]
+  n105[["backend/src/tests/dataScienceMatchingRegression.test.ts"]]
+  n106[["backend/src/tests/eligibilityLocation.test.ts"]]
+  n107[["backend/src/tests/embeddingCache.test.ts"]]
+  n108[["backend/src/tests/jdMatch.test.ts"]]
+  n109[["backend/src/tests/jdQualificationRegression.test.ts"]]
+  n110[["backend/src/tests/jobFreshness.test.ts"]]
+  n111[["backend/src/tests/jobsPipeCursor.test.ts"]]
+  n112[["backend/src/tests/localEmbeddings.integration.test.ts"]]
+  n113[["backend/src/tests/matchScoreImprovements.test.ts"]]
+  n114[["backend/src/tests/parsingEvidence.test.ts"]]
+  n115[["backend/src/tests/parsingRegressions.test.ts"]]
+  n116[["backend/src/tests/providerResult.test.ts"]]
+  n117[["backend/src/tests/providerRetrieval.test.ts"]]
+  n118[["backend/src/tests/rankingEvaluation.test.ts"]]
+  n119[["backend/src/tests/rankingRegression.test.ts"]]
+  n120[["backend/src/tests/rateLimitProxy.test.ts"]]
+  n121[["backend/src/tests/readiness.test.ts"]]
+  n122[["backend/src/tests/recommendationEndpoints.test.ts"]]
+  n123[["backend/src/tests/recommendationIntegrity.test.ts"]]
+  n124[["backend/src/tests/recommendationPersistence.test.ts"]]
+  n125[["backend/src/tests/retrievalExecutor.test.ts"]]
+  n126[["backend/src/tests/roleDiscoveryRegression.test.ts"]]
+  n127[["backend/src/tests/schemaReadiness.test.ts"]]
+  n128[["backend/src/tests/security.test.ts"]]
+  n129[["backend/src/tests/semanticMatchingAndJdExtraction.test.ts"]]
+  n130[["backend/src/tests/skillExtractionRegression.test.ts"]]
+  n131[["backend/src/tests/v1Security.test.ts"]]
+  n132["backend/src/types/pdf-parse.d.ts"]
+  n133["backend/src/types/xenova.d.ts"]
+  n134["backend/src/utils/otp.ts"]
+  n135["backend/src/utils/otpEmailTemplate.ts"]
+  n136["backend/src/utils/sendEmail.ts"]
+  n138[["e2e/audit_integrity.py"]]
+  n139[["e2e/login_gate_check.py"]]
+  n140[["e2e/recommendation_browser_acceptance.py"]]
+  n141[["e2e/resume_view_e2e.py"]]
+  n142[["e2e/ui_redesign_acceptance.py"]]
+  n143[["e2e/ui_redesign_motion.py"]]
+  n144["frontend/project/api/internal/email.ts"]
+  n145["frontend/project/eslint.config.js"]
+  n146["frontend/project/postcss.config.js"]
+  n147["frontend/project/src/App.legacy.tsx"]
+  n148["frontend/project/src/App.tsx"]
+  n149["frontend/project/src/app/AppShell.tsx"]
+  n150["frontend/project/src/app/router.tsx"]
+  n151["frontend/project/src/components/AuthForm.tsx"]
+  n152["frontend/project/src/components/CreativeVisual.tsx"]
+  n153["frontend/project/src/components/DragReturn.tsx"]
+  n154["frontend/project/src/components/Icon.tsx"]
+  n155["frontend/project/src/components/PublicAuth.tsx"]
+  n156["frontend/project/src/components/PublicLegal.tsx"]
+  n157["frontend/project/src/components/UI.tsx"]
+  n158["frontend/project/src/context/ResumeContext.tsx"]
+  n159["frontend/project/src/features/auth/AuthContext.tsx"]
+  n160["frontend/project/src/lib/api.ts"]
+  n161["frontend/project/src/lib/display.ts"]
+  n162["frontend/project/src/lib/matchReport.ts"]
+  n163["frontend/project/src/lib/validation.ts"]
+  n164["frontend/project/src/main.tsx"]
+  n165["frontend/project/src/pages/AnalysisPage.tsx"]
+  n166["frontend/project/src/pages/AtsPage.tsx"]
+  n167["frontend/project/src/pages/ErrorPage.tsx"]
+  n168["frontend/project/src/pages/Home.tsx"]
+  n169["frontend/project/src/pages/JobsPage.tsx"]
+  n170["frontend/project/src/pages/LandingPage.tsx"]
+  n171["frontend/project/src/pages/LoginPage.legacy.tsx"]
+  n172["frontend/project/src/pages/LoginPage.tsx"]
+  n173["frontend/project/src/pages/NotFoundPage.tsx"]
+  n174["frontend/project/src/pages/PrivacyPage.tsx"]
+  n175["frontend/project/src/pages/ProfilePage.tsx"]
+  n176["frontend/project/src/pages/ResumeViewPage.tsx"]
+  n177["frontend/project/src/pages/ResumesPage.tsx"]
+  n178["frontend/project/src/pages/SignupPage.legacy.tsx"]
+  n179["frontend/project/src/pages/SignupPage.tsx"]
+  n180["frontend/project/src/pages/TermsPage.tsx"]
+  n181["frontend/project/src/pages/libraryData.ts"]
+  n182["frontend/project/src/vite-env.d.ts"]
+  n183["frontend/project/tailwind.config.js"]
+  n184[["frontend/project/tests/display.test.ts"]]
+  n185[["frontend/project/tests/matchReport.test.ts"]]
+  n186["frontend/project/vite.config.ts"]
+  n192["workers/keepalive-worker/worker.js"]
+  n25 --> n27
+  n25 --> n28
+  n25 --> n26
+  n147 --> n172
+  n147 --> n179
+  n147 --> n168
+  n148 --> n159
+  n148 --> n150
+  n149 --> n154
+  n149 --> n157
+  n149 --> n159
+  n149 --> n160
+  n150 --> n149
+  n150 --> n159
+  n150 --> n172
+  n150 --> n179
+  n150 --> n166
+  n150 --> n165
+  n150 --> n177
+  n150 --> n176
+  n150 --> n175
+  n150 --> n174
+  n150 --> n180
+  n150 --> n173
+  n150 --> n167
+  n150 --> n170
+  n150 --> n169
+  n155 --> n154
+  n155 --> n153
+  n155 --> n157
+  n155 --> n163
+  n155 --> n159
+  n155 --> n160
+  n156 --> n157
+  n157 --> n154
+  n159 --> n160
+  n164 --> n148
+  n165 --> n157
+  n165 --> n160
+  n165 --> n161
+  n166 --> n160
+  n166 --> n157
+  n167 --> n154
+  n167 --> n157
+  n168 --> n158
+  n169 --> n160
+  n169 --> n161
+  n169 --> n162
+  n169 --> n157
+  n170 --> n154
+  n170 --> n157
+  n170 --> n153
+  n171 --> n151
+  n171 --> n152
+  n172 --> n155
+  n173 --> n154
+  n173 --> n157
+  n174 --> n156
+  n175 --> n159
+  n175 --> n160
+  n175 --> n157
+  n175 --> n181
+  n176 --> n160
+  n176 --> n157
+  n176 --> n181
+  n177 --> n160
+  n177 --> n157
+  n177 --> n181
+  n178 --> n151
+  n178 --> n152
+  n179 --> n155
+  n180 --> n156
+  n181 --> n165
+  n184 --> n161
+  n185 --> n162
+```

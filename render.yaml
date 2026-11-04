@@ -5,7 +5,7 @@
 # Required secrets (set manually): PG_DATABASE_STRING (or DATABASE_URL), JWT_SECRET,
 #   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JOOBLE_API_KEY,
 #   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SAGEMAKER_ENDPOINT_NAME,
-#   ADZUNA_APP_ID, ADZUNA_APP_KEY, JOBSPIPE_API_KEY
+#   ADZUNA_APP_ID, ADZUNA_APP_KEY, JOBSPIPE_API_KEY, MERCURY_API_KEY (role discovery)
 
 services:
   # ---------------------------------------------------------------------------
@@ -99,6 +99,20 @@ services:
         sync: false
       - key: EMBEDDING_MODEL_ID
         value: anass1209/resume-job-matcher-all-MiniLM-L6-v2
+      # Cache-scope pin: without this, modelRevision is null, embedCached never
+      # persists vectors, and every run re-embeds (79-184s ranking per run).
+      # Bump the suffix (r1 -> r2) to invalidate all cached embeddings after a
+      # model or chunking change.
+      - key: EMBEDDING_MODEL_REVISION
+        value: resume-job-matcher-all-MiniLM-L6-v2-r1
+      # ---- Role discovery primary: Mercury 3 (Inception, OpenAI-compatible) ----
+      # Set MERCURY_API_KEY in the Render dashboard (sync:false = secret).
+      - key: MERCURY_API_KEY
+        sync: false
+      - key: MERCURY_BASE_URL
+        value: https://api.inceptionlabs.ai/v1/chat/completions
+      - key: MERCURY_MODEL
+        value: mercury-3
       - key: PYTHON_SERVICE_URL
         sync: false
 

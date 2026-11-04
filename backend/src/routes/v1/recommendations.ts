@@ -97,48 +97,23 @@ router.post('/roles', authenticate, workLimiter, validate({ body: z.object({resu
   } catch { return res.status(503).json({success:false,message:'Could not prepare role suggestions'}); }
 });
 
-router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }), async (req: any, res) => {
-  const userId = String(req.user.id);
-  const { resumeId, idempotencyKey, forceRefresh = false } = req.body;
-  let runId: string | null = null;
-  const startedAt = Date.now();
+type RunContext = { runId: string; userId: string; resumeId: string; preferences: ReturnType<typeof effectivePreferences>; forceRefresh: boolean; startedAt: number };
+
+/**
+ * Retrieval → scoring → persistence for a single run.
+ *
+ * Deliberately detached from the HTTP response: a cold run takes 125-230s
+ * (ranking embeddings dominate) while Render's free proxy severs in-flight
+ * requests at ~100s and answers 502 "An error occurred with this application."
+ * The route replies 202 with the runId and the client polls
+ * GET /recommendation-runs/:id until status settles on completed|failed.
+ */
+async function executeRecommendationRun(ctx: RunContext): Promise<void> {
+  const { runId, userId, resumeId, preferences, forceRefresh, startedAt } = ctx;
   const timings: Record<string, number> = {};
   try {
     const resume = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
-    if (!resume.rows[0]) return res.status(404).json({ success: false, message: 'Resume not found' });
-    const saved = await pool.query('SELECT * FROM user_job_preferences WHERE user_id=$1', [userId]);
-    const preferences = effectivePreferences(saved.rows[0], req.body);
-    // A normal page visit reuses the persisted report. Only an explicit refresh
-    // is allowed to spend provider/API/embedding work again.
-    if (!forceRefresh) {
-      const cachedRun = await pool.query(
-        `SELECT id,status,returned_count,completed_at,ranker_version,profile_version,provider_status_json,query_plan_json,preferences_snapshot_json FROM recommendation_runs
-          WHERE user_id=$1 AND resume_id=$2 AND status='completed'
-            AND preferences_snapshot_json = $3::jsonb
-          ORDER BY completed_at DESC NULLS LAST LIMIT 1`,
-        [userId, resumeId, JSON.stringify(preferences)],
-      );
-      if (cachedRun.rows[0] && recommendationCacheValid(cachedRun.rows[0],rankerVersion,PROFILE_VERSION,preferences.daysPosted ?? 30) && await cachedRowsCurrent(cachedRun.rows[0].id,preferences)) {
-        const prior = cachedRun.rows[0];
-        return res.json({ success: true, persisted: true, cached: true, runId: prior.id, status: prior.status, returnedCount: prior.returned_count, ...recommendationDiagnostics(prior), recommendations: await results(prior.id, 0, 20), nextOffset: prior.returned_count > 20 ? 20 : null });
-      }
-    }
-    if (idempotencyKey) {
-      const previous = await pool.query('SELECT * FROM recommendation_runs WHERE user_id=$1 AND idempotency_key=$2', [userId, idempotencyKey]);
-      if (previous.rows[0]) {
-        const prior = previous.rows[0];
-        const reusable = prior.status === 'completed' && recommendationCacheValid(prior,rankerVersion,PROFILE_VERSION,preferences.daysPosted ?? 30,new Date(),forceRefresh) && await cachedRowsCurrent(prior.id,preferences);
-        if (!reusable && prior.status === 'completed') return res.status(409).json({success:false,code:'STALE_IDEMPOTENCY_KEY',message:'Use a new idempotency key for a refreshed run'});
-        return res.status(prior.status === 'completed' ? 200 : 202).json({ success: reusable, runId: prior.id, persisted: reusable, status: prior.status, returnedCount: prior.returned_count, ...recommendationDiagnostics(prior), recommendations: reusable ? await results(prior.id, 0, 20) : [] });
-      }
-    }
-    runId = crypto.randomUUID();
-    const inserted = await pool.query(`INSERT INTO recommendation_runs (id,user_id,resume_id,preferences_snapshot_json,ranker_version,profile_version,status,idempotency_key)
-      VALUES ($1,$2,$3,$4,$5,$6,'running',$7) ON CONFLICT (user_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id`, [runId,userId,resumeId,JSON.stringify(preferences),rankerVersion,PROFILE_VERSION,idempotencyKey ?? null]);
-    if (!inserted.rows.length) {
-      const prior = await pool.query('SELECT id,status,returned_count FROM recommendation_runs WHERE user_id=$1 AND idempotency_key=$2', [userId,idempotencyKey]);
-      return res.status(202).json({ success: false, persisted: false, runId: prior.rows[0].id, status: prior.rows[0].status, recommendations: [] });
-    }
+    if (!resume.rows[0]) throw new Error('RESUME_NOT_FOUND');
     const profile = await ownedProfile(resume.rows[0]);
     if (!profile || !Array.isArray(profile.skills) || !Array.isArray(profile.experience)) throw new Error('PROFILE_UNAVAILABLE');
     const roleDiscovery = await roleSuggestions(profile,resumeId,userId);
@@ -266,7 +241,7 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
     try {
       await client.query('BEGIN');
       const still = await client.query('SELECT id FROM resumes WHERE id=$1 AND user_id=$2 FOR KEY SHARE', [resumeId,userId]);
-      if (!still.rows[0]) { await client.query('ROLLBACK'); return res.status(409).json({ success:false, message:'Resume removed during ranking', runId, persisted:false }); }
+      if (!still.rows[0]) { await client.query('ROLLBACK'); throw new Error('RESUME_REMOVED'); }
       
       const jobIdMap = await upsertJobsBatch(ranked, client);
 
@@ -311,11 +286,71 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
     console.info(`[recommendations] completed count=${ranked.length} timings=${JSON.stringify(timings)}`);
-    return res.json({ success:true, runId, persisted:true, totalFetched:all.length, deduped:distinct.length, candidateCount:distinct.length, returnedCount:ranked.length, insufficientEligibleJobs:ranked.length < 50, sources, ...diagnostics, preferences, recommendations:await results(runId,0,20), nextOffset:ranked.length > 20 ? 20 : null });
   } catch (error) {
-    if (runId) await pool.query("UPDATE recommendation_runs SET status='failed',completed_at=now(),error_code=$2 WHERE id=$1 AND status='running'",[runId,(error as Error).message === 'ALL_PROVIDERS_FAILED' ? 'ALL_PROVIDERS_FAILED' : 'RECOMMENDATION_FAILED']).catch(() => undefined);
-    console.error('[recommendations] run failed (details withheld to protect private data)');
-    return res.status(503).json({ success:false, code:(error as Error).message === 'ALL_PROVIDERS_FAILED' ? 'ALL_PROVIDERS_FAILED' : 'RECOMMENDATION_FAILED', message:'Recommendation run failed', runId, persisted:false });
+    const message = (error as Error)?.message || '';
+    const code = ['ALL_PROVIDERS_FAILED', 'RESUME_REMOVED', 'RESUME_NOT_FOUND', 'PROFILE_UNAVAILABLE'].includes(message) ? message : 'RECOMMENDATION_FAILED';
+    await pool.query("UPDATE recommendation_runs SET status='failed',completed_at=now(),error_code=$2 WHERE id=$1 AND status='running'", [runId, code]).catch(() => undefined);
+    // Details stay in server logs only: run payloads contain resume content.
+    console.warn(`[recommendations] run failed code=${code}`);
+  }
+}
+
+router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }), async (req: any, res) => {
+  const userId = String(req.user.id);
+  const { resumeId, idempotencyKey, forceRefresh = false } = req.body;
+  try {
+    const resume = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
+    if (!resume.rows[0]) return res.status(404).json({ success: false, message: 'Resume not found' });
+    const saved = await pool.query('SELECT * FROM user_job_preferences WHERE user_id=$1', [userId]);
+    const preferences = effectivePreferences(saved.rows[0], req.body);
+    // A normal page visit reuses the persisted report. Only an explicit refresh
+    // is allowed to spend provider/API/embedding work again.
+    if (!forceRefresh) {
+      const cachedRun = await pool.query(
+        `SELECT id,status,returned_count,completed_at,ranker_version,profile_version,provider_status_json,query_plan_json,preferences_snapshot_json FROM recommendation_runs
+          WHERE user_id=$1 AND resume_id=$2 AND status='completed'
+            AND preferences_snapshot_json = $3::jsonb
+          ORDER BY completed_at DESC NULLS LAST LIMIT 1`,
+        [userId, resumeId, JSON.stringify(preferences)],
+      );
+      if (cachedRun.rows[0] && recommendationCacheValid(cachedRun.rows[0],rankerVersion,PROFILE_VERSION,preferences.daysPosted ?? 30) && await cachedRowsCurrent(cachedRun.rows[0].id,preferences)) {
+        const prior = cachedRun.rows[0];
+        return res.json({ success: true, persisted: true, cached: true, runId: prior.id, status: prior.status, returnedCount: prior.returned_count, ...recommendationDiagnostics(prior), recommendations: await results(prior.id, 0, 20), nextOffset: prior.returned_count > 20 ? 20 : null });
+      }
+    }
+    if (idempotencyKey) {
+      const previous = await pool.query('SELECT * FROM recommendation_runs WHERE user_id=$1 AND idempotency_key=$2', [userId, idempotencyKey]);
+      if (previous.rows[0]) {
+        const prior = previous.rows[0];
+        const reusable = prior.status === 'completed' && recommendationCacheValid(prior,rankerVersion,PROFILE_VERSION,preferences.daysPosted ?? 30,new Date(),forceRefresh) && await cachedRowsCurrent(prior.id,preferences);
+        if (!reusable && prior.status === 'completed') return res.status(409).json({success:false,code:'STALE_IDEMPOTENCY_KEY',message:'Use a new idempotency key for a refreshed run'});
+        return res.status(prior.status === 'completed' ? 200 : 202).json({ success: reusable, runId: prior.id, persisted: reusable, status: prior.status, returnedCount: prior.returned_count, ...recommendationDiagnostics(prior), recommendations: reusable ? await results(prior.id, 0, 20) : [] });
+      }
+    }
+    // A process restart leaves rows stuck in 'running'; reap them so polling can never wedge.
+    await pool.query(`UPDATE recommendation_runs SET status='failed',completed_at=now(),error_code='RUN_ABANDONED' WHERE status='running' AND created_at < now() - interval '15 minutes'`).catch(() => undefined);
+    // The same search already in flight: hand back that run instead of starting a
+    // second pipeline against the same providers and embedding endpoint.
+    if (!forceRefresh) {
+      const inFlight = await pool.query(
+        `SELECT id FROM recommendation_runs WHERE user_id=$1 AND resume_id=$2 AND status='running' AND preferences_snapshot_json=$3::jsonb ORDER BY created_at DESC LIMIT 1`,
+        [userId, resumeId, JSON.stringify(preferences)],
+      );
+      if (inFlight.rows[0]) return res.status(202).json({ success: true, persisted: true, alreadyRunning: true, runId: inFlight.rows[0].id, status: 'running' });
+    }
+    const runId = crypto.randomUUID();
+    const inserted = await pool.query(`INSERT INTO recommendation_runs (id,user_id,resume_id,preferences_snapshot_json,ranker_version,profile_version,status,idempotency_key)
+      VALUES ($1,$2,$3,$4,$5,$6,'running',$7) ON CONFLICT (user_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id`, [runId,userId,resumeId,JSON.stringify(preferences),rankerVersion,PROFILE_VERSION,idempotencyKey ?? null]);
+    if (!inserted.rows.length) {
+      const prior = await pool.query('SELECT id,status,returned_count FROM recommendation_runs WHERE user_id=$1 AND idempotency_key=$2', [userId,idempotencyKey]);
+      return res.status(202).json({ success: false, persisted: false, runId: prior.rows[0].id, status: prior.rows[0].status, recommendations: [] });
+    }
+    // Respond first: the pipeline below must never hold the HTTP connection open.
+    setImmediate(() => { void executeRecommendationRun({ runId, userId, resumeId, preferences, forceRefresh, startedAt: Date.now() }); });
+    return res.status(202).json({ success: true, persisted: true, runId, status: 'running' });
+  } catch {
+    console.error('[recommendations] run could not be started');
+    return res.status(503).json({ success: false, code: 'RECOMMENDATION_FAILED', message: 'Could not start a recommendation run' });
   }
 });
 router.get('/:id',authenticate,async (req:any,res) => {

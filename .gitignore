@@ -51,3 +51,7 @@ backend/node_modules
 # Python
 __pycache__/
 *.pyc
+
+# graphify build cache + machine-local interpreter path (outputs are committed)
+graphify-out/cache/
+graphify-out/.graphify_python

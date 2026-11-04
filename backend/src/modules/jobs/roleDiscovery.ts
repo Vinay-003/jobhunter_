@@ -3,7 +3,7 @@ import axios from 'axios';
 import { z } from 'zod';
 import type { ResumeProfile } from '../parsing/resumeProfile.js';
 
-export const ROLE_DISCOVERY_VERSION = '2.2.0';
+export const ROLE_DISCOVERY_VERSION = '2.3.0';
 export const ALLOWED_FREE_MODELS = [
   'free/deepseek-v4.1-flash',
   'free/deepseek-v4-flash-0731',
@@ -20,8 +20,24 @@ const MODELS = [
   'free/mimo-v2.6-pro'
 ] as const;
 const INFERENCE_BUDGET_MS = 70_000;
+// Per-provider budgets: apinex attempts keep their historical 45/25/20 ladder
+// (asserted by roleDiscoveryRegression), Mercury gets its own fast allowance.
 const MODEL_TIMEOUTS_MS = [45_000, 25_000, 20_000] as const;
+const MERCURY_TIMEOUT_MS = 25_000;
+const MERCURY_DEFAULT_URL = 'https://api.inceptionlabs.ai/v1/chat/completions';
+const MERCURY_DEFAULT_MODEL = 'mercury-3';
 const TTL = 24 * 60 * 60_000;
+
+/** Mercury 3 (Inception) — OpenAI-compatible, diffusion model, sub-second first token. */
+export function mercuryConfig(): { url: string; key: string; model: string } | null {
+  const key = process.env.MERCURY_API_KEY || process.env.INCEPTION_API_KEY || '';
+  if (!key.trim()) return null;
+  return {
+    url: (process.env.MERCURY_BASE_URL || MERCURY_DEFAULT_URL).trim(),
+    key: key.trim(),
+    model: (process.env.MERCURY_MODEL || MERCURY_DEFAULT_MODEL).trim(),
+  };
+}
 
 export function normalizeRoleModel(model?: string | null): string {
   if (!model) return 'free/deepseek-v4.1-flash';
@@ -31,6 +47,7 @@ export function normalizeRoleModel(model?: string | null): string {
   if (m === 'free/deepseek-v4.1-flash') return 'free/deepseek-v4.1-flash';
   if (m === 'free/deepseek-v4-flash-0731') return 'free/deepseek-v4-flash-0731';
   if (m === 'free/glm-5.3-flash') return 'free/glm-5.3-flash';
+  if (m === 'mercury-3' || m === 'inception/mercury-3' || m === 'mercury') return MERCURY_DEFAULT_MODEL;
   return m;
 }
 
@@ -224,9 +241,12 @@ export function parseRoleOutput(content: string): { value: unknown; repaired: bo
 
 export async function discoverRoles(profile: ResumeProfile, options: { ownerId: string; cached?: RoleDiscoveryResult | null; transport?: RoleDiscoveryTransport }): Promise<RoleDiscoveryResult> {
   const material = profileMaterial(profile);
-  const cacheKey = sha(`${options.ownerId}:${ROLE_DISCOVERY_VERSION}:${MODELS.join(',')}:${material}`);
+  const mercury = mercuryConfig();
+  const primaryModel = mercury?.model ?? MERCURY_DEFAULT_MODEL;
+  const cacheKey = sha(`${options.ownerId}:${ROLE_DISCOVERY_VERSION}:${mercury ? primaryModel : 'no-primary'}:${MODELS.join(',')}:${material}`);
+  const knownModel = (model?: string | null) => Boolean(model) && (model === primaryModel || MODELS.some(m => m === model) || isAllowedFreeModel(model));
   const usable = (v?: RoleDiscoveryResult | null) => {
-    if (!v || v.version !== ROLE_DISCOVERY_VERSION || v.cacheKey !== cacheKey || v.source !== 'ai' || (!MODELS.some(model => model === v.model) && !isAllowedFreeModel(v.model))) return false;
+    if (!v || v.version !== ROLE_DISCOVERY_VERSION || v.cacheKey !== cacheKey || v.source !== 'ai' || !knownModel(v.model)) return false;
     const age = Date.now() - Date.parse(v.createdAt);
     try { validatedRoles(v, material, profile); } catch { return false; }
     return Number.isFinite(age) && age >= 0 && age < TTL;
@@ -234,11 +254,13 @@ export async function discoverRoles(profile: ResumeProfile, options: { ownerId: 
 
   const configError = material.length > 40_000
     ? 'INPUT_TOO_LONG'
-    : !process.env.APINEX_API_KEY
-      ? 'NOT_CONFIGURED'
-      : process.env.APINEX_ROLE_MODEL && !isAllowedFreeModel(process.env.APINEX_ROLE_MODEL)
-        ? 'MODEL_NOT_ALLOWED'
-        : null;
+    : mercury
+      ? null
+      : !process.env.APINEX_API_KEY
+        ? 'NOT_CONFIGURED'
+        : process.env.APINEX_ROLE_MODEL && !isAllowedFreeModel(process.env.APINEX_ROLE_MODEL)
+          ? 'MODEL_NOT_ALLOWED'
+          : null;
 
   if (!configError) {
     if (usable(options.cached)) return options.cached!;
@@ -255,15 +277,25 @@ export async function discoverRoles(profile: ResumeProfile, options: { ownerId: 
         return typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
       });
 
-      const candidateModels: string[] = (() => {
-        if (process.env.APINEX_ROLE_MODEL) {
-          const norm = normalizeRoleModel(process.env.APINEX_ROLE_MODEL);
-          if (norm === 'free/mimo-v2.6-pro') return ['free/mimo-v2.6-pro', 'free/deepseek-v4.1-flash'];
-          if (norm === 'free/gpt-6-luna') return ['free/gpt-6-luna', 'free/mimo-v2.6-pro'];
-          return [norm, 'free/deepseek-v4.1-flash', 'free/deepseek-v4-flash-0731', 'free/glm-5.3-flash'];
+      type RoleAttempt = { provider: 'mercury' | 'apinex'; url: string; key: string; model: string; temperature?: number; jsonMode?: boolean };
+      const attempts: RoleAttempt[] = [];
+      // Mercury 3 first: diffusion model, ~1000 tok/s, so the primary leg is
+      // usually done before apinex would have finished its first token.
+      if (mercury) attempts.push({ provider: 'mercury', url: mercury.url, key: mercury.key, model: mercury.model, jsonMode: true });
+      if (process.env.APINEX_API_KEY) {
+        const candidateModels: string[] = (() => {
+          if (process.env.APINEX_ROLE_MODEL) {
+            const norm = normalizeRoleModel(process.env.APINEX_ROLE_MODEL);
+            if (norm === 'free/mimo-v2.6-pro') return ['free/mimo-v2.6-pro', 'free/deepseek-v4.1-flash'];
+            if (norm === 'free/gpt-6-luna') return ['free/gpt-6-luna', 'free/mimo-v2.6-pro'];
+            return [norm, 'free/deepseek-v4.1-flash', 'free/deepseek-v4-flash-0731', 'free/glm-5.3-flash'];
+          }
+          return ['free/deepseek-v4.1-flash', 'free/deepseek-v4-flash-0731', 'free/glm-5.3-flash', 'free/gpt-6-luna', 'free/mimo-v2.6-pro'];
+        })();
+        for (const candidateModel of candidateModels) {
+          attempts.push({ provider: 'apinex', url: 'https://api.apinex.bond/v1/chat/completions', key: process.env.APINEX_API_KEY, model: normalizeRoleModel(candidateModel), temperature: 0.1 });
         }
-        return ['free/deepseek-v4.1-flash', 'free/deepseek-v4-flash-0731', 'free/glm-5.3-flash', 'free/gpt-6-luna', 'free/mimo-v2.6-pro'];
-      })();
+      }
 
       const userContent = `Candidate Resume Profile:
 ${material}
@@ -273,10 +305,17 @@ ${SKELETON}`;
 
       const started = Date.now();
       let lastFailureCode = 'INVALID_RESPONSE_SCHEMA';
+      // An auth/quota rejection is provider-wide, not model-wide: skip the rest
+      // of that provider's ladder but still try the next provider.
+      const rejectedProviders = new Set<string>();
+      let apinexAttempt = 0;
 
-      for (const [index, candidateModel] of candidateModels.entries()) {
-        const model = normalizeRoleModel(candidateModel);
-        const timeoutMs = Math.min(MODEL_TIMEOUTS_MS[index] ?? 25_000, INFERENCE_BUDGET_MS - (Date.now() - started));
+      for (const [index, attempt] of attempts.entries()) {
+        if (rejectedProviders.has(attempt.provider)) continue;
+        const model = attempt.model;
+        const ownTimeout = attempt.provider === 'mercury' ? MERCURY_TIMEOUT_MS : MODEL_TIMEOUTS_MS[Math.min(apinexAttempt, MODEL_TIMEOUTS_MS.length - 1)] ?? 25_000;
+        if (attempt.provider === 'apinex') apinexAttempt++;
+        const timeoutMs = Math.min(ownTimeout, INFERENCE_BUDGET_MS - (Date.now() - started));
         if (timeoutMs <= 0) {
           lastFailureCode = 'INFERENCE_TIMEOUT';
           break;
@@ -284,9 +323,9 @@ ${SKELETON}`;
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
           const request = transport({
-            url: 'https://api.apinex.bond/v1/chat/completions',
+            url: attempt.url,
             headers: {
-              Authorization: `Bearer ${process.env.APINEX_API_KEY}`,
+              Authorization: `Bearer ${attempt.key}`,
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
@@ -295,7 +334,10 @@ ${SKELETON}`;
                 { role: 'system', content: SYSTEM },
                 { role: 'user', content: userContent }
               ],
-              temperature: 0.1
+              ...(attempt.temperature === undefined ? {} : { temperature: attempt.temperature }),
+              // Mercury advertises json_mode; guaranteeing valid JSON removes the
+              // INVALID_RESPONSE_SCHEMA failures seen with the free models.
+              ...(attempt.jsonMode ? { response_format: { type: 'json_object' } } : {})
             }),
             timeoutMs,
             maxBytes: 96_000
@@ -313,17 +355,17 @@ ${SKELETON}`;
           const output = parseRoleOutput(content);
           const roles = validatedRoles(output.value, material, profile);
           const warning = index > 0
-            ? `${candidateModels[0].includes('luna') ? 'Luna' : candidateModels[0]} returned invalid role output or failed; validated fallback model ${model} was used.`
+            ? `${attempts[0].model.includes('luna') ? 'Luna' : attempts[0].model} returned invalid role output or failed; validated fallback model ${model} was used.`
             : output.repaired
               ? 'AI response lacked closing JSON delimiters; repaired delimiters only, then validated all fields and evidence.'
               : undefined;
           const result: RoleDiscoveryResult = { ...base, source: 'ai', model, roles, ...(warning ? { warning } : {}) };
           cache.set(cacheKey, result);
           while (cache.size > 128) cache.delete(cache.keys().next().value!);
-          console.info(`[role-discovery] source=ai model=${model} roles=${roles.length} ms=${Date.now() - started}`);
+          console.info(`[role-discovery] source=ai provider=${attempt.provider} model=${model} roles=${roles.length} ms=${Date.now() - started}`);
           return result;
         } catch (attemptErr: any) {
-          console.warn(`[role-discovery] model=${model} attempt failed:`, attemptErr?.message || attemptErr);
+          console.warn(`[role-discovery] provider=${attempt.provider} model=${model} attempt failed:`, attemptErr?.message || attemptErr);
           lastFailureCode = axios.isAxiosError(attemptErr)
             ? attemptErr.response?.status === 402
               ? 'HTTP_402_ACCOUNT_OR_QUOTA'
@@ -332,7 +374,7 @@ ${SKELETON}`;
               ? attemptErr.message
               : 'INVALID_RESPONSE_SCHEMA';
           if (axios.isAxiosError(attemptErr) && [401, 402, 403].includes(attemptErr.response?.status ?? 0)) {
-            break;
+            rejectedProviders.add(attempt.provider);
           }
           continue;
         } finally {

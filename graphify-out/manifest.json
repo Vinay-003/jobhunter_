@@ -1,0 +1,1262 @@
+{
+  "/home/mylappy/Projects/jobhunter_/api/internal/email.ts": {
+    "mtime": 1791456136.6315334,
+    "seen": 1793777648.434122,
+    "ast_hash": "fb4c4ba1975bdff7ea6381abd55e085c",
+    "semantic_hash": "fb4c4ba1975bdff7ea6381abd55e085c"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/001_initial_v2.sql": {
+    "mtime": 1791456136.6315334,
+    "seen": 1793777648.4341273,
+    "ast_hash": "ae5942a27d59a189fc88325b39753c21",
+    "semantic_hash": "ae5942a27d59a189fc88325b39753c21"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/002_add_fts.sql": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.43413,
+    "ast_hash": "025786275711eb613518c58d264f4385",
+    "semantic_hash": "025786275711eb613518c58d264f4385"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/003_storage_metadata.sql": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.4341311,
+    "ast_hash": "b29e802b654d5edca99dfd037a6efcf0",
+    "semantic_hash": "b29e802b654d5edca99dfd037a6efcf0"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/004_job_search_cache.sql": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.4341326,
+    "ast_hash": "d7f6ae6e82f243640050045dc8bc15d7",
+    "semantic_hash": "d7f6ae6e82f243640050045dc8bc15d7"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/005_keepalive.sql": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.4341338,
+    "ast_hash": "0c4840cd84848e4038be68dca2498295",
+    "semantic_hash": "0c4840cd84848e4038be68dca2498295"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/006_analysis_integrity.sql": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.4341347,
+    "ast_hash": "a782de093956c61de0f0925e6a5c01ec",
+    "semantic_hash": "a782de093956c61de0f0925e6a5c01ec"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/007_recommendation_integrity.sql": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.434136,
+    "ast_hash": "f2703150413837b398b00055bb038756",
+    "semantic_hash": "f2703150413837b398b00055bb038756"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/008_embedding_cache.sql": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.4341366,
+    "ast_hash": "46667358167a0d34040bee831b313163",
+    "semantic_hash": "46667358167a0d34040bee831b313163"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/009_recommendation_profile_version.sql": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.4341376,
+    "ast_hash": "be85660954ac6aaae0cf28b1dba46440",
+    "semantic_hash": "be85660954ac6aaae0cf28b1dba46440"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/migrations/010_auth_otp_and_verification.sql": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.4341383,
+    "ast_hash": "46664ad7e94f83265cc94195d612db6f",
+    "semantic_hash": "46664ad7e94f83265cc94195d612db6f"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/package.json": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.4341395,
+    "ast_hash": "2468a172c90bd46f601a2f882fc93889",
+    "semantic_hash": "2468a172c90bd46f601a2f882fc93889"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/python/app.py": {
+    "mtime": 1791456136.632339,
+    "seen": 1793777648.4341404,
+    "ast_hash": "34a3851fc26bba3f30b250798eab36d2",
+    "semantic_hash": "34a3851fc26bba3f30b250798eab36d2"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/python/job_matcher_ml.py": {
+    "mtime": 1791456136.633332,
+    "seen": 1793777648.4341412,
+    "ast_hash": "ef235fc9e16ac444e26b371ebb27ce84",
+    "semantic_hash": "ef235fc9e16ac444e26b371ebb27ce84"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/python/pdf_text_extract.py": {
+    "mtime": 1790002166.5225406,
+    "seen": 1793777648.4341419,
+    "ast_hash": "0fe214d24b6990c5bdda4003d8ee1388",
+    "semantic_hash": "0fe214d24b6990c5bdda4003d8ee1388"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/python/resume_analyzer_ml.py": {
+    "mtime": 1791456136.633332,
+    "seen": 1793777648.4341428,
+    "ast_hash": "6f62bdc825f8b1f003308a49fc10400d",
+    "semantic_hash": "6f62bdc825f8b1f003308a49fc10400d"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/config/database.ts": {
+    "mtime": 1791456136.633332,
+    "seen": 1793777648.4341438,
+    "ast_hash": "1636edf5eae8bedaf9c43c17682cfb97",
+    "semantic_hash": "1636edf5eae8bedaf9c43c17682cfb97"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/config/env.ts": {
+    "mtime": 1791456136.633332,
+    "seen": 1793777648.4341445,
+    "ast_hash": "4104429ec956b62531e843658690ab5b",
+    "semantic_hash": "4104429ec956b62531e843658690ab5b"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/config/schema.sql": {
+    "mtime": 1790002166.5236146,
+    "seen": 1793777648.4341455,
+    "ast_hash": "f78ffb065c2c5942334782fd7262d03b",
+    "semantic_hash": "f78ffb065c2c5942334782fd7262d03b"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/config/supabase_schema.sql": {
+    "mtime": 1790002166.5236146,
+    "seen": 1793777648.4341464,
+    "ast_hash": "c06282ecf0bf7cec1b5419427234ba0e",
+    "semantic_hash": "c06282ecf0bf7cec1b5419427234ba0e"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/controllers/analysisController.ts": {
+    "mtime": 1790002166.5236146,
+    "seen": 1793777648.4341471,
+    "ast_hash": "234ed308dacc6519868fdce105a280e6",
+    "semantic_hash": "234ed308dacc6519868fdce105a280e6"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/controllers/authController.ts": {
+    "mtime": 1791456136.633332,
+    "seen": 1793777648.434148,
+    "ast_hash": "4993f2f38d767a9cd3d99930351d4adc",
+    "semantic_hash": "4993f2f38d767a9cd3d99930351d4adc"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/db/migrate.ts": {
+    "mtime": 1791456136.6343322,
+    "seen": 1793777648.434149,
+    "ast_hash": "72a2c040dc1bf1e6ec1cdf85a267e747",
+    "semantic_hash": "72a2c040dc1bf1e6ec1cdf85a267e747"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/db/migrations/create_resumes_table.sql": {
+    "mtime": 1791456136.6343322,
+    "seen": 1793777648.43415,
+    "ast_hash": "e7003120c06884c95bbcec18dbe0debb",
+    "semantic_hash": "e7003120c06884c95bbcec18dbe0debb"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/db/migrations/run_migration.ts": {
+    "mtime": 1790002166.5240765,
+    "seen": 1793777648.4341507,
+    "ast_hash": "40bad6be774aa94bddf0d6bc2cf41f7c",
+    "semantic_hash": "40bad6be774aa94bddf0d6bc2cf41f7c"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/db/schemaReadiness.ts": {
+    "mtime": 1791456136.6343322,
+    "seen": 1793777648.4341514,
+    "ast_hash": "5449195708da9736002040438574040c",
+    "semantic_hash": "5449195708da9736002040438574040c"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/middleware/auth.ts": {
+    "mtime": 1791456136.6343322,
+    "seen": 1793777648.4341524,
+    "ast_hash": "387eb75a361be9dde2f545af7b930292",
+    "semantic_hash": "387eb75a361be9dde2f545af7b930292"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/middleware/csrf.ts": {
+    "mtime": 1791456136.6343322,
+    "seen": 1793777648.4341533,
+    "ast_hash": "79229cb1b3232794836d25c1ae7125dc",
+    "semantic_hash": "79229cb1b3232794836d25c1ae7125dc"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/middleware/requireSession.ts": {
+    "mtime": 1791456136.6343322,
+    "seen": 1793777648.4341543,
+    "ast_hash": "737e732c04e8eb6b2341f76b60ba6480",
+    "semantic_hash": "737e732c04e8eb6b2341f76b60ba6480"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/middleware/validate.ts": {
+    "mtime": 1791456136.6343322,
+    "seen": 1793777648.434155,
+    "ast_hash": "792e6a88488ea026f5fd0d4f39a634cd",
+    "semantic_hash": "792e6a88488ea026f5fd0d4f39a634cd"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/models/Resume.ts": {
+    "mtime": 1791456136.6343322,
+    "seen": 1793777648.434156,
+    "ast_hash": "3611e7349aeb356ebf5f6f013a3aaf86",
+    "semantic_hash": "3611e7349aeb356ebf5f6f013a3aaf86"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/analysis/jdRubric.ts": {
+    "mtime": 1791458598.5233634,
+    "seen": 1793777648.434157,
+    "ast_hash": "bdde45deab6f329002e6d5072d701bc5",
+    "semantic_hash": "bdde45deab6f329002e6d5072d701bc5"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/analysis/reportSchema.ts": {
+    "mtime": 1791458078.8457878,
+    "seen": 1793777648.4341576,
+    "ast_hash": "b53636d84eb8963d5373c748f5e5c250",
+    "semantic_hash": "b53636d84eb8963d5373c748f5e5c250"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/ats/readinessScorer.ts": {
+    "mtime": 1791458078.8457878,
+    "seen": 1793777648.4341586,
+    "ast_hash": "769b85548d57e9a0477e8f3310e6d6af",
+    "semantic_hash": "769b85548d57e9a0477e8f3310e6d6af"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/auth/session.ts": {
+    "mtime": 1791456136.635389,
+    "seen": 1793777648.4341593,
+    "ast_hash": "afed5154350f0ba6a3adffe6829c34a7",
+    "semantic_hash": "afed5154350f0ba6a3adffe6829c34a7"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/evaluation/ranking-label.v1.schema.json": {
+    "mtime": 1791456136.6358097,
+    "seen": 1793777648.4341605,
+    "ast_hash": "c52d7e9b2d74b5d6c88d8286eb12eb04",
+    "semantic_hash": "c52d7e9b2d74b5d6c88d8286eb12eb04"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/evaluation/rankingEvaluation.ts": {
+    "mtime": 1791456136.6358097,
+    "seen": 1793777648.4341612,
+    "ast_hash": "90fae866b46bdcdbc3eb997cad95c84f",
+    "semantic_hash": "90fae866b46bdcdbc3eb997cad95c84f"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/evaluation/runEvaluation.ts": {
+    "mtime": 1791456136.6358097,
+    "seen": 1793777648.434162,
+    "ast_hash": "9cce8de389c5555a727ab6df86eb3e37",
+    "semantic_hash": "9cce8de389c5555a727ab6df86eb3e37"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/jd/jdParser.ts": {
+    "mtime": 1791456136.6358097,
+    "seen": 1793777648.4341629,
+    "ast_hash": "af8f3ac6f9d053a01ac523b08524ef26",
+    "semantic_hash": "af8f3ac6f9d053a01ac523b08524ef26"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/jd/matcher.ts": {
+    "mtime": 1791456136.636201,
+    "seen": 1793777648.4341638,
+    "ast_hash": "fd80c444b6d872836d065700529016ca",
+    "semantic_hash": "fd80c444b6d872836d065700529016ca"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/jobs/availability.ts": {
+    "mtime": 1791456136.636201,
+    "seen": 1793777648.4341648,
+    "ast_hash": "64603ec990cfe2471ee5b1945903692d",
+    "semantic_hash": "64603ec990cfe2471ee5b1945903692d"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/jobs/eligibility.ts": {
+    "mtime": 1791458598.5243635,
+    "seen": 1793777648.4341655,
+    "ast_hash": "bc523057c06f5f8a66fd1b8d1b9fe6ca",
+    "semantic_hash": "bc523057c06f5f8a66fd1b8d1b9fe6ca"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/jobs/geography.ts": {
+    "mtime": 1791456136.6364176,
+    "seen": 1793777648.4341662,
+    "ast_hash": "aabd93f0f594840ccb643e622351c41c",
+    "semantic_hash": "aabd93f0f594840ccb643e622351c41c"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/jobs/queryPlanner.ts": {
+    "mtime": 1791456136.6364176,
+    "seen": 1793777648.4341676,
+    "ast_hash": "9b0ce01399c82a1153cf3875a9180968",
+    "semantic_hash": "9b0ce01399c82a1153cf3875a9180968"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/jobs/ranking.ts": {
+    "mtime": 1791458598.5243635,
+    "seen": 1793777648.4341686,
+    "ast_hash": "541add9d8428f400595bec36d8bcd5e2",
+    "semantic_hash": "541add9d8428f400595bec36d8bcd5e2"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/jobs/roleDiscovery.ts": {
+    "mtime": 1791456136.6364176,
+    "seen": 1793777648.4341693,
+    "ast_hash": "697e2863fc66d855e34f894fd6f2c1fc",
+    "semantic_hash": "697e2863fc66d855e34f894fd6f2c1fc"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/jobs/seniority.ts": {
+    "mtime": 1791458598.5243635,
+    "seen": 1793777648.43417,
+    "ast_hash": "9c7f27d2a6781fddb3e8ecfbc6976d5d",
+    "semantic_hash": "9c7f27d2a6781fddb3e8ecfbc6976d5d"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/matching/evidenceBuilder.ts": {
+    "mtime": 1791456136.6364176,
+    "seen": 1793777648.4341712,
+    "ast_hash": "7f66f945be3ed5b04c15ead45abe438d",
+    "semantic_hash": "7f66f945be3ed5b04c15ead45abe438d"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/parsing/documentBlocks.ts": {
+    "mtime": 1791456136.6364176,
+    "seen": 1793777648.434172,
+    "ast_hash": "ef961d77864e630f6deed01c83178bfe",
+    "semantic_hash": "ef961d77864e630f6deed01c83178bfe"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/parsing/pdfParser.ts": {
+    "mtime": 1791456136.6371927,
+    "seen": 1793777648.4341726,
+    "ast_hash": "e4f536db39f2875c91ce6ab498e455f9",
+    "semantic_hash": "e4f536db39f2875c91ce6ab498e455f9"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/parsing/resumeProfile.ts": {
+    "mtime": 1791458078.8457878,
+    "seen": 1793777648.4341733,
+    "ast_hash": "d0016df77985673064c68678ef1d04e6",
+    "semantic_hash": "d0016df77985673064c68678ef1d04e6"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/parsing/skillExtractor.ts": {
+    "mtime": 1791456136.6371927,
+    "seen": 1793777648.4341743,
+    "ast_hash": "818aa19f6bb7dee1189094d0ccc338c4",
+    "semantic_hash": "818aa19f6bb7dee1189094d0ccc338c4"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/parsing/skillNormalizer.ts": {
+    "mtime": 1791456136.6371927,
+    "seen": 1793777648.4341753,
+    "ast_hash": "d701267cd164e534e6e151102abf75f1",
+    "semantic_hash": "d701267cd164e534e6e151102abf75f1"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/modules/storage/supabaseStorage.ts": {
+    "mtime": 1791456136.6371927,
+    "seen": 1793777648.434176,
+    "ast_hash": "40ac2864518120b4e440ce235cf027d3",
+    "semantic_hash": "40ac2864518120b4e440ce235cf027d3"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/embeddings/AwsSageMakerEmbeddingProvider.ts": {
+    "mtime": 1791456136.637684,
+    "seen": 1793777648.4341767,
+    "ast_hash": "d66fc7c7e6eab7b3de85a748af21a80c",
+    "semantic_hash": "d66fc7c7e6eab7b3de85a748af21a80c"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/embeddings/EmbeddingProvider.ts": {
+    "mtime": 1791456136.6377842,
+    "seen": 1793777648.4341776,
+    "ast_hash": "761de7a4600b77928a243d0997fce6e8",
+    "semantic_hash": "761de7a4600b77928a243d0997fce6e8"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/embeddings/LocalEmbeddingProvider.ts": {
+    "mtime": 1791456136.6377842,
+    "seen": 1793777648.4341784,
+    "ast_hash": "641129653e52024a07573e144ce312fb",
+    "semantic_hash": "641129653e52024a07573e144ce312fb"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/embeddings/MockEmbeddingProvider.ts": {
+    "mtime": 1791456136.6377842,
+    "seen": 1793777648.4341793,
+    "ast_hash": "10795d4eb55b5c835bc97a335ff571a2",
+    "semantic_hash": "10795d4eb55b5c835bc97a335ff571a2"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/embeddings/embeddingCache.ts": {
+    "mtime": 1791456136.6377842,
+    "seen": 1793777648.43418,
+    "ast_hash": "efedcff620205dd2afa90fcacf9950c1",
+    "semantic_hash": "efedcff620205dd2afa90fcacf9950c1"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/embeddings/local_embedding_worker.py": {
+    "mtime": 1791456136.6377842,
+    "seen": 1793777648.434181,
+    "ast_hash": "a38dec370a66591e0ba67b2f51ac5ee7",
+    "semantic_hash": "a38dec370a66591e0ba67b2f51ac5ee7"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/embeddings/validateVectors.ts": {
+    "mtime": 1791456136.6377842,
+    "seen": 1793777648.4341817,
+    "ast_hash": "92e73bde7d8c5f41f82f0ea3833854f4",
+    "semantic_hash": "92e73bde7d8c5f41f82f0ea3833854f4"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/AdzunaProvider.ts": {
+    "mtime": 1791456136.6377842,
+    "seen": 1793777648.4341826,
+    "ast_hash": "971e1e7daf81122e219d4470d3e856b1",
+    "semantic_hash": "971e1e7daf81122e219d4470d3e856b1"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/ArbeitnowProvider.ts": {
+    "mtime": 1791456136.6382663,
+    "seen": 1793777648.4341834,
+    "ast_hash": "50532f16eee3734438210f608f24bd14",
+    "semantic_hash": "50532f16eee3734438210f608f24bd14"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/JobProvider.ts": {
+    "mtime": 1791456136.6382663,
+    "seen": 1793777648.434184,
+    "ast_hash": "b8fbaa4286718cba7b6edddf1269f1d9",
+    "semantic_hash": "b8fbaa4286718cba7b6edddf1269f1d9"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/JobsPipeProvider.ts": {
+    "mtime": 1791456136.6382663,
+    "seen": 1793777648.434185,
+    "ast_hash": "39fbc61085176365d392002555278390",
+    "semantic_hash": "39fbc61085176365d392002555278390"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/JoobleProvider.ts": {
+    "mtime": 1791456136.6382663,
+    "seen": 1793777648.4341857,
+    "ast_hash": "fbd0478b3334c8e2a697da65b970f0f5",
+    "semantic_hash": "fbd0478b3334c8e2a697da65b970f0f5"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/RemotiveProvider.ts": {
+    "mtime": 1791456136.6382663,
+    "seen": 1793777648.4341867,
+    "ast_hash": "05bc9c11065ec832ab6620c63adec159",
+    "semantic_hash": "05bc9c11065ec832ab6620c63adec159"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/jobStore.ts": {
+    "mtime": 1791456136.6382663,
+    "seen": 1793777648.4341874,
+    "ast_hash": "140408e0e0da50b1bcbc5ae01d0d482c",
+    "semantic_hash": "140408e0e0da50b1bcbc5ae01d0d482c"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/providerBudgets.ts": {
+    "mtime": 1791456136.6382663,
+    "seen": 1793777648.4341884,
+    "ast_hash": "d91c3773e28499db195cc6179b98810f",
+    "semantic_hash": "d91c3773e28499db195cc6179b98810f"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/retrievalExecutor.ts": {
+    "mtime": 1791456136.6383321,
+    "seen": 1793777648.4341893,
+    "ast_hash": "3e93bfd3d59ffceacdb7d29b02f8f5ad",
+    "semantic_hash": "3e93bfd3d59ffceacdb7d29b02f8f5ad"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/providers/jobs/retrievalPlan.ts": {
+    "mtime": 1791456136.6383321,
+    "seen": 1793777648.43419,
+    "ast_hash": "32d53eb98e60813facb872cff34dd2ed",
+    "semantic_hash": "32d53eb98e60813facb872cff34dd2ed"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/analysis.ts": {
+    "mtime": 1790002166.5240765,
+    "seen": 1793777648.4341908,
+    "ast_hash": "356cf3b084de23e73a10d2d853ab921e",
+    "semantic_hash": "356cf3b084de23e73a10d2d853ab921e"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/auth.ts": {
+    "mtime": 1790002166.524383,
+    "seen": 1793777648.4341917,
+    "ast_hash": "6d45c7219019f54626f099b92c57d330",
+    "semantic_hash": "6d45c7219019f54626f099b92c57d330"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/jobs.ts": {
+    "mtime": 1791456136.6383321,
+    "seen": 1793777648.4341927,
+    "ast_hash": "94f557214ee5aad0b586d62eb3aff337",
+    "semantic_hash": "94f557214ee5aad0b586d62eb3aff337"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/keepalive.ts": {
+    "mtime": 1791456136.6383321,
+    "seen": 1793777648.4341934,
+    "ast_hash": "d0b7c3896d232e04a27e954934eb69e1",
+    "semantic_hash": "d0b7c3896d232e04a27e954934eb69e1"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/upload.ts": {
+    "mtime": 1791456136.6383321,
+    "seen": 1793777648.434194,
+    "ast_hash": "388f391d3913e9fbaf29baec287cf4c8",
+    "semantic_hash": "388f391d3913e9fbaf29baec287cf4c8"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/v1/analyses.ts": {
+    "mtime": 1791458078.8457878,
+    "seen": 1793777648.434195,
+    "ast_hash": "166024b00d4bd6d6cbdcea04e4a00301",
+    "semantic_hash": "166024b00d4bd6d6cbdcea04e4a00301"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/v1/auth.ts": {
+    "mtime": 1791457042.135266,
+    "seen": 1793777648.434196,
+    "ast_hash": "afaf6bdce35a628fe4f8c4f120999ee4",
+    "semantic_hash": "afaf6bdce35a628fe4f8c4f120999ee4"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/v1/index.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.434197,
+    "ast_hash": "8e782ca7f3c8e1c616dc8fcb72b881d5",
+    "semantic_hash": "8e782ca7f3c8e1c616dc8fcb72b881d5"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/v1/profile.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.4341977,
+    "ast_hash": "aa8fc1c39ec638a3cacba75986524292",
+    "semantic_hash": "aa8fc1c39ec638a3cacba75986524292"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/v1/recommendations.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.4341986,
+    "ast_hash": "43e31f5184cce6f67c9ef50cc35ba38e",
+    "semantic_hash": "43e31f5184cce6f67c9ef50cc35ba38e"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/routes/v1/resumes.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.4341996,
+    "ast_hash": "32e4863a4b72c78c41efefa3772a2013",
+    "semantic_hash": "32e4863a4b72c78c41efefa3772a2013"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/scripts/test_all_providers_diagnostics.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.4342003,
+    "ast_hash": "cd252f8bf852f5b6d0278cd4bc6b1c37",
+    "semantic_hash": "cd252f8bf852f5b6d0278cd4bc6b1c37"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/server.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.434201,
+    "ast_hash": "df171c51b253717e33e796b7d0db976b",
+    "semantic_hash": "df171c51b253717e33e796b7d0db976b"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/services/analysisService.old.ts": {
+    "mtime": 1790002166.5246487,
+    "seen": 1793777648.4342022,
+    "ast_hash": "c3962a6aaadb9c4ef2e18dbe7377e3c0",
+    "semantic_hash": "c3962a6aaadb9c4ef2e18dbe7377e3c0"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/services/analysisService.ts": {
+    "mtime": 1790002166.5248625,
+    "seen": 1793777648.434203,
+    "ast_hash": "dc4854621d657a3afa9b8756c645dfc8",
+    "semantic_hash": "dc4854621d657a3afa9b8756c645dfc8"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/services/jobRecommendationService.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.4342046,
+    "ast_hash": "c8c423d5a97d17ead260feb7e7afcc98",
+    "semantic_hash": "c8c423d5a97d17ead260feb7e7afcc98"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/services/joobleService.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.4342055,
+    "ast_hash": "8390bb2af5ef5d539bc978b757edc56c",
+    "semantic_hash": "8390bb2af5ef5d539bc978b757edc56c"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/services/recommendationPersistence.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.4342065,
+    "ast_hash": "66950948bd0dadbbbdb48bde3e8e37cc",
+    "semantic_hash": "66950948bd0dadbbbdb48bde3e8e37cc"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/adzunaProvider.test.ts": {
+    "mtime": 1791456136.6396108,
+    "seen": 1793777648.4342072,
+    "ast_hash": "56ec19cadb6c306459921b468ef78c7b",
+    "semantic_hash": "56ec19cadb6c306459921b468ef78c7b"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/analysisIntegrity.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.434208,
+    "ast_hash": "e16b30968d8e5a6b60474cf3f411b537",
+    "semantic_hash": "e16b30968d8e5a6b60474cf3f411b537"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/auditRegression.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342089,
+    "ast_hash": "7f7c9cb8a072f4b925061a8742c724c5",
+    "semantic_hash": "7f7c9cb8a072f4b925061a8742c724c5"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/authOtp.test.ts": {
+    "mtime": 1791456136.6700995,
+    "seen": 1793777648.4342098,
+    "ast_hash": "a02e4d9a54b6c3dda319e0303bd4bc7e",
+    "semantic_hash": "a02e4d9a54b6c3dda319e0303bd4bc7e"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/dataScienceMatchingRegression.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342105,
+    "ast_hash": "594e02381c6be19fe8f0f667bba62448",
+    "semantic_hash": "594e02381c6be19fe8f0f667bba62448"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/eligibilityLocation.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342115,
+    "ast_hash": "26a3806807adedac02971514ec6e32b8",
+    "semantic_hash": "26a3806807adedac02971514ec6e32b8"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/embeddingCache.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342124,
+    "ast_hash": "fe1fb3559f572ea68b87da51b818340c",
+    "semantic_hash": "fe1fb3559f572ea68b87da51b818340c"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/jdMatch.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342132,
+    "ast_hash": "83f449c8207104a80d0200798eb98cf3",
+    "semantic_hash": "83f449c8207104a80d0200798eb98cf3"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/jdQualificationRegression.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342139,
+    "ast_hash": "9e242debb46a4a73900f61556bb9edfe",
+    "semantic_hash": "9e242debb46a4a73900f61556bb9edfe"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/jobFreshness.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342146,
+    "ast_hash": "3decc284b8723feab69e6ac7997d27cf",
+    "semantic_hash": "3decc284b8723feab69e6ac7997d27cf"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/jobsPipeCursor.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342158,
+    "ast_hash": "96ebfa24147c996fe3fcd555b0e4eb5c",
+    "semantic_hash": "96ebfa24147c996fe3fcd555b0e4eb5c"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/localEmbeddings.integration.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342165,
+    "ast_hash": "ebf86226823bb958e54870388d3aeb28",
+    "semantic_hash": "ebf86226823bb958e54870388d3aeb28"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/matchScoreImprovements.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342172,
+    "ast_hash": "6d9096f82c259db6c81cd8f4e01831a5",
+    "semantic_hash": "6d9096f82c259db6c81cd8f4e01831a5"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/parsingEvidence.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.434218,
+    "ast_hash": "92dd0b15e73cbbc44f039319becebe6e",
+    "semantic_hash": "92dd0b15e73cbbc44f039319becebe6e"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/parsingRegressions.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342186,
+    "ast_hash": "3300ddaef165feb71c088d9f8f2cc4f8",
+    "semantic_hash": "3300ddaef165feb71c088d9f8f2cc4f8"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/providerResult.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342198,
+    "ast_hash": "b6d81c81f406248aba6eab565bda4daf",
+    "semantic_hash": "b6d81c81f406248aba6eab565bda4daf"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/providerRetrieval.test.ts": {
+    "mtime": 1791456136.6407204,
+    "seen": 1793777648.4342206,
+    "ast_hash": "b6a748476054a5a37d19e9ea3ccba972",
+    "semantic_hash": "b6a748476054a5a37d19e9ea3ccba972"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/rankingEvaluation.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342213,
+    "ast_hash": "019611db85834f8249df161be64c63fe",
+    "semantic_hash": "019611db85834f8249df161be64c63fe"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/rankingRegression.test.ts": {
+    "mtime": 1791458598.5243635,
+    "seen": 1793777648.4342222,
+    "ast_hash": "69214a1230d42ef85d56e6e030381856",
+    "semantic_hash": "69214a1230d42ef85d56e6e030381856"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/rateLimitProxy.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342234,
+    "ast_hash": "bdf6d9fec0d15cbdb2244f20fc144741",
+    "semantic_hash": "bdf6d9fec0d15cbdb2244f20fc144741"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/readiness.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342241,
+    "ast_hash": "32164ec9850e465aac19c98922e6b448",
+    "semantic_hash": "32164ec9850e465aac19c98922e6b448"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/recommendationEndpoints.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342248,
+    "ast_hash": "e51c5ab7d0e74dced5fe8d2721a8d164",
+    "semantic_hash": "e51c5ab7d0e74dced5fe8d2721a8d164"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/recommendationIntegrity.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342256,
+    "ast_hash": "a3cdcd5376e81cf5858b3e008b598dae",
+    "semantic_hash": "a3cdcd5376e81cf5858b3e008b598dae"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/recommendationPersistence.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342265,
+    "ast_hash": "f1cd37de77b586855f22b77370f72cfe",
+    "semantic_hash": "f1cd37de77b586855f22b77370f72cfe"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/retrievalExecutor.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342275,
+    "ast_hash": "eb5ba687dc27db37c54130859b13ad02",
+    "semantic_hash": "eb5ba687dc27db37c54130859b13ad02"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/roleDiscoveryRegression.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342282,
+    "ast_hash": "62bc8c0f7953b8b4d3b77bb1b7eefe08",
+    "semantic_hash": "62bc8c0f7953b8b4d3b77bb1b7eefe08"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/schemaReadiness.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.434229,
+    "ast_hash": "49119e450a84c76bdfa3822256d07e7d",
+    "semantic_hash": "49119e450a84c76bdfa3822256d07e7d"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/security.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.43423,
+    "ast_hash": "ded5e301081e27ccfb0cca0d47a66850",
+    "semantic_hash": "ded5e301081e27ccfb0cca0d47a66850"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/semanticMatchingAndJdExtraction.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342308,
+    "ast_hash": "7abbe80ed6939185e770a7931b862d2b",
+    "semantic_hash": "7abbe80ed6939185e770a7931b862d2b"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/skillExtractionRegression.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342315,
+    "ast_hash": "45c3a83c83d06f96f530af47530106f1",
+    "semantic_hash": "45c3a83c83d06f96f530af47530106f1"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/tests/v1Security.test.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342322,
+    "ast_hash": "63bbdf9993aef0e61c6d4dafab367669",
+    "semantic_hash": "63bbdf9993aef0e61c6d4dafab367669"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/types/pdf-parse.d.ts": {
+    "mtime": 1791456136.641332,
+    "seen": 1793777648.4342334,
+    "ast_hash": "e8f6072534ed3e6a68a681c3b3a7d090",
+    "semantic_hash": "e8f6072534ed3e6a68a681c3b3a7d090"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/types/xenova.d.ts": {
+    "mtime": 1791456136.6427746,
+    "seen": 1793777648.4342341,
+    "ast_hash": "ad154cdf739192fe5fc09281697bc45e",
+    "semantic_hash": "ad154cdf739192fe5fc09281697bc45e"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/utils/otp.ts": {
+    "mtime": 1791456136.6702104,
+    "seen": 1793777648.434235,
+    "ast_hash": "7c2829ae956718a0af2ad36956746836",
+    "semantic_hash": "7c2829ae956718a0af2ad36956746836"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/utils/otpEmailTemplate.ts": {
+    "mtime": 1791456136.6703053,
+    "seen": 1793777648.4342358,
+    "ast_hash": "603d42769489b20ee3787080a856190a",
+    "semantic_hash": "603d42769489b20ee3787080a856190a"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/src/utils/sendEmail.ts": {
+    "mtime": 1791456136.6703053,
+    "seen": 1793777648.434237,
+    "ast_hash": "301c72c5d74a9a70bfd14397d39b82d2",
+    "semantic_hash": "301c72c5d74a9a70bfd14397d39b82d2"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/tsconfig.json": {
+    "mtime": 1791456136.6429043,
+    "seen": 1793777648.4342377,
+    "ast_hash": "f03661557228b8642aff31509102893f",
+    "semantic_hash": "f03661557228b8642aff31509102893f"
+  },
+  "/home/mylappy/Projects/jobhunter_/e2e/audit_integrity.py": {
+    "mtime": 1791456136.6429043,
+    "seen": 1793777648.4342384,
+    "ast_hash": "c3bf78a6a76a4846a2d78ba1d6dd4d4a",
+    "semantic_hash": "c3bf78a6a76a4846a2d78ba1d6dd4d4a"
+  },
+  "/home/mylappy/Projects/jobhunter_/e2e/login_gate_check.py": {
+    "mtime": 1791456136.6429043,
+    "seen": 1793777648.4342391,
+    "ast_hash": "a2e066a2f2a8793b886ad374706eabc5",
+    "semantic_hash": "a2e066a2f2a8793b886ad374706eabc5"
+  },
+  "/home/mylappy/Projects/jobhunter_/e2e/recommendation_browser_acceptance.py": {
+    "mtime": 1791456136.6429043,
+    "seen": 1793777648.4342403,
+    "ast_hash": "554da03cfa9e3230090390e12d0bc276",
+    "semantic_hash": "554da03cfa9e3230090390e12d0bc276"
+  },
+  "/home/mylappy/Projects/jobhunter_/e2e/resume_view_e2e.py": {
+    "mtime": 1791456136.6429043,
+    "seen": 1793777648.434241,
+    "ast_hash": "7d93d2db31f7716d43347b843d074ca7",
+    "semantic_hash": "7d93d2db31f7716d43347b843d074ca7"
+  },
+  "/home/mylappy/Projects/jobhunter_/e2e/ui_redesign_acceptance.py": {
+    "mtime": 1791456136.6429043,
+    "seen": 1793777648.434242,
+    "ast_hash": "b7c8aa1eb566c120eb5f920bd3652429",
+    "semantic_hash": "b7c8aa1eb566c120eb5f920bd3652429"
+  },
+  "/home/mylappy/Projects/jobhunter_/e2e/ui_redesign_motion.py": {
+    "mtime": 1791456136.6429043,
+    "seen": 1793777648.4342427,
+    "ast_hash": "04d36aea5ba176e100ebe4c85a2da718",
+    "semantic_hash": "04d36aea5ba176e100ebe4c85a2da718"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/api/internal/email.ts": {
+    "mtime": 1791456543.1550646,
+    "seen": 1793777648.4342437,
+    "ast_hash": "a0e8d64a2cb4432fedd237a199d28a84",
+    "semantic_hash": "a0e8d64a2cb4432fedd237a199d28a84"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/eslint.config.js": {
+    "mtime": 1790002166.5258272,
+    "seen": 1793777648.4342444,
+    "ast_hash": "2bc8570a791ea45c9895ec66bc8a86b9",
+    "semantic_hash": "2bc8570a791ea45c9895ec66bc8a86b9"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/package.json": {
+    "mtime": 1791456136.6437666,
+    "seen": 1793777648.4342453,
+    "ast_hash": "f0f0eec056d406ff9d7d244de5e0bcb0",
+    "semantic_hash": "f0f0eec056d406ff9d7d244de5e0bcb0"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/postcss.config.js": {
+    "mtime": 1790002166.5262125,
+    "seen": 1793777648.434246,
+    "ast_hash": "c735540bb63936a123bc867d950c9f69",
+    "semantic_hash": "c735540bb63936a123bc867d950c9f69"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/App.legacy.tsx": {
+    "mtime": 1791456136.6437666,
+    "seen": 1793777648.434247,
+    "ast_hash": "4613b86f3bee371b8aab9bdf2b672f06",
+    "semantic_hash": "4613b86f3bee371b8aab9bdf2b672f06"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/App.tsx": {
+    "mtime": 1791456136.6437666,
+    "seen": 1793777648.4342477,
+    "ast_hash": "64c6fbeeab4917d395f01a0040f2fb04",
+    "semantic_hash": "64c6fbeeab4917d395f01a0040f2fb04"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/app/AppShell.tsx": {
+    "mtime": 1791456136.6437666,
+    "seen": 1793777648.4342487,
+    "ast_hash": "ec2508e9f1b9e5f78e41dbf56e2f9028",
+    "semantic_hash": "ec2508e9f1b9e5f78e41dbf56e2f9028"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/app/router.tsx": {
+    "mtime": 1791456136.644701,
+    "seen": 1793777648.4342494,
+    "ast_hash": "0eb4c41fe5781d48d004833731e95c4b",
+    "semantic_hash": "0eb4c41fe5781d48d004833731e95c4b"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/components/AuthForm.tsx": {
+    "mtime": 1791456136.644701,
+    "seen": 1793777648.4342504,
+    "ast_hash": "d65b653b6359a55e286afd1fa0b8d598",
+    "semantic_hash": "d65b653b6359a55e286afd1fa0b8d598"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/components/CreativeVisual.tsx": {
+    "mtime": 1791456136.644701,
+    "seen": 1793777648.434251,
+    "ast_hash": "ef028cde6912c83aec0f83fa724b0fbe",
+    "semantic_hash": "ef028cde6912c83aec0f83fa724b0fbe"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/components/DragReturn.tsx": {
+    "mtime": 1791456136.644701,
+    "seen": 1793777648.434252,
+    "ast_hash": "effe4a3c37aabca30affb9136cb0b5f8",
+    "semantic_hash": "effe4a3c37aabca30affb9136cb0b5f8"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/components/Icon.tsx": {
+    "mtime": 1791456136.644701,
+    "seen": 1793777648.4342527,
+    "ast_hash": "94532cd9735160b3641327e050047cb5",
+    "semantic_hash": "94532cd9735160b3641327e050047cb5"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/components/PublicAuth.tsx": {
+    "mtime": 1791457042.135266,
+    "seen": 1793777648.4342535,
+    "ast_hash": "25e1b969dc58f131d62682c009caaef1",
+    "semantic_hash": "25e1b969dc58f131d62682c009caaef1"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/components/PublicLegal.tsx": {
+    "mtime": 1791456136.644701,
+    "seen": 1793777648.4342546,
+    "ast_hash": "b52d91fe7abc84db7619e31b5a45bc06",
+    "semantic_hash": "b52d91fe7abc84db7619e31b5a45bc06"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/components/UI.tsx": {
+    "mtime": 1791456136.644701,
+    "seen": 1793777648.4342554,
+    "ast_hash": "7df1f29a3dabe39cf20dc7c7151d8f93",
+    "semantic_hash": "7df1f29a3dabe39cf20dc7c7151d8f93"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/context/ResumeContext.tsx": {
+    "mtime": 1790002166.5265667,
+    "seen": 1793777648.434256,
+    "ast_hash": "3b6d144b52c39f585447a2fdda6c1651",
+    "semantic_hash": "3b6d144b52c39f585447a2fdda6c1651"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/features/auth/AuthContext.tsx": {
+    "mtime": 1791457042.135266,
+    "seen": 1793777648.4342568,
+    "ast_hash": "b8a5fb25424cb8b87866a27e3bcd5485",
+    "semantic_hash": "b8a5fb25424cb8b87866a27e3bcd5485"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/lib/api.ts": {
+    "mtime": 1791456136.645389,
+    "seen": 1793777648.434258,
+    "ast_hash": "56c38e21f460ab0bd64d6b306edf6662",
+    "semantic_hash": "56c38e21f460ab0bd64d6b306edf6662"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/lib/display.ts": {
+    "mtime": 1791456136.6456783,
+    "seen": 1793777648.4342587,
+    "ast_hash": "d2544fb41721cf7510ce82c18ca2b5b2",
+    "semantic_hash": "d2544fb41721cf7510ce82c18ca2b5b2"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/lib/matchReport.ts": {
+    "mtime": 1791458078.8467877,
+    "seen": 1793777648.4342594,
+    "ast_hash": "6d28164e329ed3cc38df6a14e7824026",
+    "semantic_hash": "6d28164e329ed3cc38df6a14e7824026"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/lib/validation.ts": {
+    "mtime": 1791456136.6456783,
+    "seen": 1793777648.4342601,
+    "ast_hash": "b5e78bf6685448d3ed3763cb9fdd82de",
+    "semantic_hash": "b5e78bf6685448d3ed3763cb9fdd82de"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/main.tsx": {
+    "mtime": 1790002166.5268178,
+    "seen": 1793777648.434261,
+    "ast_hash": "eb10138ed48767691f1c803ec3337c9b",
+    "semantic_hash": "eb10138ed48767691f1c803ec3337c9b"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/AnalysisPage.tsx": {
+    "mtime": 1791458078.8467877,
+    "seen": 1793777648.4342618,
+    "ast_hash": "c776c4932da3b488ce72c2afc50215f6",
+    "semantic_hash": "c776c4932da3b488ce72c2afc50215f6"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/AtsPage.tsx": {
+    "mtime": 1791456136.646082,
+    "seen": 1793777648.4342628,
+    "ast_hash": "08db1c598a136ce6bc74957fcc131dc1",
+    "semantic_hash": "08db1c598a136ce6bc74957fcc131dc1"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/ErrorPage.tsx": {
+    "mtime": 1791456136.646082,
+    "seen": 1793777648.4342635,
+    "ast_hash": "52c9ea26136abcb11cc61d76f9ccbbd6",
+    "semantic_hash": "52c9ea26136abcb11cc61d76f9ccbbd6"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/Home.tsx": {
+    "mtime": 1791456136.646082,
+    "seen": 1793777648.4342647,
+    "ast_hash": "65d3e784ac2415baf73611ef60c813cd",
+    "semantic_hash": "65d3e784ac2415baf73611ef60c813cd"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/JobsPage.tsx": {
+    "mtime": 1791458078.8467877,
+    "seen": 1793777648.4342654,
+    "ast_hash": "b9feecc9a5f8fd05d5cf7003cd4ea81b",
+    "semantic_hash": "b9feecc9a5f8fd05d5cf7003cd4ea81b"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/LandingPage.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.4342663,
+    "ast_hash": "05f26bf8833f280222b67497fa95eac4",
+    "semantic_hash": "05f26bf8833f280222b67497fa95eac4"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/LoginPage.legacy.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.434267,
+    "ast_hash": "a4a735fe2766234e145887c86d518ec5",
+    "semantic_hash": "a4a735fe2766234e145887c86d518ec5"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/LoginPage.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.434268,
+    "ast_hash": "d2e24662f316ec7b411b8a9dd97afddd",
+    "semantic_hash": "d2e24662f316ec7b411b8a9dd97afddd"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/NotFoundPage.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.4342687,
+    "ast_hash": "adc57d41a45ccb3c5931b110fb5c8465",
+    "semantic_hash": "adc57d41a45ccb3c5931b110fb5c8465"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/PrivacyPage.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.4342697,
+    "ast_hash": "13c379d7a1568dcc70cbe8a145a867e6",
+    "semantic_hash": "13c379d7a1568dcc70cbe8a145a867e6"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/ProfilePage.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.4342704,
+    "ast_hash": "992ed963af9d92c16f2b8d976885c33d",
+    "semantic_hash": "992ed963af9d92c16f2b8d976885c33d"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/ResumeViewPage.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.4342716,
+    "ast_hash": "864a225f0085b7eec25c81cbae9afa96",
+    "semantic_hash": "864a225f0085b7eec25c81cbae9afa96"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/ResumesPage.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.4342723,
+    "ast_hash": "e0f6217843553cd2c63e0a3c31afa31c",
+    "semantic_hash": "e0f6217843553cd2c63e0a3c31afa31c"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/SignupPage.legacy.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.434273,
+    "ast_hash": "80e2b09e0e06403b0857eca486b2dab4",
+    "semantic_hash": "80e2b09e0e06403b0857eca486b2dab4"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/SignupPage.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.4342737,
+    "ast_hash": "95f3c57b4099ceaac3fed0ecf87bf161",
+    "semantic_hash": "95f3c57b4099ceaac3fed0ecf87bf161"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/TermsPage.tsx": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.434275,
+    "ast_hash": "a162c38c014c7fdf9dacb0d97124cf33",
+    "semantic_hash": "a162c38c014c7fdf9dacb0d97124cf33"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/pages/libraryData.ts": {
+    "mtime": 1791456136.6467545,
+    "seen": 1793777648.4342756,
+    "ast_hash": "f2c48c01054ef94e46597133ba5145ba",
+    "semantic_hash": "f2c48c01054ef94e46597133ba5145ba"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/src/vite-env.d.ts": {
+    "mtime": 1791456136.6483226,
+    "seen": 1793777648.4342775,
+    "ast_hash": "9d4f5a75f439c52d44df7f23616b5ead",
+    "semantic_hash": "9d4f5a75f439c52d44df7f23616b5ead"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/tailwind.config.js": {
+    "mtime": 1790002166.52727,
+    "seen": 1793777648.4342787,
+    "ast_hash": "478ae51f7490f76d857a8afbda44c90e",
+    "semantic_hash": "478ae51f7490f76d857a8afbda44c90e"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/tests/display.test.ts": {
+    "mtime": 1791456136.6483226,
+    "seen": 1793777648.4342794,
+    "ast_hash": "a3ef53b1147497d6c0aee5d539500ae7",
+    "semantic_hash": "a3ef53b1147497d6c0aee5d539500ae7"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/tests/matchReport.test.ts": {
+    "mtime": 1791456136.648496,
+    "seen": 1793777648.4342802,
+    "ast_hash": "44e6ee86b2074974cee185720f93353b",
+    "semantic_hash": "44e6ee86b2074974cee185720f93353b"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/tsconfig.app.json": {
+    "mtime": 1790002166.52727,
+    "seen": 1793777648.4342809,
+    "ast_hash": "c181cad8596965f0e008618e4f6cccd3",
+    "semantic_hash": "c181cad8596965f0e008618e4f6cccd3"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/tsconfig.json": {
+    "mtime": 1790002166.52727,
+    "seen": 1793777648.434282,
+    "ast_hash": "a3d39fa780ebff65444de257f291ce6c",
+    "semantic_hash": "a3d39fa780ebff65444de257f291ce6c"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/tsconfig.node.json": {
+    "mtime": 1790002166.52727,
+    "seen": 1793777648.4342828,
+    "ast_hash": "fd32df1e922920eb085c1d20ffd7fd58",
+    "semantic_hash": "fd32df1e922920eb085c1d20ffd7fd58"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/vercel.json": {
+    "mtime": 1791456136.648496,
+    "seen": 1793777648.4342835,
+    "ast_hash": "e4559f6f01c74b4b58f46f83f7ed8c8c",
+    "semantic_hash": "e4559f6f01c74b4b58f46f83f7ed8c8c"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/vite.config.ts": {
+    "mtime": 1790002166.52727,
+    "seen": 1793777648.4342842,
+    "ast_hash": "90c638b20bba866e8bc6968fa8561e1d",
+    "semantic_hash": "90c638b20bba866e8bc6968fa8561e1d"
+  },
+  "/home/mylappy/Projects/jobhunter_/graphify/graph.json": {
+    "mtime": 1793775111.4773529,
+    "seen": 1793777648.4342854,
+    "ast_hash": "ae360b172d728f50b1e1e0c15fb2de5f",
+    "semantic_hash": "ae360b172d728f50b1e1e0c15fb2de5f"
+  },
+  "/home/mylappy/Projects/jobhunter_/graphify/graphify.py": {
+    "mtime": 1793775108.5321548,
+    "seen": 1793777648.434286,
+    "ast_hash": "bc7c17595e8784db7751e5f90671e175",
+    "semantic_hash": "bc7c17595e8784db7751e5f90671e175"
+  },
+  "/home/mylappy/Projects/jobhunter_/graphify/query.py": {
+    "mtime": 1793775100.4014957,
+    "seen": 1793777648.4342868,
+    "ast_hash": "19eb7bedf285b24ca2f851657c28f4ae",
+    "semantic_hash": "19eb7bedf285b24ca2f851657c28f4ae"
+  },
+  "/home/mylappy/Projects/jobhunter_/workers/keepalive-worker/package.json": {
+    "mtime": 1791456136.6494033,
+    "seen": 1793777648.4342875,
+    "ast_hash": "b2b36b9aab1168f80a99403d42c0361d",
+    "semantic_hash": "b2b36b9aab1168f80a99403d42c0361d"
+  },
+  "/home/mylappy/Projects/jobhunter_/workers/keepalive-worker/worker.js": {
+    "mtime": 1791456136.6494033,
+    "seen": 1793777648.4342887,
+    "ast_hash": "da8053331c4e339849e3ec656b83b2b5",
+    "semantic_hash": "da8053331c4e339849e3ec656b83b2b5"
+  },
+  "/home/mylappy/Projects/jobhunter_/.github/workflows/ci.yml": {
+    "mtime": 1791456136.6302853,
+    "seen": 1793777648.4342895,
+    "ast_hash": "3c867319bf692bbde30c3b19c8ee614c",
+    "semantic_hash": "3c867319bf692bbde30c3b19c8ee614c"
+  },
+  "/home/mylappy/Projects/jobhunter_/ARCHITECTURE.md": {
+    "mtime": 1791456136.6302853,
+    "seen": 1793777648.4342902,
+    "ast_hash": "1a763e58d8df2b3add9aeab91f7cd072",
+    "semantic_hash": "1a763e58d8df2b3add9aeab91f7cd072"
+  },
+  "/home/mylappy/Projects/jobhunter_/DEPLOYMENT.md": {
+    "mtime": 1791456136.6302853,
+    "seen": 1793777648.434291,
+    "ast_hash": "b0bd92b2d5b866390c6bd538e600ad6e",
+    "semantic_hash": "b0bd92b2d5b866390c6bd538e600ad6e"
+  },
+  "/home/mylappy/Projects/jobhunter_/IMPLEMENTATION_STATUS.md": {
+    "mtime": 1791456136.6302853,
+    "seen": 1793777648.434292,
+    "ast_hash": "dc9746b381c9444c173e060a1991b285",
+    "semantic_hash": "dc9746b381c9444c173e060a1991b285"
+  },
+  "/home/mylappy/Projects/jobhunter_/INTERVIEW_PREP_README.md": {
+    "mtime": 1791746270.1101346,
+    "seen": 1793777648.4342928,
+    "ast_hash": "a621283f95a1960cd8b1921324ec4430",
+    "semantic_hash": "a621283f95a1960cd8b1921324ec4430"
+  },
+  "/home/mylappy/Projects/jobhunter_/INTERVIEW_QUESTIONS.md": {
+    "mtime": 1791746353.2728574,
+    "seen": 1793777648.4342935,
+    "ast_hash": "6389874fa9de24b1b399cb41ff05d226",
+    "semantic_hash": "6389874fa9de24b1b399cb41ff05d226"
+  },
+  "/home/mylappy/Projects/jobhunter_/KEEPALIVE.md": {
+    "mtime": 1791456136.6302853,
+    "seen": 1793777648.4342942,
+    "ast_hash": "1e124eaa1dc58f59dd4831cfdd2a5f73",
+    "semantic_hash": "1e124eaa1dc58f59dd4831cfdd2a5f73"
+  },
+  "/home/mylappy/Projects/jobhunter_/LOCAL_SETUP.md": {
+    "mtime": 1791456136.6303322,
+    "seen": 1793777648.434295,
+    "ast_hash": "8b91c17beb7dd12d54a005e6a322aacb",
+    "semantic_hash": "8b91c17beb7dd12d54a005e6a322aacb"
+  },
+  "/home/mylappy/Projects/jobhunter_/PLAN.md": {
+    "mtime": 1791456136.6303322,
+    "seen": 1793777648.4342961,
+    "ast_hash": "01476f911ef9c42ffa0c6032853fd1b0",
+    "semantic_hash": "01476f911ef9c42ffa0c6032853fd1b0"
+  },
+  "/home/mylappy/Projects/jobhunter_/README.md": {
+    "mtime": 1791456136.6303322,
+    "seen": 1793777648.4342968,
+    "ast_hash": "a864b7c26b6a2f8110cbed0739c5c869",
+    "semantic_hash": "a864b7c26b6a2f8110cbed0739c5c869"
+  },
+  "/home/mylappy/Projects/jobhunter_/SECURITY.md": {
+    "mtime": 1791456136.6303322,
+    "seen": 1793777648.4342976,
+    "ast_hash": "dd487e4429b5bd8ca8c5efdd1fdc09e9",
+    "semantic_hash": "dd487e4429b5bd8ca8c5efdd1fdc09e9"
+  },
+  "/home/mylappy/Projects/jobhunter_/SYSTEM_DESIGN.md": {
+    "mtime": 1791456136.6303322,
+    "seen": 1793777648.4342983,
+    "ast_hash": "b180e454496609b74bedb6879340a154",
+    "semantic_hash": "b180e454496609b74bedb6879340a154"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/README.md": {
+    "mtime": 1790002166.520639,
+    "seen": 1793777648.4342992,
+    "ast_hash": "b32b13f797f9e9905c266df8439f7098",
+    "semantic_hash": "b32b13f797f9e9905c266df8439f7098"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/evaluation/README.md": {
+    "mtime": 1791456136.6315334,
+    "seen": 1793777648.4343002,
+    "ast_hash": "20116cabc4ae75610db230414c85c9db",
+    "semantic_hash": "20116cabc4ae75610db230414c85c9db"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/python/README.md": {
+    "mtime": 1790002166.5218053,
+    "seen": 1793777648.434301,
+    "ast_hash": "8b6189e1a8d0d043e65dd67ec375ac69",
+    "semantic_hash": "8b6189e1a8d0d043e65dd67ec375ac69"
+  },
+  "/home/mylappy/Projects/jobhunter_/backend/python/requirements.txt": {
+    "mtime": 1790002166.5225406,
+    "seen": 1793777648.4343016,
+    "ast_hash": "175308d9748d2c8b7c112b50406f9eac",
+    "semantic_hash": "175308d9748d2c8b7c112b50406f9eac"
+  },
+  "/home/mylappy/Projects/jobhunter_/frontend/project/index.html": {
+    "mtime": 1791456136.6437666,
+    "seen": 1793777648.4343026,
+    "ast_hash": "1f27c8a6253ca1fd9f12c9cfee87efaf",
+    "semantic_hash": "1f27c8a6253ca1fd9f12c9cfee87efaf"
+  },
+  "/home/mylappy/Projects/jobhunter_/graphify/CONCEPTS.md": {
+    "mtime": 1793775103.8103602,
+    "seen": 1793777648.4343035,
+    "ast_hash": "fb5458ac3afe7d4e8ea5f44c7bed9e75",
+    "semantic_hash": "fb5458ac3afe7d4e8ea5f44c7bed9e75"
+  },
+  "/home/mylappy/Projects/jobhunter_/graphify/GRAPH.md": {
+    "mtime": 1793775111.480222,
+    "seen": 1793777648.4343042,
+    "ast_hash": "fb5458ac3afe7d4e8ea5f44c7bed9e75",
+    "semantic_hash": "fb5458ac3afe7d4e8ea5f44c7bed9e75"
+  },
+  "/home/mylappy/Projects/jobhunter_/infra/aws/README.md": {
+    "mtime": 1791456136.6486554,
+    "seen": 1793777648.434305,
+    "ast_hash": "0d5814888fc27dccac1ae82708fc9907",
+    "semantic_hash": "0d5814888fc27dccac1ae82708fc9907"
+  },
+  "/home/mylappy/Projects/jobhunter_/plan.md": {
+    "mtime": 1791456136.6489623,
+    "seen": 1793777648.434306,
+    "ast_hash": "590da683f76836e1e2b3ede984eadfd4",
+    "semantic_hash": "590da683f76836e1e2b3ede984eadfd4"
+  },
+  "/home/mylappy/Projects/jobhunter_/render.yaml": {
+    "mtime": 1791456136.6490395,
+    "seen": 1793777648.4343069,
+    "ast_hash": "a1cf56a40ac28e4612f03af559314cb8",
+    "semantic_hash": "a1cf56a40ac28e4612f03af559314cb8"
+  },
+  "/home/mylappy/Projects/jobhunter_/reports/2026-10-03-four-resume-audit.md": {
+    "mtime": 1791456136.6490395,
+    "seen": 1793777648.4343076,
+    "ast_hash": "1f4047a44adae9bf23cbc19411a700e7",
+    "semantic_hash": "1f4047a44adae9bf23cbc19411a700e7"
+  },
+  "/home/mylappy/Projects/jobhunter_/reports/ui-redesign-2026-10-05.md": {
+    "mtime": 1791456136.64917,
+    "seen": 1793777648.4343083,
+    "ast_hash": "a2577c18c400249cd82a4f3bf9f0ab50",
+    "semantic_hash": "a2577c18c400249cd82a4f3bf9f0ab50"
+  },
+  "/home/mylappy/Projects/jobhunter_/workers/keepalive-worker/README.md": {
+    "mtime": 1791456136.649311,
+    "seen": 1793777648.4343095,
+    "ast_hash": "6d032bebf95baa843af14679c1de42c1",
+    "semantic_hash": "6d032bebf95baa843af14679c1de42c1"
+  }
+}

@@ -4,9 +4,10 @@ import { JobQueryPlanner } from '../modules/jobs/queryPlanner.js';
 const profile:any={summary:null,skills:['React','Express','PostgreSQL'],experience:[{title:'Software Development Intern',description:'Implemented REST APIs and React interfaces',kind:'internship'}],projects:[{title:'Hiring platform | React, Express, PostgreSQL',description:'Built authentication and payment integration with database persistence'}],education:[{degree:'B.Tech',completed:false,completionDate:'May 2027'}],seniority:'intern'};
 const valid={roles:[{title:'Full Stack Developer',reason:'Both application layers evidenced.',evidence:['Implemented REST APIs and React interfaces']},{title:'Backend Developer',reason:'Server and persistence evidenced.',evidence:['Built authentication and payment integration']},{title:'Frontend Developer',reason:'Interfaces explicitly evidenced.',evidence:['React interfaces']}]};
 const response=(x:unknown)=>JSON.stringify({choices:[{message:{content:JSON.stringify(x)}}]});
-let key:string|undefined,model:string|undefined;
-beforeEach(()=>{key=process.env.APINEX_API_KEY;model=process.env.APINEX_ROLE_MODEL;process.env.APINEX_API_KEY='unit-test-placeholder';process.env.APINEX_ROLE_MODEL='free/gpt-6-luna';});
-afterEach(()=>{if(key===undefined)delete process.env.APINEX_API_KEY;else process.env.APINEX_API_KEY=key;if(model===undefined)delete process.env.APINEX_ROLE_MODEL;else process.env.APINEX_ROLE_MODEL=model;});
+let key:string|undefined,model:string|undefined,mercuryKey:string|undefined,inceptionKey:string|undefined;
+// Mercury env must be absent so the apinex ladder (and its asserted timeouts/order) is the only path.
+beforeEach(()=>{key=process.env.APINEX_API_KEY;model=process.env.APINEX_ROLE_MODEL;mercuryKey=process.env.MERCURY_API_KEY;inceptionKey=process.env.INCEPTION_API_KEY;delete process.env.MERCURY_API_KEY;delete process.env.INCEPTION_API_KEY;process.env.APINEX_API_KEY='unit-test-placeholder';process.env.APINEX_ROLE_MODEL='free/gpt-6-luna';});
+afterEach(()=>{if(key===undefined)delete process.env.APINEX_API_KEY;else process.env.APINEX_API_KEY=key;if(model===undefined)delete process.env.APINEX_ROLE_MODEL;else process.env.APINEX_ROLE_MODEL=model;if(mercuryKey===undefined)delete process.env.MERCURY_API_KEY;else process.env.MERCURY_API_KEY=mercuryKey;if(inceptionKey===undefined)delete process.env.INCEPTION_API_KEY;else process.env.INCEPTION_API_KEY=inceptionKey;});
 describe('role discovery',()=>{
   test('mixed demonstrated stacks give fullstack first; all three manual titles covered',()=>{
     expect(inferRoleTitles(profile)).toEqual(['Full Stack Developer','Backend Developer','Frontend Developer']);

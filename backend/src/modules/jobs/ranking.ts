@@ -170,13 +170,17 @@ export async function rankJobsBatch(
     );
     const eduText = eduSentences.length ? eduSentences.slice(0, 2).join(' ').trim().slice(0, 250) : null;
     const parsed = parseJd(`Job title: ${job.title}\n${job.description ?? ''}`);
+    // Responsibilities stay UNCAPPED for scoring (regression test guards this);
+    // embed volume is bounded by the round-robin MAX_JOB_TEXTS cap below.
     const responsibilities = parsed.responsibilities;
+    // Skills are capped: extractSkills over a full JD yields dozens of tokens,
+    // but required/preferred/provider skills (ordered first) carry the signal.
     const jobSkills = [...new Set([
       ...(parsed.requiredSkills ?? []),
       ...(parsed.preferredSkills ?? []),
       ...(job.providerSkills ?? []),
       ...extractSkills(jobText.toLowerCase()),
-    ].map((s) => s.trim()).filter(Boolean))];
+    ].map((s) => s.trim()).filter(Boolean))].slice(0, 20);
     const jobDescSnippet = redactProfessionalText(job.description ?? job.title).slice(0, 1500);
 
     return {
@@ -197,12 +201,34 @@ export async function rankJobsBatch(
     ...candidateSkills,
   ].map((t) => t.trim()).filter(Boolean))];
 
-  const jobGroup = [...new Set(perJobTexts.flatMap((t) => [
-    t.title,
-    ...(t.responsibilities.length ? t.responsibilities : [t.jobDesc]),
-    ...(t.eduText ? [t.eduText] : []),
-    ...t.jobSkills,
-  ]).map((t) => t.trim()).filter(Boolean))];
+  const jobGroupLists = perJobTexts.map((entry) => [...new Set([
+    entry.title,
+    ...(entry.responsibilities.length ? entry.responsibilities : [entry.jobDesc]),
+    ...(entry.eduText ? [entry.eduText] : []),
+    ...entry.jobSkills,
+  ].map((text) => text.trim()).filter(Boolean))]);
+  // Global safety valve: a 300-job run would otherwise fan out ~6000 vectors
+  // (~190 sequential SageMaker invokes). Round-robin across jobs until the cap
+  // so every job keeps its title and highest-priority texts instead of the
+  // last jobs losing all semantic signal to flatMap ordering.
+  const MAX_JOB_TEXTS = 2400;
+  const jobGroup: string[] = [];
+  {
+    const seen = new Set<string>();
+    const cursors = jobGroupLists.map(() => 0);
+    const active = jobGroupLists.map((_, i) => i);
+    while (active.length && jobGroup.length < MAX_JOB_TEXTS) {
+      for (let a = active.length - 1; a >= 0; a--) {
+        const i = active[a];
+        const cursor = cursors[i];
+        if (cursor >= jobGroupLists[i].length) { active.splice(a, 1); continue; }
+        const text = jobGroupLists[i][cursor];
+        cursors[i] = cursor + 1;
+        if (!seen.has(text)) { seen.add(text); jobGroup.push(text); }
+        if (jobGroup.length >= MAX_JOB_TEXTS) break;
+      }
+    }
+  }
 
   const uniq = [...new Set([
     ...resumeGroup,
@@ -380,6 +406,10 @@ export async function rankJobsBatch(
     {
       const responsibilities = perJobTexts[idx].responsibilities;
       for (const responsibility of responsibilities) {
+        // Round-robin embed cap can truncate this text: without a vector every
+        // pairScore is 0, which would wrongly count as "unsupported" and drag
+        // coverage down. Skip only when vectors exist but this one is missing.
+        if (vec.size && !vec.has(responsibility.trim())) continue;
         let best = 0, bestChunk: string | null = null;
         for (const rc of resumeChunks) {
           const s = pairScore(rc, responsibility);
