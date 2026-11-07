@@ -27,6 +27,29 @@ describe('JD qualification regressions', () => {
     expect(eligibleJob(job('Software Engineer', description), 'intern', prefs, { totalExperienceYears: .33 }).status).toBe('ineligible');
     expect(scoreJdRubric(candidate, jd, matchJd(candidate, jd), []).eligibility).toBe('ineligible');
   });
+  test('label-style experience lines set seniority and years', () => {
+    const description = 'Job description:\n\nExperience required: 5+ years\n\nRequirements:\n\nData Architect :\nStrong in Data Warehousing\nStrong SQL';
+    expect(detectJobSeniority('Data Warehouse Professional', description)).toBe('senior');
+    const jd = parseJd(description);
+    expect(jd.minYears).toBe(5);
+    expect(jd.seniority).toBe('senior');
+    expect(eligibleJob(job('Data Engineer', description), 'junior', prefs, { totalExperienceYears: 1 }).status).toBe('ineligible');
+  });
+  test('tenure phrasings without seniority words still band from years', () => {
+    const cases: Array<[string, string | null]> = [
+      ['Minimum 5 years of experience', 'senior'],
+      ['5+ years of experience required', 'senior'],
+      ['Requires 3 years experience', 'mid'],
+      ['Experience: 2 years', 'mid'],
+      ['2-4 years of relevant experience', 'mid'],
+      ['We are a company with 20 years of history.', null],
+      ['no year mention at all here', null],
+    ];
+    for (const [text, expected] of cases) {
+      expect(detectJobSeniority('Data Engineer', text)).toBe(expected);
+      expect(parseJd(text).seniority).toBe(expected);
+    }
+  });
   test('snippet experience is a barrier, with unknown qualification evidence', () => {
     const j = job('Software Engineer: Workday Integration Tech Dev', 'Exp:6+ Years');
     expect(eligibleJob(j, 'intern', prefs, { totalExperienceYears: .33 }).status).toBe('ineligible');

@@ -1,5 +1,5 @@
 import { extractSkills } from '../parsing/skillExtractor.js';
-import { detectSeniority, type CanonicalSeniority } from '../jobs/seniority.js';
+import { detectSeniority, yearRequirement, type CanonicalSeniority } from '../jobs/seniority.js';
 export type RequirementGroup = { allOf: string[]; anyOf: string[]; required: boolean; confidence: number; evidence: string; start: number; end: number };
 export type ParsedJobDescription = {
   title: string | null; seniority: CanonicalSeniority | 'junior' | 'lead' | null;
@@ -21,24 +21,6 @@ function heading(line: string): 'required' | 'preferred' | 'responsibilities' | 
   if (classified) return classified[1];
   if (/^#{1,6}\s/.test(line) || /^(?:benefits|about us|role overview|overview|company|location|compensation|education|application process|who we are|job details|application question\(s\))$/i.test(normalized)) return 'other';
   return null;
-}
-function yearRequirement(text: string): { min: number | null; max: number | null } {
-  // Only professional-tenure labels are evidence. Do not interpret company age,
-  // product age, or arbitrary "3-6 months" durations as candidate experience.
-  if (!/\b(?:experience|exp\.?|professional|industry|engineering)\b/i.test(text) || /\b(?:company|business|founded|established|since)\b/i.test(text)) return { min: null, max: null };
-  const bare = text.match(/\b(?:exp\.?|experience)\s*[:=-]?\s*(\d{1,2})\s*(?:[-–—]|to)\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\b/i)
-    ?? text.match(/\b(?:exp\.?|experience)\s*[:=-]?\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\b/i);
-  if (bare) {
-    const isRange = /(?:[-–—]|to)/i.test(bare[0]);
-    return { min: Number(bare[1]), max: isRange ? (bare[3] ? null : Number(bare[2])) : (bare[2] ? null : Number(bare[1])) };
-  }
-  const simpleRange = text.match(/\b(\d{1,2})\s*(?:[-–—]|to)\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\s*(?:of\s+)?(?:professional\s+)?(?:[a-z]+\s+){0,4}experience\b/i);
-  if (simpleRange) return { min: Number(simpleRange[1]), max: simpleRange[3] ? null : Number(simpleRange[2]) };
-  const range = text.match(/\b(\d{1,2})\s*[-–—]\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:[a-z]+\s+){0,5}experience\b/i);
-  if (range) return { min: Number(range[1]), max: range[3] ? null : Number(range[2]) };
-  const single = text.match(/\b(\d{1,2})(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:[a-z]+\s+){0,5}(?:experience|engineering|software development)\b/i)
-    ?? text.match(/\b(\d{1,2})(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?experience\s+(?:in|with|as)\b/i);
-  return single ? { min: Number(single[1]), max: single[2] ? null : Number(single[1]) } : { min: null, max: null };
 }
 export function parseJd(jdText: string): ParsedJobDescription {
   const lines = [...jdText.matchAll(/[^\n]+/g)].map(match => ({ raw: match[0], start: match.index, end: match.index + match[0].length }));
