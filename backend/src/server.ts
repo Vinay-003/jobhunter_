@@ -8,7 +8,6 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import uploadRoutes from './routes/upload.js';
 import analysisRoutes from './routes/analysis.js';
-import jobRoutes from './routes/jobs.js';
 import keepaliveRoutes from './routes/keepalive.js';
 import v1Router from './routes/v1/index.js';
 import fs from 'fs';
@@ -58,6 +57,9 @@ const authLimiter = rateLimit({ windowMs: 15*60*1000, max: 20, standardHeaders: 
 app.post(['/api/auth/login', '/api/auth/signup'], authLimiter);
 const uploadLimiter = rateLimit({ windowMs: 60*1000, max: 10, standardHeaders: true, legacyHeaders: false });
 app.post(['/api/v1/auth/login', '/api/v1/auth/signup'], authLimiter);
+// OTP endpoints: verification codes are 6 digits — cap guessing per IP
+const otpLimiter = rateLimit({ windowMs: 15*60*1000, max: 10, standardHeaders: true, legacyHeaders: false });
+app.post(['/api/v1/auth/verify-otp', '/api/v1/auth/resend-otp'], otpLimiter);
 app.post('/api/v1/resumes', uploadLimiter);
 app.use('/api/v1', csrfProtection);
 
@@ -80,7 +82,6 @@ app.use('/api/keepalive', keepaliveRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api', uploadRoutes);
 app.use('/api', analysisRoutes);
-app.use('/api', jobRoutes);
 
 // V1 API (spec-compliant) — also exposes /api/v1/keepalive via v1Router
 app.use('/api/v1', v1Router);
@@ -102,8 +103,7 @@ app.get('/', (req, res) => {
     endpoints: {
       auth: '/api/auth',
       resumes: '/api',
-      analysis: '/api/analyze',
-      jobs: '/api/jobs'
+      analysis: '/api/analyze'
     }
   });
 });
@@ -179,9 +179,6 @@ async function startServer(): Promise<void> {
   console.log('  POST /api/auth/login - Login');
   console.log('  POST /api/upload-resume - Upload resume');
   console.log('  POST /api/analyze - Analyze resume');
-  console.log('  POST /api/jobs/scrape - Scrape jobs');
-  console.log('  GET  /api/jobs - Get all jobs');
-  console.log('  GET  /api/jobs/recommendations - Get recommendations');
   console.log('='.repeat(50));
   });
 }

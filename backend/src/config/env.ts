@@ -110,9 +110,10 @@ export function isAllowedOrigin(origin?: string | null): boolean {
     const url = new URL(origin);
     // Allow localhost on any port for development/testing
     if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
-    // Allow any Vercel deployment (production, preview, and branch URLs)
-    if (url.hostname.endsWith('.vercel.app')) return true;
-    // Allow custom domain and any subdomains
+    // Allow custom domain and any subdomains. NO *.vercel.app wildcard: prod
+    // cookies are SameSite=None, so any Vercel site could make credentialed
+    // cross-origin requests against the API. Preview deploys must be listed
+    // in CORS_ALLOWED_ORIGINS instead.
     if (url.hostname === 'vinaybuilds.me' || url.hostname.endsWith('.vinaybuilds.me')) return true;
   } catch {
     return false;

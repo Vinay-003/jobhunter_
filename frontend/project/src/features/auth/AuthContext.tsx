@@ -79,7 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data.user) setUser(data.user);
       else await refresh();
       return { user: data.user };
-    } catch (err: any) {
+    } catch (err) {
       const msg = getApiErrorMessage(err);
       setError(msg);
       throw new Error(msg);
@@ -100,7 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         email: data.email || email,
         user: data.user,
       };
-    } catch (err: any) {
+    } catch (err) {
       const msg = getApiErrorMessage(err);
       setError(msg);
       throw new Error(msg);
@@ -121,7 +121,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         await refresh();
       }
-    } catch (err: any) {
+    } catch (err) {
       const msg = getApiErrorMessage(err);
       setError(msg);
       throw new Error(msg);
@@ -134,7 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await ensureCsrfToken();
       await api.post('/auth/resend-otp', { email, purpose });
-    } catch (err: any) {
+    } catch (err) {
       const msg = getApiErrorMessage(err);
       throw new Error(msg);
     }

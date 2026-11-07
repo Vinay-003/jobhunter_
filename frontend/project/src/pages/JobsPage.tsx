@@ -560,6 +560,7 @@ export default function JobsPage() {
       const POLL_INTERVAL_MS = 2500;
       const POLL_DEADLINE_MS = 8 * 60 * 1000;
       const pollStartedAt = Date.now();
+      let pollFailures = 0;
       while (runStatus === 'running' || runStatus === 'pending' || runStatus === '') {
         if (sequence !== requestSequence.current || controller.signal.aborted) return;
         if (Date.now() - pollStartedAt > POLL_DEADLINE_MS) {
@@ -567,7 +568,16 @@ export default function JobsPage() {
         }
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
         if (sequence !== requestSequence.current || controller.signal.aborted) return;
-        const statusResponse = await api.get(`/recommendation-runs/${startedRunId}`, { timeout: 30000, signal: controller.signal });
+        let statusResponse;
+        try {
+          statusResponse = await api.get(`/recommendation-runs/${startedRunId}`, { timeout: 30000, signal: controller.signal });
+          pollFailures = 0;
+        } catch (pollErr) {
+          // The run's heavy phase can starve the DB pool and fail a poll;
+          // the run keeps going, so tolerate a few failures before giving up.
+          if (++pollFailures >= 3) throw pollErr;
+          continue;
+        }
         const run = (statusResponse.data as any)?.run;
         runStatus = String(run?.status ?? '').toLowerCase();
         if (runStatus === 'failed') {

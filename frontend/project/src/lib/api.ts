@@ -158,7 +158,13 @@ export function getApiErrorMessage(err: unknown): string {
   }
   if (typeof err !== 'object') return GENERIC_MESSAGE;
 
-  const apiErr = err as any;
+  const apiErr = err as {
+    status?: number;
+    code?: string;
+    message?: string;
+    details?: unknown;
+    response?: { status?: number; data?: unknown };
+  };
   const status: number | undefined =
     typeof apiErr.status === 'number' ? apiErr.status
       : typeof apiErr.response?.status === 'number' ? apiErr.response?.status

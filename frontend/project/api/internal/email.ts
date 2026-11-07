@@ -13,7 +13,20 @@ function matchesSecret(received: string | null | undefined, expected: string | u
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-export default async function handler(req: any, res: any) {
+// Minimal Vercel function shapes — @vercel/node types not installed
+type HandlerReq = {
+  method?: string;
+  headers?: Record<string, string | string[] | undefined>;
+  body?: Record<string, unknown> | string;
+};
+type HandlerRes = {
+  setHeader(key: string, value: string): void;
+  status(code: number): HandlerRes;
+  json(payload: unknown): void;
+  end(): void;
+};
+
+export default async function handler(req: HandlerReq, res: HandlerRes) {
   // CORS / preflight support
   if (req.method === 'OPTIONS') {
     res.setHeader('Allow', 'POST');
@@ -35,7 +48,7 @@ export default async function handler(req: any, res: any) {
   let body = req.body;
   if (typeof body === 'string') {
     try {
-      body = JSON.parse(body);
+      body = JSON.parse(body) as Record<string, unknown>;
     } catch {
       return res.status(400).json({ success: false, message: 'Invalid JSON body' });
     }
@@ -53,9 +66,11 @@ export default async function handler(req: any, res: any) {
   if (
     !EMAIL_REGEX.test(to) ||
     to.length > 254 ||
+    // eslint-disable-next-line no-control-regex -- deliberate: reject control chars in headers
     /[\r\n\x00-\x1f\x7f]/.test(to) ||
     !subject ||
     subject.length > MAX_SUBJECT ||
+    // eslint-disable-next-line no-control-regex -- deliberate: reject control chars in headers
     /[\r\n\x00-\x1f\x7f]/.test(subject) ||
     !text ||
     text.length > MAX_TEXT ||
@@ -98,8 +113,8 @@ export default async function handler(req: any, res: any) {
 
     await transporter.sendMail(mailOptions);
     return res.status(200).json({ success: true, message: 'Accepted for sending' });
-  } catch (error: any) {
-    console.error('[email-relay] SMTP send error:', error?.message || error);
+  } catch (error) {
+    console.error('[email-relay] SMTP send error:', error instanceof Error ? error.message : error);
     return res.status(503).json({ success: false, message: 'Email relay delivery failed' });
   }
 }

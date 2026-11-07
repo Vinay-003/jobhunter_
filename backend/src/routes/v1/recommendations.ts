@@ -355,9 +355,16 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
 });
 router.get('/:id',authenticate,async (req:any,res) => {
   if (!z.string().uuid().safeParse(req.params.id).success) return res.status(400).json({ success:false,message:'Invalid run ID' });
-  const run = await pool.query('SELECT * FROM recommendation_runs WHERE id=$1 AND user_id=$2',[req.params.id,req.user.id]);
-  if (!run.rows[0]) return res.status(404).json({success:false,message:'Run not found'});
-  res.json({success:true,run:run.rows[0]});
+  // The run pipeline competes for pool connections; without this catch a pool
+  // timeout rejects the handler and Express never responds, killing the poll.
+  try {
+    const run = await pool.query('SELECT * FROM recommendation_runs WHERE id=$1 AND user_id=$2',[req.params.id,req.user.id]);
+    if (!run.rows[0]) return res.status(404).json({success:false,message:'Run not found'});
+    res.json({success:true,run:run.rows[0]});
+  } catch (err) {
+    console.warn(`[recommendations] run status lookup failed: ${(err as Error)?.message}`);
+    res.status(503).json({ success:false, code:'DB_BUSY', message:'Database is busy, retry shortly' });
+  }
 });
 router.get('/:id/results',authenticate,async (req:any,res) => {
   if (!z.string().uuid().safeParse(req.params.id).success) return res.status(400).json({success:false,message:'Invalid run ID'});

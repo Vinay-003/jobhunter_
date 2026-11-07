@@ -10,11 +10,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "bun test tests/",
     "preview": "vite preview"
   },
   "dependencies": {
     "axios": "^1.9.0",
-    "caniuse-lite": "^1.0.30001754",
     "framer-motion": "^11.0.3",
     "lucide-react": "^0.344.0",
     "nodemailer": "^10.0.16",

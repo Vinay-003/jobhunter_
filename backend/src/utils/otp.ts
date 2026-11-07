@@ -75,11 +75,11 @@ export async function consumeOtp(
     await client.query('BEGIN');
 
     const query = purpose
-      ? `SELECT id, value, expiry FROM otps WHERE email = $1 AND purpose = $2 AND expiry > now() ORDER BY last_sent DESC LIMIT 1`
-      : `SELECT id, value, expiry FROM otps WHERE email = $1 AND expiry > now() ORDER BY last_sent DESC LIMIT 1`;
+      ? `SELECT id, value, expiry, attempts FROM otps WHERE email = $1 AND purpose = $2 AND expiry > now() ORDER BY last_sent DESC LIMIT 1`
+      : `SELECT id, value, expiry, attempts FROM otps WHERE email = $1 AND expiry > now() ORDER BY last_sent DESC LIMIT 1`;
     const params = purpose ? [email, purpose] : [email];
 
-    const { rows } = await client.query<{ id: string; value: string; expiry: string }>(query, params);
+    const { rows } = await client.query<{ id: string; value: string; expiry: string; attempts: number }>(query, params);
     const record = rows[0];
 
     if (!record) {
@@ -92,6 +92,14 @@ export async function consumeOtp(
     const matches = storedBuf.length === inputBuf.length && crypto.timingSafeEqual(storedBuf, inputBuf);
 
     if (!matches) {
+      // Brute-force cap: 6-digit OTP was previously unlimited; kill it after 5 wrong guesses
+      const { rows: upd } = await client.query<{ attempts: number }>(
+        `UPDATE otps SET attempts = attempts + 1 WHERE id = $1 RETURNING attempts`,
+        [record.id]
+      );
+      if ((upd[0]?.attempts ?? 0) >= 5) {
+        await client.query(`DELETE FROM otps WHERE id = $1`, [record.id]);
+      }
       await client.query('COMMIT');
       return false;
     }

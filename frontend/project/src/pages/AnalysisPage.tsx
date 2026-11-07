@@ -577,8 +577,8 @@ function HealthEvidence({ view, rules }: { view: ViewModel; rules: Rule[]; actio
       .filter((r) => r.status !== 'pass' && (r.evidence || r.message))
       .map((r, i) => ({
         id: r.ruleId || `rule_${i}`,
-        type: (r.ruleId?.includes('repetition') ? 'repeated_verb' : r.ruleId?.includes('metric') ? 'unquantified' : 'formatting') as any,
-        category: (r.category as any) || 'impact',
+        type: r.ruleId?.includes('repetition') ? 'repeated_verb' : r.ruleId?.includes('metric') ? 'unquantified' : 'formatting',
+        category: (r.category as ResumeFinding['category'] | undefined) || 'impact',
         severity: r.status === 'fail' ? 'error' : 'warning',
         message: r.message || 'Check needs improvement',
         recommendation: r.recommendation || 'Review this line.',
@@ -1018,8 +1018,8 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
   const { id } = useParams();
   const location = useLocation();
   const locationState = location.state as AnalysisLocationState | null;
-  const initial = initialView ?? locationState?.initialAnalysis;
-  const [view, setView] = useState<ViewModel | null>(() => initial ? { ...initial, readiness: initial.readiness ?? (initial as any).analysis ?? {}, fileName: initial.fileName ?? locationState?.fileName, createdAt: initial.createdAt ?? locationState?.createdAt } : null);
+  const initial: (ViewModel & { analysis?: Readiness }) | undefined = initialView ?? locationState?.initialAnalysis;
+  const [view, setView] = useState<ViewModel | null>(() => initial ? { ...initial, readiness: initial.readiness ?? initial.analysis ?? {}, fileName: initial.fileName ?? locationState?.fileName, createdAt: initial.createdAt ?? locationState?.createdAt } : null);
   const [loading, setLoading] = useState(!initial);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>('overview');
@@ -1029,7 +1029,7 @@ export default function AnalysisPage({ initialView }: { initialView?: ViewModel 
     setError('');
     setTab('overview');
     if (initial) {
-      setView({ ...initial, readiness: initial.readiness ?? (initial as any).analysis ?? {}, fileName: initial.fileName ?? locationState?.fileName, createdAt: initial.createdAt ?? locationState?.createdAt });
+      setView({ ...initial, readiness: initial.readiness ?? initial.analysis ?? {}, fileName: initial.fileName ?? locationState?.fileName, createdAt: initial.createdAt ?? locationState?.createdAt });
       setLoading(false);
       return;
     }

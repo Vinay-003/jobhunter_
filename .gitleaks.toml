@@ -1,0 +1,11 @@
+# Gitleaks config — known, audited historical findings are allowlisted by commit.
+# Do not add new commits here without checking what the finding actually is.
+title = "jobhunter gitleaks"
+
+[allowlist]
+description = "Historical secrets found in the 2026-11 audit; all three are stale/harmless (CI's fake test JWT, an old Jooble UUID in a deleted file, and a fragment in deleted trash.html)."
+commits = [
+  "19c807e192c37fa77f9e4300319b75f90dd90c8e",
+  "d9a0836e1bf3760cbc580181fe7588bbf50a1e9e",
+  "2bf28f7cec3be1f07a184cdb42ccac92f57cff16",
+]
