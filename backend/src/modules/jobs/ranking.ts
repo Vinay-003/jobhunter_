@@ -95,6 +95,26 @@ function to01(rawCosine: number): number {
   return Math.min(1, 0.40 + (rawCosine - 0.50) / 0.40 * 0.60);
 }
 
+// Generic label words that never prove a skill on their own: unrelated labels
+// sharing only these (e.g. "data-warehousing" vs "data engineering") must not match.
+const GENERIC_SKILL_TOKENS = new Set([
+  'data', 'software', 'computer', 'programming', 'development', 'engineering',
+  'technology', 'technologies', 'tools', 'platform', 'platforms', 'systems',
+  'science', 'management', 'solutions',
+]);
+
+/** Chip/label form: drop "(computer programming)" parentheticals and kebab-case, then canonicalize. */
+export function displaySkillLabel(raw: string): string {
+  const direct = normalizeSkill(raw);
+  if (direct !== raw) return direct;
+  const cleaned = raw.replace(/\s*\([^)]*\)/g, ' ').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const normalized = normalizeSkill(cleaned);
+  if (normalized !== cleaned) return normalized;
+  return cleaned.toLowerCase() === cleaned
+    ? cleaned.replace(/\b[a-z]/g, (c) => c.toUpperCase())
+    : cleaned;
+}
+
 /**
  * Detect job seniority from title + snippet.
  * Handles: senior/junior words, Sr./Jr. abbreviations, roman numerals
@@ -161,6 +181,21 @@ export async function rankJobsBatch(
     ...((profile as any).demonstratedSkills ?? []),
     ...experienceSkills,
   ].map((s) => s.trim()).filter(Boolean))];
+
+  // Corpus for the semantic gate below: a job skill is only semantically trusted
+  // when the candidate's own text mentions it — raw label-vs-label embeddings
+  // match unrelated skills ("Azure" vs resume chunks, "data-warehousing" vs
+  // "Data Structures and Algorithms") because unrelated labels cluster at 0.4–0.8.
+  const corpusText = [...resumeChunks, ...candidateSkills].join('\n').toLowerCase();
+  const corpusTokens = new Set(corpusText.replace(/\([^)]*\)/g, ' ').split(/[^a-z0-9+#]+/).filter(Boolean));
+  const resumeMentions = (skill: string): boolean => {
+    const cleaned = skill.replace(/\([^)]*\)/g, ' ').toLowerCase();
+    const tokens = [...new Set(cleaned.split(/[^a-z0-9+#]+/).filter((t) => t.length >= 3 && !GENERIC_SKILL_TOKENS.has(t)))];
+    if (tokens.length) return tokens.some((t) => corpusTokens.has(t));
+    // All-generic label ("data engineering"): only the full phrase counts.
+    const phrase = cleaned.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${phrase}\\b`).test(corpusText);
+  };
 
   const perJobTexts = jobs.map((job) => {
     const jobText = `${job.title} ${job.description ?? ''}`;
@@ -295,7 +330,7 @@ export async function rankJobsBatch(
         ...experienceSkills,
       ]);
       const structured = parsed.requirementGroups?.some(group => group.confidence >= .7);
-      const display = (s: string) => normalizeSkill(s);
+      const display = displaySkillLabel;
 
       // Evaluate every job skill semantically against candidate skills and resume chunks
       const semanticallyMatchedSkills: string[] = [];
@@ -338,8 +373,10 @@ export async function rankJobsBatch(
           }
         }
 
-        // Matched if direct or semantic similarity >= 0.40 (raw cosine >= ~0.50)
-        const isMatched = isDirectSkill || bestSim >= 0.40;
+        // Matched if direct identity, or strong semantic similarity (raw cosine
+        // >= 0.70) AND the resume actually mentions the skill. Similarity alone
+        // matches unrelated labels — that's how Azure/data-warehousing appeared.
+        const isMatched = isDirectSkill || (bestSim >= 0.70 && resumeMentions(skill));
         if (isMatched) {
           semanticallyMatchedSkills.push(skill);
         }
@@ -350,9 +387,9 @@ export async function rankJobsBatch(
             source = 'demonstrated';
           } else if (matchedWith) {
             const normMatched = normalizeSkill(matchedWith).toLowerCase();
-            source = demonstrated.has(normMatched) ? 'demonstrated' : declared.has(normMatched) ? 'declared' : 'demonstrated';
+            source = demonstrated.has(normMatched) ? 'demonstrated' : declared.has(normMatched) ? 'declared' : 'unverified';
           } else {
-            source = demonstrated.has(normSkill) ? 'demonstrated' : declared.has(normSkill) ? 'declared' : 'demonstrated';
+            source = demonstrated.has(normSkill) ? 'demonstrated' : declared.has(normSkill) ? 'declared' : 'unverified';
           }
         }
 
@@ -687,7 +724,7 @@ export async function rankJobsBatch(
      if (penalty) evidence.push(`Seniority mismatch: -${penalty} points (${profileSen} → ${jobSen}); eligibility assessed separately`);
     const thin = !job.description || job.description.length < 120 || !resumeChunks.length;
      if (thin) { scoreCap=Math.min(scoreCap??100,55);fitScore = Math.min(fitScore, scoreCap); scoreCapReasons.push('Thin job or profile evidence caps score at 55'); }
-     matchedSkills=[...new Set(matchedSkills.map(normalizeSkill))];missingSkills=[...new Set(missingSkills.map(normalizeSkill))];
+     matchedSkills=[...new Set(matchedSkills.map(displaySkillLabel))];missingSkills=[...new Set(missingSkills.map(displaySkillLabel))];
      if(!skillEvidence.length) for(const skill of [...matchedSkills,...missingSkills]) skillEvidence.push({skill,source:normalizeSkillSet((profile as any).demonstratedSkills??[]).has(skill.toLowerCase())?'demonstrated':normalizeSkillSet((profile as any).declaredSkills??profile.skills).has(skill.toLowerCase())?'declared':'unverified'});
      const components = [
        {key:'requiredSkill',label:'Required skills',points:requiredSkillScore,maxPoints:30,reason:evidence.find(x=>/skill|requirement/i.test(x)) ?? 'No requirement evidence'},
