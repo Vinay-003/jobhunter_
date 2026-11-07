@@ -1,4 +1,6 @@
 {
+  "installCommand": "env -u npm_config_cache_dir npm ci --include=dev",
+  "buildCommand": "env -u npm_config_cache_dir npm run build",
   "rewrites": [
     {
       "source": "/api/v1/:path*",
