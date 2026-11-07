@@ -17,7 +17,7 @@ import type { NormalizedJob, JobProvider, ProviderSearchResult } from '../../pro
 import { retrievalPlan, sourceEnvelope } from '../../providers/jobs/retrievalPlan.js';
 import { executeRetrieval } from '../../providers/jobs/retrievalExecutor.js';
 import { effectivePreferences, eligibleJob, countryCodeForLocation } from '../../modules/jobs/eligibility.js';
-import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
+import { loadParsedResume } from '../../modules/parsing/parsedResumeCache.js';
 import { buildResumeProfile, PROFILE_VERSION } from '../../modules/parsing/resumeProfile.js';
 import { downloadFile } from '../../modules/storage/supabaseStorage.js';
 import { recommendationCacheValid, recommendationDiagnostics, recommendationSnapshot } from '../../services/recommendationPersistence.js';
@@ -78,8 +78,10 @@ async function recentClosedUrls(userId:string):Promise<Set<string>> {
 async function ownedProfile(resume: any) {
   const stored = await pool.query('SELECT profile_json,profile_version FROM resume_profiles WHERE resume_id=$1', [resume.id]);
   if (stored.rows[0]?.profile_version === PROFILE_VERSION) return stored.rows[0].profile_json;
-  const buf = await downloadFile({ bucket: resume.storage_bucket || 'resumes', path: resume.storage_object_path || resume.file_path, sha256: '' });
-  const profile = buildResumeProfile(await parsePdfBuffer(Buffer.from(buf as any)));
+  const parsed = await loadParsedResume(resume.id, () =>
+    downloadFile({ bucket: resume.storage_bucket || 'resumes', path: resume.storage_object_path || resume.file_path, sha256: '' })
+      .then((d) => Buffer.from(d as any)));
+  const profile = buildResumeProfile(parsed);
   await pool.query('INSERT INTO resume_profiles(resume_id,profile_json,profile_version) VALUES($1,$2,$3) ON CONFLICT(resume_id) DO UPDATE SET profile_json=$2,profile_version=$3', [resume.id,JSON.stringify(profile),PROFILE_VERSION]);
   return profile;
 }

@@ -1,0 +1,21 @@
+name: Keepalive
+
+# Render free tier sleeps after 15 min without HTTP traffic (~30 s cold start on
+# the next request). Ping every 10 min so user-facing requests never hit a cold
+# start; /api/keepalive also INSERTs into keepalive_pings, resetting Supabase's
+# 7-day inactivity pause. Public repo → scheduled Actions minutes are free.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake backend
+        run: |
+          curl -fsS -X POST https://jobhunter-backend-lkkf.onrender.com/api/keepalive \
+            -H 'x-keepalive-source: github-actions' \
+            --max-time 120 \
+          || curl -fsS https://jobhunter-backend-lkkf.onrender.com/health --max-time 120

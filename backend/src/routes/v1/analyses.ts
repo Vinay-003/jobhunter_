@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import pool from '../../config/database.js';
 import { validate } from '../../middleware/validate.js';
 import { requireSession as authenticateAny } from '../../middleware/requireSession.js';
-import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
+import { loadParsedResume } from '../../modules/parsing/parsedResumeCache.js';
 import { buildResumeProfile, buildParsedResumeSections, PROFILE_VERSION } from '../../modules/parsing/resumeProfile.js';
 import { scoreReadiness, VERSION as SCORER_VERSION } from '../../modules/ats/readinessScorer.js';
 import { parseJd } from '../../modules/jd/jdParser.js';
@@ -37,6 +37,10 @@ function getEmbeddingProvider(){
   return new AwsSageMakerEmbeddingProvider();
 }
 
+// Server-Timing marks so production latency is attributable from `curl -D -`
+// (this service's logs are not reachable from the local Render CLI).
+import { makeTiming } from '../../utils/serverTiming.js';
+
 // helper to load resume buffer
 async function loadResumeBuffer(resumeRow:any):Promise<Buffer>{
   const bucket = resumeRow.storage_bucket || 'resumes';
@@ -64,6 +68,7 @@ async function loadResumeBuffer(resumeRow:any):Promise<Buffer>{
 router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId: z.string().uuid(), targetLevel: z.string().optional() }) }), async (req:any,res)=>{
   const userId = String(req.user.id);
   const { resumeId, targetLevel } = req.body;
+  const timing = makeTiming(res);
   try {
     const r = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
     let row = r.rows[0];
@@ -73,16 +78,17 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
       if (!r2.rows[0]) return res.status(404).json({ success:false, message:'Resume not found'});
       row = r2.rows[0];
     }
-    const buf = await loadResumeBuffer(row);
-    const parsed = await parsePdfBuffer(buf);
+    timing.lap('db-resume');
+    const parsed = await loadParsedResume(row.id, () => loadResumeBuffer(row));
+    timing.lap('load-parse');
     if (parsed.detectedAsScanned) {
       return res.status(400).json({ success:false, message:'We could not reliably extract text from this PDF. It may be scanned or image-based. Upload a text-based PDF for accurate ATS analysis.', code:'SCANNED_PDF' });
     }
     const profile = buildResumeProfile(parsed);
     const parsedSectionsData = buildParsedResumeSections(parsed, profile);
     const readiness = scoreReadiness(parsed, profile, targetLevel);
-    // ensure profile stored (cache only — analysis proceeds even if this fails, but the failure is visible)
-    await pool.query('INSERT INTO resume_profiles (resume_id, profile_json, profile_version) VALUES ($1,$2,$3) ON CONFLICT (resume_id) DO UPDATE SET profile_json=$2, profile_version=$3', [row.id, JSON.stringify(profile), PARSER_VERSION]).catch((e)=>console.error('[analyses] resume_profile upsert failed:', e));
+    timing.lap('score');
+    // Profile is stored by the upload handler; recommendations rebuilds it if stale — no upsert here.
     const analysisId = crypto.randomUUID();
     const breakdown = readiness.breakdown;
     const evidence = {
@@ -113,12 +119,15 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
       console.error('[analyses] readiness insert failed:', e);
       return res.status(500).json({ success:false, message:'Failed to save analysis results' });
     }
+    timing.lap('db-save');
+    timing.send();
     res.json(snapshot);
   } catch(e:any){
     if (e?.code === 'STORED_FILE_MISSING') {
       return res.status(410).json({ success:false, message: e.message });
     }
     console.error('readiness error', e);
+    timing.send();
     res.status(500).json({ success:false, message:e.message || 'Failed to analyze'});
   }
 });
@@ -126,6 +135,7 @@ router.post('/readiness', authenticateAny, validate({ body: z.object({ resumeId:
 router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: z.string().uuid(), jobDescription: z.string().min(20).max(20000), targetRole: z.string().optional(), targetLevel: z.string().optional() }) }), async (req:any,res)=>{
   const userId = String(req.user.id);
   const { resumeId, jobDescription, targetRole, targetLevel } = req.body;
+  const timing = makeTiming(res);
   try {
     const r = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
     let row = r.rows[0];
@@ -135,8 +145,9 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
       if (!r2.rows[0]) return res.status(404).json({ success:false, message:'Resume not found'});
       row = r2.rows[0];
     }
-    const buf = await loadResumeBuffer(row);
-    const parsed = await parsePdfBuffer(buf);
+    timing.lap('db-resume');
+    const parsed = await loadParsedResume(row.id, () => loadResumeBuffer(row));
+    timing.lap('load-parse');
     if (parsed.detectedAsScanned) return res.status(400).json({ success:false, message:'Scanned PDF not supported for JD matching', code:'SCANNED_PDF'});
     const profile = buildResumeProfile(parsed);
     const parsedSectionsData = buildParsedResumeSections(parsed, profile);
@@ -150,6 +161,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
       // A missing evidence source is not permission to embed contact/header text.
       jdChunks.length = 0;
     }
+    timing.lap('compute');
 
     const provider = getEmbeddingProvider();
     const allTexts = [...resumeChunks, ...jdChunks];
@@ -181,6 +193,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
     }
     // Mock vectors are deterministic test data, never a semantic fit signal.
     if (embeddingStatus !== 'real') vectors = [];
+    timing.lap('embed');
     // build semantic responsibility coverage: for each jd responsibility find best cosine to resume chunks
     // simple cosine using mock vectors aligned to uniq order
     const textToVec = new Map<string, number[]>();
@@ -215,6 +228,7 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
         yearsExperience: jd.yearsExperience, minYearsExperience: jd.minYears ?? jd.yearsExperience,
         requirementGroups: jd.requirementGroups ?? null, domainTerms: jd.domainTerms },
       score: rubric.score };
+    timing.lap('rubric');
     const analysisId = crypto.randomUUID();
     const createdAt = new Date().toISOString();
     const jdHash = crypto.createHash('sha256').update(jobDescription).digest('hex');
@@ -233,12 +247,15 @@ router.post('/jd-match', authenticateAny, validate({ body: z.object({ resumeId: 
       console.error('[analyses] jd-match insert failed:', e);
       return res.status(500).json({ success:false, message:'Failed to save analysis results' });
     }
+    timing.lap('db-save');
+    timing.send();
     res.json(snapshot);
   } catch(e:any){
     if (e?.code === 'STORED_FILE_MISSING') {
       return res.status(410).json({ success:false, message: e.message });
     }
     console.error('jd-match error', e);
+    timing.send();
     res.status(500).json({ success:false, message:e.message || 'JD match failed'});
   }
 });
@@ -279,8 +296,7 @@ router.get('/:id', authenticateAny, async (req:any,res)=>{
         const resumeRes = await pool.query('SELECT * FROM resumes WHERE id=$1', [row.resume_id]);
         if (resumeRes.rows[0]) {
           const resumeRow = resumeRes.rows[0];
-          const buf = await loadResumeBuffer(resumeRow);
-          const parsed = await parsePdfBuffer(buf);
+          const parsed = await loadParsedResume(resumeRow.id, () => loadResumeBuffer(resumeRow));
           if (!parsed.detectedAsScanned) {
             const profile = buildResumeProfile(parsed);
             const parsedSectionsData = buildParsedResumeSections(parsed, profile);

@@ -273,9 +273,11 @@ async function extractWithPdfParse(buffer: Buffer): Promise<string[] | null> {
   }
 }
 
-export async function parsePdfBuffer(buffer: Buffer): Promise<ParsedDocument> {
-  if (!isPdfMagic(buffer)) throw new Error('Invalid PDF: missing %PDF magic bytes');
-  const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+// sha256 → parse result: the same PDF bytes are parsed repeatedly across
+// upload → readiness → jd-match → GET enrichment; cap keeps memory bounded.
+const parseCache = new Map<string, ParsedDocument>();
+
+async function parsePdfBufferUncached(buffer: Buffer, sha256: string): Promise<ParsedDocument> {
 
   const pdfjsResult = await extractWithPdfJs(buffer);
   let pages = pdfjsResult?.pages ?? null;
@@ -357,6 +359,17 @@ export async function parsePdfBuffer(buffer: Buffer): Promise<ParsedDocument> {
     charCount,
     lineSpans: pdfjsResult?.lineSpans,
   };
+}
+
+export async function parsePdfBuffer(buffer: Buffer): Promise<ParsedDocument> {
+  if (!isPdfMagic(buffer)) throw new Error('Invalid PDF: missing %PDF magic bytes');
+  const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+  const hit = parseCache.get(sha256);
+  if (hit) return hit;
+  const parsed = await parsePdfBufferUncached(buffer, sha256);
+  if (parseCache.size >= 8) parseCache.delete(parseCache.keys().next().value!);
+  parseCache.set(sha256, parsed);
+  return parsed;
 }
 
 export default parsePdfBuffer;

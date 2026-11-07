@@ -6,6 +6,8 @@ import { requireSession } from '../../middleware/requireSession.js';
 import { z } from 'zod';
 import { validate } from '../../middleware/validate.js';
 import parsePdfBuffer from '../../modules/parsing/pdfParser.js';
+import { cacheParsedResume } from '../../modules/parsing/parsedResumeCache.js';
+import { makeTiming } from '../../utils/serverTiming.js';
 import { buildResumeProfile, PROFILE_VERSION } from '../../modules/parsing/resumeProfile.js';
 import { uploadFile, deleteFile, downloadFile } from '../../modules/storage/supabaseStorage.js';
 
@@ -23,6 +25,7 @@ const upload = multer({
 });
 
 router.post('/', requireSession, upload.single('resume'), async (req:any,res)=>{
+  const timing = makeTiming(res);
   try {
     if (!req.file) return res.status(400).json({ success:false, message:'No file uploaded'});
     const buf:Buffer = req.file.buffer;
@@ -36,10 +39,12 @@ router.post('/', requireSession, upload.single('resume'), async (req:any,res)=>{
     try { parsed = await parsePdfBuffer(buf); }
     catch { return res.status(422).json({ success:false, message:'Unreadable PDF document' }); }
     if (parsed.detectedAsScanned || !parsed.normalizedText?.trim()) return res.status(422).json({ success:false, message:'PDF has no readable text' });
+    timing.lap('parse');
     const pageCount = parsed.pages.length || 1;
     const parserVersion = PROFILE_VERSION;
 
     const storage = await uploadFile(userId, resumeId, buf, req.file.originalname);
+    timing.lap('storage');
 
     // DB insert - handle is_latest via transaction: clear old latest BEFORE insert to avoid unique violation
     let row;
@@ -87,6 +92,10 @@ router.post('/', requireSession, upload.single('resume'), async (req:any,res)=>{
     } finally {
       client.release();
     }
+    // Seed the parsed-resume cache so the follow-up readiness/jd-match calls
+    // skip the cross-region storage download + PDF parse entirely.
+    cacheParsedResume(row.id, parsed);
+    timing.lap('db');
 
     // Retention: max 3 resumes per user — evict the oldest beyond the cap
     // (row first so a failed delete can never orphan storage; storage best-effort after).
@@ -110,16 +119,20 @@ router.post('/', requireSession, upload.single('resume'), async (req:any,res)=>{
       }
       if (evicted.length) console.warn(`[retention] evicted ${evicted.length} oldest resume(s) for user ${userId} (cap ${MAX_RESUMES_PER_USER})`);
     } catch(e){ console.warn('retention check warning', e); }
+    timing.lap('retention');
 
     try {
       const p = parsed;
       const profile = buildResumeProfile(p);
       await pool.query('INSERT INTO resume_profiles (resume_id, profile_json, profile_version) VALUES ($1,$2,$3) ON CONFLICT (resume_id) DO UPDATE SET profile_json=$2, profile_version=$3, updated_at=now()', [row.id, JSON.stringify(profile), parserVersion]);
     } catch{}
+    timing.lap('profile');
 
+    timing.send();
     res.json({ success:true, evicted, resume:{ id: row.id, fileName: row.original_filename || row.file_name, uploadDate: row.created_at || row.upload_date, status: row.processing_status || row.status, sha256, pageCount, storageBucket: storage.bucket }});
   } catch(e:any){
     console.error('upload error', e);
+    timing.send();
     res.status(500).json({ success:false, message: 'Upload failed'});
   }
 });
