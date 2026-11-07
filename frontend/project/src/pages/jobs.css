@@ -95,6 +95,9 @@
 .jobs-page .job-detail__hero p { color:var(--muted); }
 .jobs-page .job-detail__score { color:var(--blue); }
 .jobs-page .job-detail__score { min-width:100px; flex-shrink:0; white-space:nowrap; }
+/* prototype.css sets display:flex;align-items:baseline for <b>+<span> markup,
+   but this JSX stacks two <p>s — column keeps them from running together. */
+.jobs-page .job-detail__score { flex-direction:column; align-items:center; row-gap:3px; }
 .jobs-page .job-detail__score p { margin:0; }
 .jobs-page .job-detail__score p:first-child { color:var(--blue); }
 .jobs-page .jobs-breakdown__row { padding:12px 0; border-bottom:1px solid var(--line); }

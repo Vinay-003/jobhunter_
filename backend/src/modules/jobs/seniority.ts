@@ -11,6 +11,26 @@ export function normalizeSeniority(value: string | null | undefined): CanonicalS
   return null;
 }
 
+/** Extract a candidate-tenure year range from one line of text. Moved here from jdParser so detection and parsing share the exact same rule. */
+export function yearRequirement(text: string): { min: number | null; max: number | null } {
+  // Only professional-tenure labels are evidence. Do not interpret company age,
+  // product age, or arbitrary "3-6 months" durations as candidate experience.
+  if (!/\b(?:experience|exp\.?|professional|industry|engineering)\b/i.test(text) || /\b(?:company|business|founded|established|since)\b/i.test(text)) return { min: null, max: null };
+  const bare = text.match(/\b(?:exp\.?|experience)\s*(?:required|needed|minimum)?\s*[:=-]?\s*(\d{1,2})\s*(?:[-–—]|to)\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\b/i)
+    ?? text.match(/\b(?:exp\.?|experience)\s*(?:required|needed|minimum)?\s*[:=-]?\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\b/i);
+  if (bare) {
+    const isRange = /(?:[-–—]|to)/i.test(bare[0]);
+    return { min: Number(bare[1]), max: isRange ? (bare[3] ? null : Number(bare[2])) : (bare[2] ? null : Number(bare[1])) };
+  }
+  const simpleRange = text.match(/\b(\d{1,2})\s*(?:[-–—]|to)\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\s*(?:of\s+)?(?:professional\s+)?(?:[a-z]+\s+){0,4}experience\b/i);
+  if (simpleRange) return { min: Number(simpleRange[1]), max: simpleRange[3] ? null : Number(simpleRange[2]) };
+  const range = text.match(/\b(\d{1,2})\s*[-–—]\s*(\d{1,2})(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:[a-z]+\s+){0,5}experience\b/i);
+  if (range) return { min: Number(range[1]), max: range[3] ? null : Number(range[2]) };
+  const single = text.match(/\b(\d{1,2})(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:[a-z]+\s+){0,5}(?:experience|engineering|software development)\b/i)
+    ?? text.match(/\b(\d{1,2})(\+)?\s*(?:years?|yrs?)\s+(?:of\s+)?experience\s+(?:in|with|as)\b/i);
+  return single ? { min: Number(single[1]), max: single[2] ? null : Number(single[1]) } : { min: null, max: null };
+}
+
 export function detectSeniority(title: string | null | undefined, description?: string | null): CanonicalSeniority | null {
   const name = title ?? '';
   const explicitRole = description?.match(/^\s*(?:role|job\s*title)\s*:\s*([^\n]+)/im)?.[1];
@@ -37,11 +57,18 @@ export function detectSeniority(title: string | null | undefined, description?: 
   // infer seniority from generic mentions such as "work with senior engineers".
   const openingRole = description?.match(/\b(?:intern|junior|entry[ -]?level|associate|senior|sr\.?|principal|staff|lead)\s+(?:backend|frontend|front.end|software|data|platform|cloud|full[ -]?stack)?\s*(?:engineer|developer|architect)\b/i);
   if (openingRole) return normalizeSeniority(openingRole[0].split(/\s+/)[0]);
-  const required = description?.match(/\b(?:requires?|minimum|at least|must have|need(?:ed)?|qualification[s]?:?)\b[^\n.!?]{0,100}?\b(\d{1,2})\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:professional|relevant|industry|work|engineering|software|development)\s+experience\b/i)
-    ?? description?.match(/\b(\d{1,2})\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:professional|relevant|industry|work|engineering|software|development)\s+experience\s+(?:required|needed|minimum)\b/i);
-  if (!required) return null;
-  const years = Number(required[1]);
-  return years >= 10 ? 'principal' : years >= 5 ? 'senior' : years >= 2 ? 'mid' : 'entry';
+  // Last resort: a bare tenure requirement with no seniority words anywhere.
+  // Scan line-by-line with the same rule JD parsing uses, so label phrasings
+  // like "Experience required: 5+ years" or "Requires 3 years experience"
+  // band from the lower bound (>=10 principal, >=5 senior, >=2 mid, else entry).
+  if (description) {
+    for (const raw of description.split('\n')) {
+      if (/^\s*(?:preferred|desired|nice|bonus)/i.test(raw)) continue;
+      const years = yearRequirement(raw).min;
+      if (years !== null) return years >= 10 ? 'principal' : years >= 5 ? 'senior' : years >= 2 ? 'mid' : 'entry';
+    }
+  }
+  return null;
 }
 
 export function seniorityPenalty(candidate: string | null | undefined, job: string | null | undefined): number {
