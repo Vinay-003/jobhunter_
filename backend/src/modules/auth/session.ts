@@ -102,7 +102,13 @@ export async function authenticateSession(req: Request, res: Response, next: Nex
     return res.status(401).json({ success: false, message: 'Authentication required' });
   }
 
-  const session = await verifySession(token);
+  let session;
+  try {
+    session = await verifySession(token);
+  } catch (err) {
+    // DB outage here previously produced no response at all (client hung until timeout)
+    return next(err);
+  }
   if (!session) {
     return res.status(401).json({ success: false, message: 'Invalid or expired session' });
   }

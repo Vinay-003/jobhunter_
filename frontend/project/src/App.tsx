@@ -1,4 +1,4 @@
-// src/App.tsx - V2 entry (legacy preserved as App.legacy.tsx)
+// src/App.tsx - V2 entry
 import { RouterProvider } from 'react-router-dom';
 import { AuthProvider } from './features/auth/AuthContext';
 import { router } from './app/router';

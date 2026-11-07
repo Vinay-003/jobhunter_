@@ -24,7 +24,11 @@
 .jobs-page :is(.text-emerald-200,.text-emerald-300,.text-emerald-400) { color:var(--green); }
 .jobs-page :is(.text-rose-200,.text-rose-300) { color:var(--red); }
 .jobs-page .jobs-filter-panel option { background:var(--surface); color:var(--text); }
-.jobs-page .jobs-filter-panel > .flex button { background:transparent; border:0; }
+/* Strip default button chrome from inline controls (panel ✕, etc.) — but never
+   from the primary action: this rule (0,3,1) out-specifies .jh-button-primary
+   (0,2,0), which made Find matches render transparent with color:var(--bg)
+   text — i.e. invisible on the page background in both themes. */
+.jobs-page .jobs-filter-panel > .flex button:not(.jh-button-primary) { background:transparent; border:0; }
 .jobs-page .job-detail__hero h2 { color:var(--text); }
 .jobs-page .jobs-toolbar { display:flex; align-items:center; gap:12px; width:100%; height:auto; min-height:64px; border-block:1px solid var(--line); padding:8px 0; background:transparent; }
 .jobs-page .search-field { min-width:150px; flex:1; display:flex; align-items:center; gap:9px; border-right:1px solid var(--line); padding:0 12px; }

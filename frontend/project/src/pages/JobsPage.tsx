@@ -91,10 +91,23 @@ type RawRecommendation = Partial<Job> & {
 };
 type RecommendationResponse = {
   recommendations?: RawRecommendation[]; results?: RawRecommendation[];
-  runId?: string; nextOffset?: number | null; returnedCount?: number;
+  runId?: string; nextOffset?: number | null; returnedCount?: number; total?: number;
+  status?: string; errorCode?: string | null; error_code?: string | null;
+  cached?: boolean; alreadyRunning?: boolean;
   sources?: Array<{ provider?: unknown; status?: unknown; cacheHit?: unknown; fetchedCount?: unknown; fallbackReason?: unknown; errorCode?: unknown; location?: unknown; page?: unknown }>;
   rejectedReasons?: Record<string, number>;
   roleDiscovery?: any; queries?: any[]; timings?: any;
+};
+
+// Backend run error_code -> user-facing copy (run payloads may contain resume
+// content, so the API deliberately returns only the code).
+const RECOMMENDATION_FAILURE_MESSAGES: Record<string, string> = {
+  ALL_PROVIDERS_FAILED: 'All job providers were unavailable or out of quota for today. Try again later — cached results stay available.',
+  RESUME_REMOVED: 'That resume was deleted while ranking. Pick another resume and search again.',
+  RESUME_NOT_FOUND: 'That resume no longer exists. Refresh the page and pick another one.',
+  PROFILE_UNAVAILABLE: 'We could not read that resume yet. Re-upload it and try again.',
+  RUN_ABANDONED: 'The search was interrupted on the server. Try again — the next run starts from cached provider results.',
+  RECOMMENDATION_FAILED: 'The match search failed while ranking jobs. Try refreshing — cached provider results make the next run much faster.',
 };
 
 function safeExternalUrl(value?: string) {
@@ -483,6 +496,24 @@ export default function JobsPage() {
     return ()=>{controller.abort();sequenceRef.current=sequence+1;};
   }, [selectedResume]);
 
+  // Applies either an inline (cache/idempotency) response or the results page
+  // of a completed run to component state.
+  const applyRecommendationResponse = (result: RecommendationResponse, sequence: number, opts: { resumeFileName: string; runId?: string }) => {
+    if (sequence !== requestSequence.current) return;
+    const raw = result?.recommendations ?? result?.results ?? [];
+    const mapped = raw.map(mapRecommendation);
+    setJobs(mapped);
+    setShowFilters(false);
+    setRunId(opts.runId ?? result?.runId ?? null);
+    if (result?.roleDiscovery) setRoleDiscovery(result.roleDiscovery);
+    setLastRunDiagnostics({ ...result, resumeFileName: opts.resumeFileName });
+    setNextOffset(result?.nextOffset ?? null);
+    setTotal(result?.returnedCount ?? result?.total ?? mapped.length);
+    setSources(result?.sources ?? []);
+    setRejectedReasons(result?.rejectedReasons ?? {});
+    setSelectedIndex(0);
+  };
+
   const runRecommendations = async (isRefresh = false) => {
     if (!selectedResume) return setError('Choose a resume before generating matches.');
     if (discovering || loading || refreshing || loadingResumes) return;
@@ -495,6 +526,7 @@ export default function JobsPage() {
     setError('');
      if (isRefresh) setRefreshing(true);
      else setLoading(true);
+    const settle = () => { if (sequence === requestSequence.current) { setLoading(false); setRefreshing(false); activeRequest.current = null; } };
     try {
       const payload = {
         resumeId: selectedResume,
@@ -506,24 +538,65 @@ export default function JobsPage() {
         ...(prefs.keywords.trim() ? { keywords: prefs.keywords.trim() } : {}),
         ...(isRefresh ? { forceRefresh: true, idempotencyKey: crypto.randomUUID() } : {}),
       };
-      // Local model loads ~90s cold; SageMaker cold starts can also exceed 60s.
-      const response = await api.post('/recommendation-runs', payload, { timeout: 260000, signal: controller.signal });
+      // The pipeline takes 125-230s server-side; Render's proxy severs
+      // synchronous requests at ~100s (502), so the API answers 202 with a
+      // runId and we poll GET /:id until the run settles.
+      const response = await api.post('/recommendation-runs', payload, { timeout: 60000, signal: controller.signal });
       if (sequence !== requestSequence.current) return;
-       const result = response.data as RecommendationResponse;
-       const raw = result?.recommendations ?? result?.results ?? [];
-      const mapped = raw.map(mapRecommendation);
-       setJobs(mapped);
-       setShowFilters(false);
-        setRunId(result?.runId ?? null);
-        if (result?.roleDiscovery) setRoleDiscovery(result.roleDiscovery);
-         setLastRunDiagnostics({ ...result, resumeFileName:selectedResumeName });
-       setNextOffset(result?.nextOffset ?? null);
-       setTotal(result?.returnedCount ?? mapped.length); setSources(result?.sources ?? []); setRejectedReasons(result?.rejectedReasons ?? {});
-      setSelectedIndex(0);
+      const started = response.data as RecommendationResponse;
+      let runStatus = (started.status ?? '').toLowerCase();
+      const startedRunId = started.runId;
+      if (runStatus === 'failed') {
+        const code = String(started.error_code ?? started.errorCode ?? '');
+        throw new Error(RECOMMENDATION_FAILURE_MESSAGES[code] ?? RECOMMENDATION_FAILURE_MESSAGES.RECOMMENDATION_FAILED);
+      }
+      if (!startedRunId || (runStatus !== 'running' && runStatus !== 'pending')) {
+        // Cache/idempotency hit: results came back inline.
+        return applyRecommendationResponse(started, sequence, { resumeFileName: selectedResumeName });
+      }
+
+      // Poll until completed|failed: ~2.5s interval, 8 min cap (abandoned runs
+      // are reaped server-side after 15 min, so a wedge resolves either way).
+      const POLL_INTERVAL_MS = 2500;
+      const POLL_DEADLINE_MS = 8 * 60 * 1000;
+      const pollStartedAt = Date.now();
+      let pollFailures = 0;
+      while (runStatus === 'running' || runStatus === 'pending' || runStatus === '') {
+        if (sequence !== requestSequence.current || controller.signal.aborted) return;
+        if (Date.now() - pollStartedAt > POLL_DEADLINE_MS) {
+          throw new Error('The match search is taking longer than expected. It keeps running in the background — try refreshing in a few minutes.');
+        }
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        if (sequence !== requestSequence.current || controller.signal.aborted) return;
+        let statusResponse;
+        try {
+          statusResponse = await api.get(`/recommendation-runs/${startedRunId}`, { timeout: 30000, signal: controller.signal });
+          pollFailures = 0;
+        } catch (pollErr) {
+          // The run's heavy phase can starve the DB pool and fail a poll;
+          // the run keeps going, so tolerate a few failures before giving up.
+          if (++pollFailures >= 3) throw pollErr;
+          continue;
+        }
+        const run = (statusResponse.data as any)?.run;
+        runStatus = String(run?.status ?? '').toLowerCase();
+        if (runStatus === 'failed') {
+          const code = String(run?.error_code ?? '');
+          throw new Error(RECOMMENDATION_FAILURE_MESSAGES[code]
+            ?? 'The match search failed while ranking jobs. Try refreshing — cached provider results make the next run much faster.');
+        }
+      }
+      if (runStatus !== 'completed') return;
+      if (sequence !== requestSequence.current) return;
+
+      // Fetch page one of the finished run, same shape as the old sync response.
+      const resultsResponse = await api.get(`/recommendation-runs/${startedRunId}/results`, { params: { offset: 0, limit: 20 }, timeout: 60000, signal: controller.signal });
+      if (sequence !== requestSequence.current) return;
+      applyRecommendationResponse(resultsResponse.data as RecommendationResponse, sequence, { resumeFileName: selectedResumeName, runId: startedRunId });
     } catch (err) {
       if (sequence === requestSequence.current && !controller.signal.aborted) setError(getApiErrorMessage(err));
     } finally {
-      if (sequence === requestSequence.current) { setLoading(false); setRefreshing(false); activeRequest.current = null; }
+      settle();
     }
   };
 
@@ -783,7 +856,7 @@ export default function JobsPage() {
              <div><label className="text-[10px] font-medium text-slate-600">Freshness</label><select aria-label="Freshness" value={prefs.daysPosted || 'any'} onChange={(event) => setPrefs((current) => ({ ...current, daysPosted: event.target.value === 'any' ? '' : event.target.value }))} className="jh-input mt-1.5"><option value="1">24 hours</option><option value="3">3 days</option><option value="7">7 days</option><option value="30">30 days</option><option value="any">Any date</option></select></div>
              <div><label className="text-[10px] font-medium text-slate-600">Sort</label><select value={sortBy} onChange={(event) => setSortBy(event.target.value as 'match' | 'newest')} className="jh-input mt-1.5"><option value="match">Best match</option><option value="newest">Newest</option></select></div>
           </div>
-           <div className="mt-4 flex flex-wrap gap-4 border-t border-white/[0.055] pt-4 text-[10px] text-slate-500"><label><input type="checkbox" checked={includeUnknownDates} onChange={(e) => setIncludeUnknownDates(e.target.checked)} /> Include unknown dates</label><label><input type="checkbox" checked={verifiedOpenOnly} onChange={(e) => setVerifiedOpenOnly(e.target.checked)} /> Verified open only</label></div><div className="mt-3 flex flex-wrap items-center justify-between gap-3"><p className="text-[10px] leading-4 text-slate-600">Review roles and search scope before retrieving matches. Fit scores are evidence summaries, not hiring probabilities.</p><button onClick={() => runRecommendations(false)} className="jh-button-primary"><Search size={14} /> Find matches</button></div>
+           <div className="mt-4 flex flex-wrap gap-4 border-t border-white/[0.055] pt-4 text-[10px] text-slate-500"><label><input type="checkbox" checked={includeUnknownDates} onChange={(e) => setIncludeUnknownDates(e.target.checked)} /> Include unknown dates</label><label><input type="checkbox" checked={verifiedOpenOnly} onChange={(e) => setVerifiedOpenOnly(e.target.checked)} /> Verified open only</label></div><div className="mt-3 flex flex-wrap items-center justify-between gap-3"><p className="text-[10px] leading-4 text-slate-600">Review roles and search scope before retrieving matches. Fit scores are evidence summaries, not hiring probabilities.</p><button onClick={() => runRecommendations(false)} disabled={loading || refreshing} className="jh-button-primary">{loading || refreshing ? <><Loader2 size={14} className="animate-spin" /> Searching…</> : <><Search size={14} /> Find matches</>}</button></div>
         </section>
       )}
 
@@ -820,7 +893,7 @@ export default function JobsPage() {
           <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-stone-800 text-stone-500"><Search size={23} /></span>
            <h2 className="mt-4 text-lg font-semibold">{runId ? 'No matches in this view' : 'Review your roles and search scope'}</h2>
            <p className="mx-auto mt-2 max-w-md text-sm leading-6">{runId ? 'Clear list filters, lower minimum fit, or broaden your search scope. More stored matches may be available.' : 'Choose your resume, roles and location, then find matches.'}</p>
-            <div className="mt-5 flex flex-wrap justify-center gap-2"><button onClick={() => {setSearchText('');setListLocation('');setPrefs(current=>({...current,minScore:0}));setSelectedIndex(0);}} className="jh-button-ghost">Clear list filters</button><button onClick={() => setShowFilters(true)} className="jh-button-ghost">Adjust preferences</button>{nextOffset !== null && <button className="jh-button-ghost" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Loading…' : `Load more (${jobs.length} of ${total})`}</button>}</div>
+            <div className="mt-5 flex flex-wrap justify-center gap-2"><button onClick={() => runRecommendations(Boolean(runId))} className="jh-button-primary">{runId ? 'Search again' : 'Find matches'}</button><button onClick={() => {setSearchText('');setListLocation('');setPrefs(current=>({...current,minScore:0}));setSelectedIndex(0);}} className="jh-button-ghost">Clear list filters</button><button onClick={() => setShowFilters(true)} className="jh-button-ghost">Adjust preferences</button>{nextOffset !== null && <button className="jh-button-ghost" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Loading…' : `Load more (${jobs.length} of ${total})`}</button>}</div>
         </div>
       ) : (
          <section className={`jobs-layout ${mobileDetail ? 'jobs-layout--detail' : ''}`}>

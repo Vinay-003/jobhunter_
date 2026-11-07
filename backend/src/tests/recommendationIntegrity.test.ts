@@ -3,7 +3,11 @@ import { detectJobSeniority, roleFamily } from '../modules/jobs/ranking.js';
 import { eligibleJob, effectivePreferences, countryCodeForLocation } from '../modules/jobs/eligibility.js';
 import { JobQueryPlanner } from '../modules/jobs/queryPlanner.js';
 
-const job = (overrides: Record<string, unknown> = {}) => ({ source: 'jooble', externalId: 'a', title: 'Junior Software Engineer', company: 'Example', location: 'India', description: 'Build TypeScript APIs', url: 'https://example.com/job/1?utm_source=feed', salary: null, workMode: 'remote', postedAt: '2026-10-02', ...overrides });
+// Posted ~2 days ago so the fixture stays inside the default 7-day eligibility
+// window no matter when the suite runs (a hardcoded date ages out and turns
+// these cases into 'Posting too old').
+const recentPostedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const job = (overrides: Record<string, unknown> = {}) => ({ source: 'jooble', externalId: 'a', title: 'Junior Software Engineer', company: 'Example', location: 'India', description: 'Build TypeScript APIs', url: 'https://example.com/job/1?utm_source=feed', salary: null, workMode: 'remote', postedAt: recentPostedAt, ...overrides });
 
 describe('recommendation integrity', () => {
   test('canonical URL ignores tracking but preserves distinct geographic openings', () => {

@@ -137,4 +137,48 @@ Required Skills:
     expect(ranked.missingSkills).toContain('NestJS');
     expect(ranked.missingSkills).toContain('Docker');
   });
+
+  test('semantic skill matching requires a resume mention — unrelated labels stay unverified', async () => {
+    const jd = `Title: Backend Developer
+Required:
+Azure, Data Warehousing, Python`;
+    const candidateProfile = {
+      skills: ['Python', 'React'],
+      skillsNormalized: ['Python', 'React'],
+      experience: [{
+        title: 'Developer', company: 'Acme', startDate: null, endDate: null, isCurrent: false,
+        description: 'Built React apps with Python.', kind: 'employment',
+      }],
+      projects: [], education: [], seniority: 'entry', totalExperienceYears: 1,
+      contactSignals: { hasEmail: false, hasPhone: false, hasLinkedIn: false, hasGithub: false },
+      summary: null, languages: [],
+    } as any;
+
+    // Uniform vectors make EVERY label pair look semantically identical
+    // (cosine = 1.0), so only the resume-mention gate can block Azure and
+    // Data Warehousing — previously they matched at raw cosine >= 0.50.
+    const [ranked] = await rankJobsBatch(candidateProfile, [{
+      title: 'Backend Developer', description: jd, location: null, workMode: null,
+      source: 'test', externalId: 'gate-1', descriptionQuality: 'full',
+      providerSkills: ['data-warehousing'],
+    } as any], {
+      preferences: { locations: ['India'] },
+      embeddingProvider: {
+        modelId: 'semantic-gate-test',
+        embed: async ({ texts }: any) => ({
+          vectors: texts.map(() => [0.9, 0.44]),
+          modelId: 'semantic-gate-test',
+          dimension: 2,
+        }),
+      },
+    });
+
+    expect(ranked.matchedSkills).toContain('Python');
+    // Azure is a parsed requirement: must show as a gap, never a match.
+    expect(ranked.matchedSkills).not.toContain('Azure');
+    expect(ranked.missingSkills).toContain('Azure');
+    expect(ranked.scoreDetails?.skillEvidence.find((e) => e.skill === 'Azure')?.source).toBe('unverified');
+    // Provider label that the resume never mentions must not be claimed as matched.
+    expect(ranked.matchedSkills).not.toContain('Data Warehousing');
+  });
 });
