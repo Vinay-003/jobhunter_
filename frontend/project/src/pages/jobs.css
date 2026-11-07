@@ -492,5 +492,5 @@ html[data-theme="light"] .jobs-page .role-evidence-card-desc {
 @media(prefers-reduced-motion:reduce) { .jobs-page .job-card { transition:none; } }
 
 /* Mobile tap targets: checkbox hit area + label target (WCAG 2.5.8 >=24px). */
-.jobs-page input[type="checkbox"] { width:16px; height:16px; }
+.jobs-page input[type="checkbox"] { width:16px; min-width:16px; height:16px; }
 .jobs-page label:has(input[type="checkbox"]) { display:inline-flex; align-items:center; gap:6px; min-height:24px; }

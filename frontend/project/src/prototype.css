@@ -1129,5 +1129,11 @@ html,body,#root{overflow-x:clip}
 @media(max-width:680px){.hero-example-label{font-size:9px;top:-12px}}
 /* Mobile tap targets: WCAG 2.5.8 minimum 24px; primary nav controls 44px. */
 .mobile-menu,.sidebar__close{min-width:44px;min-height:44px;place-content:center}
-.app-footer a,.marketing-footer>div a{min-height:24px}
+.app-footer a,.marketing-footer>div a,.legal-nav__actions a{min-height:24px}
 .inline-link,.back-link,.dropzone__change{padding-block:4px}
+.dropzone__change{min-height:24px}
+/* Auth fields: stretch the input/button inside the 48px .field box; links get a 24px hit area. */
+.field input,.field button{align-self:stretch}
+.field button{min-width:44px}
+.auth-switch a,.auth-switch button{display:inline-flex;align-items:center;min-height:24px}
+.auth-nav__actions>a{min-height:24px}
