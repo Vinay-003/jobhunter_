@@ -12,11 +12,13 @@ const DOMAINS = ['fintech', 'healthcare', 'e-commerce', 'ecommerce', 'saas', 'cl
 const HEADINGS: Array<[RegExp, 'required' | 'preferred' | 'responsibilities' | 'other']> = [
   [/^(?:(?:key|job|primary|core|roles?\s*(?:and|&)\s*)\s+)?(?:responsibilities|duties|roles?\s*(?:and|&)\s*responsibilities|what you(?:'|’)?ll do|what you will do|the role|your role|day.to.day|what you will be doing|what you'll be doing)$/i, 'responsibilities'],
   [/^(?:preferred|desired|nice.to.have|good.to.have|bonus|plus)(?:\s*(?:skills|qualifications|requirements|experience))?$/i, 'preferred'],
-  [/^(?:core|key|primary|must.have|minimum|essential|required|technical)?\s*(?:requirements|qualifications|skills|experience|competencies)(?:\s*(?:&|and|\/)\s*(?:qualifications|skills|experience|requirements|competencies))?$|^(?:core|key|primary|must.have|minimum|essential|required|technical)$/i, 'required'],
+  [/^(?:core|key|primary|must.have|minimum|essential|required|technical)?\s*(?:requirements|qualifications|skills|experience|competencies|technical\s+skills)(?:\s*(?:&|and|\/)\s*(?:qualifications|skills|experience|requirements|competencies))?$|^(?:core|key|primary|must.have|minimum|essential|required|technical)$/i, 'required'],
   [/^(?:what we(?:'|’)?re looking for|who you are|what you bring|your qualifications|technical proficiencies|key competencies)$/i, 'required'],
 ];
 function heading(line: string): 'required' | 'preferred' | 'responsibilities' | 'other' | null {
-  const normalized = line.trim().replace(/^#{1,6}\s*/, '').replace(/[:\s]+$/, '').replace(/^\*+|\*+$/g, '').trim();
+  const normalized = line.trim().replace(/^#{1,6}\s*/, '').replace(/[:\s]+$/, '').replace(/^\*+|\*+$/g, '').trim()
+    // Numbered headings ("## 3. Required Skills") must classify like their bare form.
+    .replace(/^\d+[.)]\s*/, '').trim();
   const classified = HEADINGS.find(([pattern]) => pattern.test(normalized));
   if (classified) return classified[1];
   if (/^#{1,6}\s/.test(line) || /^(?:benefits|about us|role overview|overview|company|location|compensation|education|application process|who we are|job details|application question\(s\))$/i.test(normalized)) return 'other';

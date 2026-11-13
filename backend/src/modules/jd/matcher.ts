@@ -64,9 +64,20 @@ function normalizeSet(skills: string[]): Set<string> {
   return new Set(skills.map((s) => normalizeSkill(s).toLowerCase()));
 }
 
+/**
+ * Canonical resume skill set used for every match decision. A resume claiming
+ * "C/C++" is claiming both languages, so it must satisfy a JD asking for C++ or C.
+ */
+export function profileSkillSet(profile: ResumeProfile): Set<string> {
+  const skills = profile.skillsNormalized.length ? profile.skillsNormalized : profile.skills;
+  const set = normalizeSet(skills);
+  if (set.has('c/c++')) { set.add('c++'); set.add('c'); }
+  return set;
+}
+
 export function matchJd(profile: ResumeProfile, jd: ParsedJobDescription): JdMatchResult {
   const profileSkills = profile.skillsNormalized.length ? profile.skillsNormalized : profile.skills;
-  const profileSet = normalizeSet(profileSkills);
+  const profileSet = profileSkillSet(profile);
   const groups = jd.requirementGroups ?? [
     ...jd.requiredSkills.map(skill => ({ allOf: [skill], anyOf: [], required: true })),
     ...jd.preferredSkills.map(skill => ({ allOf: [skill], anyOf: [], required: false })),

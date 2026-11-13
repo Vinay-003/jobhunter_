@@ -1,6 +1,6 @@
 import type { ResumeProfile } from '../parsing/resumeProfile.js';
 import type { ParsedJobDescription } from '../jd/jdParser.js';
-import type { JdMatchResult } from '../jd/matcher.js';
+import { profileSkillSet, type JdMatchResult } from '../jd/matcher.js';
 import { normalizeSeniority, seniorityPenalty } from '../jobs/seniority.js';
 
 export const JD_RUBRIC_VERSION = '3.1.0';
@@ -16,7 +16,7 @@ const roleFamily = (s: string) => {
 export function scoreJdRubric(profile: ResumeProfile, jd: ParsedJobDescription, match: JdMatchResult,
   responsibilityCoverage: Array<{ responsibility: string; matchScore: number; candidateEvidence: string | null }>) {
   const groups = jd.requirementGroups;
-  const skills = new Set((profile.skillsNormalized?.length ? profile.skillsNormalized : profile.skills).map(s => s.toLowerCase()));
+  const skills = profileSkillSet(profile);
   const cover = (required: boolean) => {
     const selected = groups?.filter(g => (g.required !== false) === required);
     if (!selected?.length) return required ? (jd.requiredSkills.length ? match.requiredCoverage : null) : (jd.preferredSkills.length ? match.preferredCoverage : null);
@@ -47,7 +47,7 @@ export function scoreJdRubric(profile: ResumeProfile, jd: ParsedJobDescription, 
   const candidateLevel = normalizeSeniority(profile.seniority);
   const jobLevel = normalizeSeniority(jd.seniority);
   const isEarlyCareerJob = /intern|fresher|trainee|apprentice/i.test(jd.title ?? '') ||
-    /\b(?:pursuing|student|intern|fresher|recent grad|new grad)\b/i.test(raw) ||
+    /\b(?:pursuing|student|intern|freshers?|recent grad|new grad)\b/i.test(raw) ||
     (candidateLevel === 'intern' && (!jobLevel || jobLevel === 'intern'));
   const educationStatus = !degreeRequested ? 'not_applicable' : !educationEvidence ? 'unverified' :
     profile.education.some(e => e.completed === true) ? 'evidenced' :

@@ -123,7 +123,11 @@ function entriesFor(body: string, kind: ExperienceEntry['kind'], bullets: Docume
     entry.bullets = bullets.filter(b => entry.description?.includes(b.text.slice(0, 20)));
     if (entry.bullets.length) {
       const prose = (entry.description ?? '').split(/(?=[•◦▪▫‣⁃*]\s)/)[0].trim();
-      entry.description = [prose, ...entry.bullets.map(b => b.text).filter(b => !prose.includes(b))].filter(Boolean).join(' ');
+      // PDF line-wrapping can re-space the same bullet, so exact includes() misses it
+      // and the sentence gets appended a second time. Compare on collapsed whitespace.
+      const flat = (s: string) => s.replace(/\s+/g, ' ').trim();
+      const proseFlat = flat(prose);
+      entry.description = [prose, ...entry.bullets.map(b => b.text).filter(b => !proseFlat.includes(flat(b)))].filter(Boolean).join(' ');
     }
   }
   return entries;
@@ -197,14 +201,17 @@ export function buildParsedResumeSections(doc: ParsedDocument, prof: ResumeProfi
   const headerLines: string[] = [];
   for (const line of lines) {
     if (/^(?:professional summary|summary|technical skills|skills|professional experience|experience)/i.test(line)) break;
+    // Institution banners ("IIIT Vadodara") sit above the name on many resumes.
+    if (/\b(?:institute|university|college|school|academy|department|iiit|iit|nit)\b/i.test(line)) continue;
     headerLines.push(line);
   }
   const name = headerLines[0] || 'Candidate';
   const targetRole = headerLines.length > 1 && !headerLines[1].includes('@') && !headerLines[1].includes('+') ? headerLines[1] : null;
   const contactLine = headerLines.find(l => l.includes('@') || l.includes('|') || l.includes('+')) || '';
   const parts = contactLine.split('|').map(s => s.trim());
-  const location = parts.find(p => !p.includes('@') && !p.includes('+') && !p.includes('.com') && !p.includes('http')) || null;
-  const links = parts.filter(p => p.includes('.com') || p.includes('http') || p.includes('github') || p.includes('linkedin'));
+  const location = parts.find(p => !p.includes('@') && !p.includes('+') && !p.includes('.com') && !p.includes('http')
+    && !/^(?:linkedin|github|gitlab|portfolio|twitter|medium|behance|leetcode|hackerrank|website|email|phone)$/i.test(p)) || null;
+  const links = parts.filter(p => !p.includes('@') && (p.includes('.com') || p.includes('http') || p.includes('github') || p.includes('linkedin')));
 
   const contactInfo: ContactInfo = { name, title: targetRole, email, phone, location, links };
 
