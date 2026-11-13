@@ -25,3 +25,13 @@ export function formatMetricValue(value: unknown): string {
   if (typeof value === 'string' && value.trim()) return safeText(value);
   return 'Not recorded';
 }
+
+/**
+ * The 3-resume retention cap deletes the oldest file when a new one is
+ * uploaded. Say so instead of letting a saved resume vanish without a word.
+ */
+export function evictionNotice(evictedCount: number): string {
+  if (!Number.isFinite(evictedCount) || evictedCount <= 0) return '';
+  const subject = evictedCount === 1 ? 'your oldest resume was' : `${evictedCount} older resumes were`;
+  return `This account keeps up to 3 resumes, so ${subject} deleted to make room. Upload it again if you still need it.`;
+}

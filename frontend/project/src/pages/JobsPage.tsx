@@ -516,7 +516,10 @@ export default function JobsPage() {
 
   const runRecommendations = async (isRefresh = false) => {
     if (!selectedResume) return setError('Choose a resume before generating matches.');
-    if (discovering || loading || refreshing || loadingResumes) return;
+    // Role discovery and the resume list still loading used to abort the search
+    // silently; say what is happening instead.
+    if (discovering || loadingResumes) return setError('Still preparing your search profile — try Find matches again in a moment.');
+    if (loading || refreshing) return;
     if (!prefs.location.trim()) return setError('Choose a location explicitly (for example India); remote is not a country.');
     activeRequest.current?.abort();
     const controller = new AbortController();
