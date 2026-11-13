@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../lib/api';
+import { evictionNotice } from '../lib/display';
 import { Button, Eyebrow, SelectMenu, Tag } from '../components/UI';
 import { ArrowRight, Briefcase, Check, ChevronDown, FileText, LockKeyhole, ShieldCheck, Target, Upload } from 'lucide-react';
 import './analysis.css';
@@ -24,6 +25,7 @@ export default function AtsPage() {
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState<'upload' | 'analyze'>('upload');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [dragging, setDragging] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
 
@@ -53,7 +55,8 @@ export default function AtsPage() {
   const analyze = async () => {
     if (!existing && !file) { setError('Choose a PDF resume first.'); return; }
     if (mode === 'match' && jobDescription.trim().length < 20) { setError('Paste at least 20 characters from the job description you want to match against.'); return; }
-    setLoading(true); setError(''); setPhase(existing ? 'analyze' : 'upload');
+    let evictionMessage = '';
+    setLoading(true); setError(''); setNotice(''); setPhase(existing ? 'analyze' : 'upload');
     try {
       let resumeId: string;
       let fileName: string;
@@ -61,9 +64,15 @@ export default function AtsPage() {
       else {
         const form = new FormData(); form.append('resume', file!); form.append('targetLevel', targetLevel);
         const upload = await api.post('/resumes', form, { headers: { 'Content-Type': 'multipart/form-data' } });
-        const uploaded = upload.data as { resume?: { id?: string }; id?: string };
+        const uploaded = upload.data as { resume?: { id?: string }; id?: string; evicted?: string[] };
         resumeId = uploaded?.resume?.id ?? uploaded?.id ?? '';
         if (!resumeId) throw new Error('Upload succeeded but no resume id was returned.');
+        // The 3-resume retention cap deletes the oldest file on upload; say so
+        // instead of letting a saved resume disappear without a word.
+        if (uploaded?.evicted?.length) {
+          evictionMessage = evictionNotice(uploaded.evicted.length);
+          setNotice(evictionMessage);
+        }
         fileName = file!.name;
         setExisting({ id: resumeId, fileName });
       }
@@ -73,7 +82,7 @@ export default function AtsPage() {
         : await api.post('/analyses/jd-match', { resumeId, jobDescription, targetLevel }, { timeout: 260000 });
       const data = response.data as { analysisId?: string; [key: string]: unknown };
       if (!data?.analysisId) throw new Error('Analysis completed but no report id was returned.');
-      navigate(`/app/analysis/${data.analysisId}`, { state: { initialAnalysis: data, fileName, mode, createdAt: new Date().toISOString() } });
+      navigate(`/app/analysis/${data.analysisId}`, { state: { initialAnalysis: data, fileName, mode, createdAt: new Date().toISOString(), notice: evictionMessage } });
     } catch (err) { setError(getApiErrorMessage(err)); }
     finally { setLoading(false); }
   };
@@ -95,6 +104,7 @@ export default function AtsPage() {
       {!loading && <div className="analysis-source-actions"><Link to="/app/resumes" className="inline-link">Choose a saved resume</Link>{selectedName && <button type="button" className="inline-link inline-link--button" onClick={() => { setFile(null); setExisting(null); setError(''); if (existingResumeId) navigate('/app/ats', { replace: true }); }}>Remove selected resume</button>}</div>}
       <div className="ats-controls"><div><span className="analysis-field-label">Career level</span><SelectMenu value={targetLevel} disabled={loading} onChange={value => setTargetLevel(value as TargetLevel)} label="Career level" options={levelOptions}/><small>Used only to adapt reasonable depth expectations.</small></div><div className="ats-controls__summary"><span className={selectedName ? 'ready' : ''}><Check size={14}/> PDF {selectedName ? 'ready' : 'needed'}</span><span><LockKeyhole size={14}/> Private storage</span>{mode === 'match' && <span className={jobDescription.trim().length >= 20 ? 'ready' : ''}><Check size={14}/> JD {jobDescription.trim().length >= 20 ? 'ready' : 'needed'}</span>}</div></div>
       {error && <p className="analysis-form-error" role="alert">{error}</p>}
+      {notice && <p className="analysis-form-error" role="status">{notice}</p>}
       <div className="ats-submit"><div><p>{mode === 'resume' ? 'No AI similarity score.' : 'Resume Health remains unchanged.'}</p><small>{mode === 'resume' ? 'Every point maps to a visible document-quality check.' : 'This creates a separate role-fit analysis.'}</small></div><Button disabled={loading} onClick={analyze}>{loading ? 'Analyzing…' : mode === 'resume' ? 'Build my report' : 'Analyze + match'} {!loading && <ArrowRight size={16}/>}</Button></div>
       {loading && <div className="analysis-progress" role="status" aria-live="polite"><div className="analysis-progress__top"><span className="spinner"/><div><b>{phase === 'upload' ? 'Uploading your resume' : mode === 'resume' ? 'Building your Resume Health report' : 'Matching your evidence to the role'}</b><small>Keep this tab open while we finish the analysis.</small></div></div><div className="analysis-stages"><span className={phase === 'analyze' ? 'done' : 'active'}>{phase === 'analyze' ? <Check size={14}/> : <i/>} Resume uploaded</span><span className={phase === 'analyze' ? 'active' : ''}><i/> Reading structure</span><span><i/> Evaluating evidence</span><span><i/> Building recommendations</span></div></div>}
     </section><aside className="ats-aside"><div className="rubric-card"><div className="rubric-card__head"><span className="rubric-card__icon"><Target size={20}/></span><div><b>{mode === 'resume' ? 'What Resume Health checks' : 'What Tailored Match checks'}</b><small>{mode === 'resume' ? '8 independent document signals' : 'Role evidence only'}</small></div></div>{mode === 'resume' ? <div className="check-grid">{checks.map((check, i) => <div key={check}><span>{String(i + 1).padStart(2, '0')}</span>{check}</div>)}</div> : <div className="match-checks">{['Required skills coverage', 'Responsibility alignment', 'Seniority alignment', 'Semantic evidence', 'Missing skills'].map(check => <div key={check}><Check size={16}/>{check}</div>)}</div>}<button type="button" className={`details-link ${showDetails ? 'details-link--open' : ''}`} aria-expanded={showDetails} onClick={() => setShowDetails(v => !v)}>How {mode === 'resume' ? 'scoring' : 'matching'} works <ChevronDown size={14}/></button>{showDetails && <div className="ats-method-note"><p>{mode === 'resume' ? 'Resume Health uses independent document-quality groups. Visible points map to real checks returned by the analysis. Job relevance is excluded.' : 'Tailored Match compares one supplied job description against required skills, responsibilities, seniority and available semantic evidence. It never changes your Resume Health score.'}</p></div>}</div><div className={`signal-reminder ${mode === 'match' ? 'signal-reminder--blue' : ''}`}><div><span>{mode === 'resume' ? '01' : '02'}</span><small>signal</small></div><p><b>{mode === 'resume' ? 'Document quality' : 'Role fit'}</b>{mode === 'resume' ? 'Your score does not guess job relevance.' : 'Your Health score does not change when the JD changes.'}</p></div></aside></div>
