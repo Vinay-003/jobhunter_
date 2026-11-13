@@ -35,6 +35,17 @@ export function parseJd(jdText: string): ParsedJobDescription {
   let explicitSections = false;
   const groups: RequirementGroup[] = [];
   const responsibilityEvidence: NonNullable<ParsedJobDescription['responsibilityEvidence']> = [];
+  const pushGroups = (unit: string, required: boolean, confidence: number, start: number, end: number) => {
+    const found = [...new Set([...extractSkills(unit.replace(/\b(?:no|not|without|don't need|not required)\s+[\w.+#-]+(?:\s+required)?/gi, '')),
+      ...(['Chroma', 'Qdrant', 'Pinecone', 'pgvector'].filter(skill => new RegExp(`\\b${skill}\\b`, 'i').test(unit)) )])];
+    if (!found.length) return;
+    const or = /\b(?:at least one(?: of)?|one or more|one of|either|any of|such as)\b/i.test(unit) || (found.length > 1 && /\s+or\s+/i.test(unit));
+    groups.push({ allOf: or ? [] : found, anyOf: or ? found : [], required, confidence, evidence: unit, start, end });
+  };
+  // Markdown table state: a "Good to have" header cell marks that column (and
+  // beyond) as preferred instead of letting it fall into the required section.
+  let tablePreferredFrom = -1;
+  let tableActive = false;
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
     const nextSection = heading(line.raw);
@@ -58,7 +69,22 @@ export function parseJd(jdText: string): ParsedJobDescription {
         responsibilityEvidence.push({ text: content, start: line.start, end: line.end, confidence: 1 });
       }
     }
-    if (section !== 'required' && section !== 'preferred') continue;
+    if (section !== 'required' && section !== 'preferred') {
+      tableActive = false;
+      continue;
+    }
+    if (line.raw.includes('|')) {
+      const cells = line.raw.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(cell => cell.trim());
+      if (cells.every(cell => /^:?-{3,}:?$/.test(cell))) continue;
+      const preferredColumn = cells.findIndex(cell => /^(?:good.to.have|nice.to.have|preferred|desired|bonus|plus|extra credit)(?:\s+\w+)*$/i.test(cell));
+      if (preferredColumn >= 0) { tablePreferredFrom = preferredColumn; tableActive = true; continue; }
+      if (tableActive) {
+        cells.forEach((cell, column) => pushGroups(cell, column < tablePreferredFrom, .9, line.start, line.end));
+        continue;
+      }
+    } else {
+      tableActive = false;
+    }
     const parent = line.raw.match(/^(\s*)(?:[•\-*◦▪·●○■□▶►⁃–—✓✔➤➔]\s*|\d+[.)]\s+)/);
     const childLines: typeof lines = [];
     if (parent && /:\s*$/.test(content)) {
@@ -72,13 +98,7 @@ export function parseJd(jdText: string): ParsedJobDescription {
     }
     const groupedContent = [content, ...childLines.map(child => child.raw.replace(bulletPattern, '').trim())].join('\n');
     const units = childLines.length ? [groupedContent] : groupedContent.split(/\s*;\s*|(?<=[.!?])\s+(?=[A-Z])/).filter(Boolean);
-    for (const unit of units) {
-      const found = [...new Set([...extractSkills(unit.replace(/\b(?:no|not|without|don't need|not required)\s+[\w.+#-]+(?:\s+required)?/gi, '')),
-        ...(['Chroma', 'Qdrant', 'Pinecone', 'pgvector'].filter(skill => new RegExp(`\\b${skill}\\b`, 'i').test(unit)) )])];
-      if (!found.length) continue;
-      const or = /\b(?:at least one(?: of)?|one or more|one of|either|any of|such as)\b/i.test(unit) || (found.length > 1 && /\s+or\s+/i.test(unit));
-      groups.push({ allOf: or ? [] : found, anyOf: or ? found : [], required: section === 'required', confidence: isBullet || inline ? 1 : .7, evidence: unit, start: line.start, end: childLines.at(-1)?.end ?? line.end });
-    }
+    for (const unit of units) pushGroups(unit, section === 'required', isBullet || inline ? 1 : .7, line.start, childLines.at(-1)?.end ?? line.end);
     index += childLines.length;
   }
   if (!groups.length) {

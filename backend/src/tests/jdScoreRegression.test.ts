@@ -82,6 +82,16 @@ describe('JD score regressions', () => {
     expect(scoreJdRubric(profile, jd, matchJd(profile, jd), []).breakdown.education).toBe(10);
   });
 
+  it('splits a "Must have | Good to have" table into required and preferred columns', () => {
+    const jd = parseJd(`Java Backend Engineer\nKey Responsibilities\n- Build Java services.\nRequirements\n| Must have | Good to have |\n| --- | --- |\n| Java, Spring Boot, REST, SQL, Git | Apache Kafka, AWS, Docker, Kubernetes |`);
+    expect(jd.requiredSkills).toEqual(expect.arrayContaining(['Java', 'Spring Boot', 'REST', 'SQL', 'Git']));
+    expect(jd.preferredSkills).toEqual(expect.arrayContaining(['Kafka', 'AWS', 'Docker', 'Kubernetes']));
+    expect(jd.requiredSkills).not.toContain('Docker');
+    expect(jd.requiredSkills).not.toContain('Kubernetes');
+    expect(jd.requirementGroups!.filter(g => g.required).length).toBeGreaterThan(0);
+    expect(jd.requirementGroups!.filter(g => !g.required).length).toBeGreaterThan(0);
+  });
+
   it('reads the person from the header, not the institution banner', () => {
     const text = [
       'Indian Institute of Information Technology Vadodara',
