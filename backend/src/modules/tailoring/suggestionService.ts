@@ -169,6 +169,31 @@ export function generateDeterministicSuggestions(
         }
       }
 
+      // Substantive domain enhancement: weave in target-aligned verified skills and gap coverage
+      if (!rewrite || rewrite === bullet) {
+        const gapText = (job.unmatchedResponsibilities || []).join(' ').toLowerCase();
+        const missingSkillList = (job.missingSkills || []).map((s) => s.toLowerCase());
+        const hasSkill = (s: string) => whitelist.has(s.toLowerCase());
+
+        // Target API / Backend / Microservices gaps
+        if ((gapText.includes('api') || gapText.includes('backend') || gapText.includes('service') || missingSkillList.some(s => s.includes('rest') || s.includes('api'))) && (hasSkill('rest') || hasSkill('api design') || hasSkill('express') || hasSkill('fastapi'))) {
+          if (/storefront|server|app|backend|application/i.test(bullet) && !/rest api/i.test(bullet)) {
+            const trimmed = bullet.replace(/[.;\s]+$/, '');
+            rewrite = `${trimmed}, incorporating structured REST API design and modular architecture to improve service reliability.`;
+            rationale = `Evidences REST API and modular backend architecture to directly address target role service gaps.`;
+          }
+        }
+
+        // Target Cloud / Infrastructure / Pipeline gaps
+        if (!rewrite && (gapText.includes('cloud') || gapText.includes('deploy') || gapText.includes('pipeline') || gapText.includes('infrastructure')) && (hasSkill('aws') || hasSkill('docker') || hasSkill('render') || hasSkill('supabase'))) {
+          if (/pipeline|deploy|cloud|stack/i.test(bullet) && !/ci\/cd|cloud/i.test(bullet)) {
+            const trimmed = bullet.replace(/[.;\s]+$/, '');
+            rewrite = `${trimmed}, establishing automated cloud deployment workflows and scalable data persistence.`;
+            rationale = `Highlights cloud deployment and persistence workflows to satisfy role infrastructure criteria.`;
+          }
+        }
+      }
+
       // If rewrite found, validate against whitelist
       if (rewrite && rewrite !== bullet) {
         const guard = validateSuggestionGuardrail(bullet, rewrite, whitelist);
@@ -356,65 +381,96 @@ Provide up to 5 customized bullet rewrite suggestions specifically tailored to b
 - Strictly adhere to the candidate verified skills whitelist.`;
 
   try {
-    const response = await axios.post(
-      mercuryUrl,
-      {
-        model: mercuryModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.2,
-        max_tokens: 4096,
-        response_format: { type: 'json_object' },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${mercuryKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 45000,
-      }
-    );
+    const MAX_RETRIES = 3;
+    let parsedPayload: any = null;
 
-    const content = response.data?.choices?.[0]?.message?.content || response.data?.choices?.[0]?.text;
-    if (!content || typeof content !== 'string' || !content.trim()) {
-      console.warn('[suggestionService] Mercury 3 returned empty content — falling back to deterministic');
-      return generateDeterministicSuggestions(candidate, job, whitelist);
-    }
-
-    let parsedPayload: any;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
+      const response = await axios.post(
+        mercuryUrl,
+        {
+          model: mercuryModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: attempt === 1 ? 0.2 : 0.4,
+          max_tokens: 4096,
+          ...(attempt <= 2 ? { response_format: { type: 'json_object' } } : {}),
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${mercuryKey}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 45000,
+        }
+      );
+
+      const choice = response.data?.choices?.[0];
+      const content = choice?.message?.content || choice?.message?.reasoning_content || choice?.text;
+
+      if (!content || typeof content !== 'string' || !content.trim()) {
+        console.warn(`[suggestionService] Mercury 3 attempt ${attempt}/${MAX_RETRIES} returned empty content`);
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, 600 * attempt));
+          continue;
+        }
+        break;
+      }
+
+      // Multi-strategy JSON extraction
+      let payload: any = null;
       // 1. Try markdown code block ```json ... ```
       const matchBlock = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
       if (matchBlock) {
-        try { parsedPayload = JSON.parse(matchBlock[1].trim()); } catch {}
+        try { payload = JSON.parse(matchBlock[1].trim()); } catch {}
       }
       // 2. Try outermost { ... }
-      if (!parsedPayload) {
+      if (!payload) {
         const firstBrace = content.indexOf('{');
         const lastBrace = content.lastIndexOf('}');
         if (firstBrace !== -1 && lastBrace > firstBrace) {
-          try { parsedPayload = JSON.parse(content.slice(firstBrace, lastBrace + 1).trim()); } catch {}
+          try { payload = JSON.parse(content.slice(firstBrace, lastBrace + 1).trim()); } catch {}
         }
       }
       // 3. Try outermost [ ... ]
-      if (!parsedPayload) {
+      if (!payload) {
         const firstBracket = content.indexOf('[');
         const lastBracket = content.lastIndexOf(']');
         if (firstBracket !== -1 && lastBracket > firstBracket) {
-          try { parsedPayload = JSON.parse(content.slice(firstBracket, lastBracket + 1).trim()); } catch {}
+          try { payload = JSON.parse(content.slice(firstBracket, lastBracket + 1).trim()); } catch {}
         }
       }
       // 4. Try cleaned direct parse
-      if (!parsedPayload) {
+      if (!payload) {
         const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        parsedPayload = JSON.parse(cleaned);
+        try { payload = JSON.parse(cleaned); } catch {}
       }
-    } catch (e: any) {
-      console.warn('[suggestionService] Failed to parse Mercury 3 JSON — raw content:', content);
-      return generateDeterministicSuggestions(candidate, job, whitelist);
+
+      if (payload && (Array.isArray(payload.suggestions) || Array.isArray(payload))) {
+        parsedPayload = payload;
+        break; // Successfully got suggestions!
+      } else {
+        console.warn(`[suggestionService] Mercury 3 attempt ${attempt}/${MAX_RETRIES} JSON parse yielded invalid structure:`, content.slice(0, 150));
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, 600 * attempt));
+          continue;
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[suggestionService] Mercury 3 attempt ${attempt}/${MAX_RETRIES} error: ${err.response?.status || err.message}`);
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, 600 * attempt));
+        continue;
+      }
     }
+  }
+
+  if (!parsedPayload) {
+    console.warn('[suggestionService] Mercury 3 exhausted retries — using deterministic fallback');
+    return generateDeterministicSuggestions(candidate, job, whitelist);
+  }
 
     const rawSuggestions = Array.isArray(parsedPayload.suggestions)
       ? parsedPayload.suggestions
