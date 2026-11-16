@@ -36,7 +36,7 @@ export const SuggestionCard: React.FC<SuggestionCardProps> = ({
 
   if (isRejected) {
     return (
-      <div className="rounded-xl border border-stone-800/60 bg-stone-900/30 p-4 text-xs text-stone-500 opacity-60 transition-opacity">
+      <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-xs text-stone-400 opacity-60 transition-opacity">
         <div className="flex items-center justify-between">
           <span className="line-through">
             {formatSectionName(suggestion.section)} · Bullet #{bulletNumber}
@@ -51,19 +51,19 @@ export const SuggestionCard: React.FC<SuggestionCardProps> = ({
     <div
       className={`rounded-xl border transition-all duration-200 p-5 ${
         isApplied
-          ? 'border-emerald-500/40 bg-emerald-950/10 shadow-sm'
-          : 'border-stone-800 bg-stone-900/70 hover:border-stone-700'
+          ? 'border-emerald-300 bg-emerald-50/40 shadow-sm'
+          : 'border-stone-200 bg-white hover:border-amber-400 hover:shadow-md'
       }`}
     >
       {/* Header with location and status */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-stone-800/80">
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-stone-100">
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-stone-800 text-amber-300">
+          <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100/70 text-amber-900 border border-amber-200">
             <MapPin size={11} />
             {formatSectionName(suggestion.section)} · Bullet #{bulletNumber}
           </span>
           {isApplied && (
-            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">
               <Check size={12} />
               Applied ✓
             </span>
@@ -71,8 +71,8 @@ export const SuggestionCard: React.FC<SuggestionCardProps> = ({
         </div>
 
         {/* Verified skills badge */}
-        <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
-          <ShieldCheck size={14} className="text-emerald-400" />
+        <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+          <ShieldCheck size={14} className="text-emerald-600" />
           <span>Verified against candidate skills</span>
         </div>
       </div>
@@ -81,27 +81,27 @@ export const SuggestionCard: React.FC<SuggestionCardProps> = ({
       <div className="mt-4 space-y-3">
         {/* Original Text */}
         <div>
-          <div className="mb-1 text-[11px] font-medium uppercase tracking-wider text-stone-500">
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-stone-500">
             Current Resume
           </div>
-          <div className="rounded-lg border border-red-900/20 bg-red-950/10 px-3.5 py-2.5 text-xs leading-relaxed text-stone-400 line-through decoration-red-500/40">
+          <div className="rounded-lg border border-red-200 bg-red-50/50 px-3.5 py-2.5 text-xs leading-relaxed text-stone-600 line-through decoration-red-400">
             {suggestion.originalText}
           </div>
         </div>
 
         {/* Suggested Text */}
         <div>
-          <div className="mb-1 flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-amber-400/90">
+          <div className="mb-1 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-amber-900">
             <span>Tailored Suggestion</span>
-            <span className="text-[10px] lowercase text-stone-500">
+            <span className="text-[10px] lowercase text-stone-500 font-normal">
               (action verbs, quantifiable metrics, role alignment)
             </span>
           </div>
           <div
             className={`rounded-lg border px-3.5 py-2.5 text-xs leading-relaxed font-normal ${
               isApplied
-                ? 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200'
-                : 'border-amber-500/30 bg-amber-950/20 text-amber-100'
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-950 font-medium'
+                : 'border-amber-300 bg-amber-50/70 text-stone-900 font-medium'
             }`}
           >
             {suggestion.suggestedText}
@@ -110,19 +110,19 @@ export const SuggestionCard: React.FC<SuggestionCardProps> = ({
       </div>
 
       {/* Rationale & Verified Skills */}
-      <div className="mt-4 space-y-2 rounded-lg bg-stone-950/60 p-3 border border-stone-800/60 text-xs">
-        <div className="text-stone-300 leading-relaxed">
-          <span className="font-semibold text-stone-400">Why this helps: </span>
+      <div className="mt-4 space-y-2 rounded-lg bg-stone-50/90 p-3.5 border border-stone-200 text-xs">
+        <div className="text-stone-700 leading-relaxed">
+          <span className="font-semibold text-stone-900">Why this helps: </span>
           {suggestion.rationale}
         </div>
 
         {suggestion.verifiedSkillsUsed && suggestion.verifiedSkillsUsed.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-stone-800/50">
-            <span className="text-[11px] text-stone-500 font-medium">Demonstrated skills applied:</span>
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-stone-200/80">
+            <span className="text-[11px] text-stone-600 font-medium">Demonstrated skills applied:</span>
             {suggestion.verifiedSkillsUsed.map((skill) => (
               <span
                 key={skill}
-                className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300"
+                className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-800"
               >
                 {skill}
               </span>
@@ -139,7 +139,7 @@ export const SuggestionCard: React.FC<SuggestionCardProps> = ({
               type="button"
               onClick={() => onReject(suggestion)}
               disabled={isApplying}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-stone-400 hover:text-stone-200 hover:bg-stone-800 transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-stone-600 hover:text-stone-900 hover:bg-stone-100 border border-stone-200 transition-colors disabled:opacity-50"
             >
               <X size={14} />
               <span>Dismiss</span>
@@ -164,7 +164,7 @@ export const SuggestionCard: React.FC<SuggestionCardProps> = ({
             </button>
           </>
         ) : (
-          <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium">
+          <div className="flex items-center gap-2 text-xs text-emerald-700 font-semibold">
             <Check size={15} />
             <span>Applied to tailored resume & re-scored</span>
           </div>
@@ -175,4 +175,3 @@ export const SuggestionCard: React.FC<SuggestionCardProps> = ({
 };
 
 export default SuggestionCard;
-

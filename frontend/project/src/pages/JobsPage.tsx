@@ -6,6 +6,7 @@ import { displayValue, safeText } from '../lib/display';
 import { buildMatchReport } from '../lib/matchReport';
 import { Tag, Eyebrow } from '../components/UI';
 import ResumeTailorStudio from '../features/tailor/ResumeTailorStudio';
+import { fetchJobSuggestions, type TailorSuggestion } from '../lib/tailorApi';
 import './jobs.css';
 import {
   ArrowUpRight,
@@ -227,11 +228,39 @@ function JobDetail({
 }) {
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [isTailoring, setIsTailoring] = useState(false);
+  const [inlineSuggestions, setInlineSuggestions] = useState<TailorSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const score = scoreOf(job);
   const external = safeExternalUrl(job.link ?? job.url);
   const description = safeText(job.snippet ?? job.description);
   const reasons = job.recommendationReasons ?? [];
   const breakdown = job.breakdown ?? [];
+
+  useEffect(() => {
+    const jId = String(job.id ?? (job as any).jobId ?? '');
+    if (!selectedResume || !jId) {
+      setInlineSuggestions([]);
+      return;
+    }
+    let active = true;
+    setLoadingSuggestions(true);
+    fetchJobSuggestions(selectedResume, jId)
+      .then((res) => {
+        if (active && res?.suggestions) {
+          setInlineSuggestions(res.suggestions);
+        }
+      })
+      .catch((err) => {
+        console.warn('[JobsPage] Could not pre-fetch suggestions:', err);
+        if (active) setInlineSuggestions([]);
+      })
+      .finally(() => {
+        if (active) setLoadingSuggestions(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedResume, job.id, (job as any).jobId]);
 
   return (
     <div className="job-detail space-y-5">
@@ -316,23 +345,30 @@ function JobDetail({
       ) : null}
 
       {job.scoreDetails?.responsibilityMatches?.length ? (
-        <details className="job-evidence-box rounded-xl border p-3.5 group">
-          <summary className="flex cursor-pointer items-center justify-between text-[11px] font-semibold select-none list-none text-slate-300">
+        <details className="job-evidence-box rounded-xl border border-slate-200/80 bg-white/70 p-3.5 group shadow-sm">
+          <summary className="flex cursor-pointer items-center justify-between text-[11px] font-semibold select-none list-none text-slate-800">
             <span className="flex items-center gap-2">
               <span>Responsibility coverage</span>
-              <span className="rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-medium">
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium border ${
+                job.scoreDetails.responsibilityMatches.filter(r => r.supported).length > 0
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                  : 'bg-amber-50 text-amber-700 border-amber-300'
+              }`}>
                 {job.scoreDetails.responsibilityMatches.filter(r => r.supported).length} of {job.scoreDetails.responsibilityMatches.length} supported
               </span>
             </span>
-            <ChevronDown size={14} className="text-slate-400 transition-transform duration-200 group-open:rotate-180" />
+            <ChevronDown size={14} className="text-slate-500 transition-transform duration-200 group-open:rotate-180" />
           </summary>
-          <div className="mt-3 space-y-2 border-t border-white/[0.06] pt-3 text-[11px]">
+          <div className="mt-3 space-y-2 border-t border-slate-200/80 pt-3 text-[11px]">
             {job.scoreDetails.responsibilityMatches.map((item, index) => (
               <div key={`${displayValue(item.responsibility)}-${index}`} className="flex items-start gap-2">
-                <span className={`mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${item.supported ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                <span className={`mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${item.supported ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                 <div className="min-w-0 flex-1 leading-relaxed">
-                  <span className="font-medium text-slate-200">{displayValue(item.responsibility)}</span>
-                  <span className="text-slate-500"> — {item.supported ? 'Supported' : 'No direct match'}{item.evidence ? `: "${displayValue(item.evidence)}"` : ''}</span>
+                  <span className="font-semibold text-slate-800">{displayValue(item.responsibility)}</span>
+                  <span className={item.supported ? 'text-slate-600 font-medium' : 'text-slate-500 italic'}>
+                    {' '}— {item.supported ? 'Supported' : 'No direct match'}
+                    {item.evidence ? <span className="block mt-0.5 text-[10px] text-slate-600 font-normal not-italic">Matched from: &ldquo;{displayValue(item.evidence)}&rdquo;</span> : null}
+                  </span>
                 </div>
               </div>
             ))}
@@ -398,6 +434,103 @@ function JobDetail({
               <ChevronDown size={12} className={`transition-transform duration-200 ${showFullDesc ? 'rotate-180' : ''}`} />
             </button>
           )}
+        </div>
+      )}
+
+      {/* Inline Match-Improving Suggestions Section */}
+      {selectedResume && (
+        <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50/70 via-white to-stone-50 p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-2 pb-3 border-b border-stone-200/80">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-amber-100 text-amber-800">
+                <Sparkles size={16} className="fill-amber-600" />
+              </span>
+              <div>
+                <h4 className="text-xs font-bold text-stone-900">
+                  Suggestions to Improve Match Score for this Role
+                </h4>
+                <p className="text-[11px] text-stone-500">
+                  Tailored suggestions to boost ATS alignment and semantic similarity
+                </p>
+              </div>
+            </div>
+            {inlineSuggestions.length > 0 && (
+              <span className="rounded-full bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-0.5 text-[10px] font-bold">
+                {inlineSuggestions.length} available
+              </span>
+            )}
+          </div>
+
+          <div className="mt-3 space-y-2.5">
+            {loadingSuggestions ? (
+              <div className="flex items-center gap-2 py-3 text-xs text-stone-500">
+                <Loader2 size={15} className="animate-spin text-amber-600" />
+                <span>Analyzing role criteria & generating match-improving suggestions…</span>
+              </div>
+            ) : inlineSuggestions.length > 0 ? (
+              <div className="space-y-2">
+                {inlineSuggestions.slice(0, 3).map((sug, idx) => (
+                  <div
+                    key={sug.id || idx}
+                    className="rounded-xl border border-stone-200 bg-white p-3 text-xs shadow-xs hover:border-amber-400 transition-all"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-stone-800 text-[11px]">
+                        {sug.section === 'experience' ? 'Work Experience' : 'Projects'} · Bullet #{(sug.bulletIndex ?? 0) + 1}
+                      </span>
+                      {sug.verifiedSkillsUsed?.length ? (
+                        <span className="text-[10px] text-emerald-800 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                          {sug.verifiedSkillsUsed.slice(0, 3).join(', ')} verified
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1.5 text-stone-700 leading-relaxed text-[11px]">
+                      &ldquo;{sug.suggestedText}&rdquo;
+                    </p>
+                    <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-1.5 text-[10px]">
+                      <span className="text-stone-600 italic">
+                        <strong className="text-stone-700 not-italic">Why this helps:</strong> {sug.rationale}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsTailoring(true)}
+                        className="font-bold text-amber-800 hover:text-amber-900 underline ml-2 shrink-0 cursor-pointer"
+                      >
+                        Review in Studio →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {inlineSuggestions.length > 3 && (
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-stone-500">
+                      +{inlineSuggestions.length - 3} more bullet improvement{inlineSuggestions.length - 3 !== 1 ? 's' : ''} available
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsTailoring(true)}
+                      className="text-[11px] font-bold text-amber-800 hover:text-amber-900 underline"
+                    >
+                      View all in Studio
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-xs text-stone-600 space-y-1.5 bg-stone-50 rounded-xl p-3 border border-stone-200">
+                {job.missingSkills?.length ? (
+                  <p>
+                    <strong className="text-stone-800">Address skill gaps:</strong> Highlight any relevant exposure to{' '}
+                    <span className="font-semibold text-rose-700">{job.missingSkills.join(', ')}</span> in your project summaries or coursework.
+                  </p>
+                ) : (
+                  <p>
+                    All required skills are demonstrated in your profile! Open the studio below to fine-tune bullet impact and maximize ATS score.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

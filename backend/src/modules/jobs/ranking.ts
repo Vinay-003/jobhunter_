@@ -234,14 +234,14 @@ export async function rankJobsBatch(
     ...eduChunks,
     ...profileRoles,
     ...candidateSkills,
-  ].map((t) => t.trim()).filter(Boolean))];
+  ].filter((t): t is string => typeof t === 'string' && Boolean(t.trim())).map((t) => t.trim()))];
 
   const jobGroupLists = perJobTexts.map((entry) => [...new Set([
     entry.title,
     ...(entry.responsibilities.length ? entry.responsibilities : [entry.jobDesc]),
     ...(entry.eduText ? [entry.eduText] : []),
     ...entry.jobSkills,
-  ].map((text) => text.trim()).filter(Boolean))]);
+  ].filter((t): t is string => typeof t === 'string' && Boolean(t.trim())).map((t) => t.trim()))]);
   // Global safety valve: a 300-job run would otherwise fan out ~6000 vectors
   // (~190 sequential SageMaker invokes). Round-robin across jobs until the cap
   // so every job keeps its title and highest-priority texts instead of the
@@ -268,7 +268,7 @@ export async function rankJobsBatch(
   const uniq = [...new Set([
     ...resumeGroup,
     ...jobGroup,
-  ].map((t) => t.trim()).filter(Boolean))];
+  ].filter((t): t is string => typeof t === 'string' && Boolean(t.trim())).map((t) => t.trim()))];
 
   const provider = opts?.embeddingProvider ?? getRankingEmbeddingProvider();
   const providerName = (provider as object).constructor?.name ?? 'unknown';
@@ -485,9 +485,11 @@ export async function rankJobsBatch(
     let roleTitle = 0;
     {
       const target = opts?.preferences?.targetRoles ?? [];
-      const titleLower = job.title.toLowerCase();
+      const jobTitleSafe = job.title || '';
+      const titleLower = jobTitleSafe.toLowerCase();
 
       const isDirectMatch = profileRoles.some(r => {
+        if (!r || typeof r !== 'string') return false;
         const rL = r.toLowerCase();
         return titleLower.includes(rL) || rL.includes(titleLower) ||
           rL.split(/\s+/).filter(w => w.length > 3).every(w => titleLower.includes(w));
@@ -496,7 +498,7 @@ export async function rankJobsBatch(
       let maxRoleSim = 0;
       if (vec.size && profileRoles.length) {
         for (const pr of profileRoles) {
-          const s = pairScore(pr, job.title);
+          const s = pairScore(pr, jobTitleSafe);
           if (s > maxRoleSim) maxRoleSim = s;
         }
       }
@@ -514,7 +516,7 @@ export async function rankJobsBatch(
       } else if (maxRoleSim >= 0.15) {
         roleTitle = Math.round(maxRoleSim * 15);
       } else {
-        const actual = roleArea(job.title);
+        const actual = roleArea(jobTitleSafe);
         const areas = profileRoleAreas(profile);
         const desired = target.map(roleArea);
         const compatible = areas.has(actual) || (actual === 'generic' && areas.size > 0);
@@ -522,7 +524,7 @@ export async function rankJobsBatch(
         roleTitle = !compatible || !targeted ? 0 : actual === 'generic' ? 9 : 15;
       }
 
-      const roleLabel = roleArea(job.title);
+      const roleLabel = roleArea(jobTitleSafe);
       evidence.push(`Role ${roleLabel}: ${roleTitle ? `supported by candidate profile${maxRoleSim >= 0.30 ? ` (${Math.round(maxRoleSim * 100)}% semantic alignment)` : ''}` : 'specialization not demonstrated or outside target roles'}`);
     }
 

@@ -325,8 +325,8 @@ Provide up to 5 highest-impact bullet rewrite suggestions that improve ATS frien
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        temperature: 0.2,
-        max_tokens: 2048,
+        temperature: 0.6,
+        max_tokens: 4096,
         response_format: { type: 'json_object' },
       },
       {
@@ -334,7 +334,7 @@ Provide up to 5 highest-impact bullet rewrite suggestions that improve ATS frien
           Authorization: `Bearer ${mercuryKey}`,
           'Content-Type': 'application/json',
         },
-        timeout: 25000,
+        timeout: 45000,
       }
     );
 
@@ -346,9 +346,10 @@ Provide up to 5 highest-impact bullet rewrite suggestions that improve ATS frien
 
     let parsedPayload: any;
     try {
-      parsedPayload = JSON.parse(content);
-    } catch {
-      console.warn('[suggestionService] Failed to parse Mercury 3 JSON — falling back to deterministic');
+      const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      parsedPayload = JSON.parse(cleaned);
+    } catch (e: any) {
+      console.warn('[suggestionService] Failed to parse Mercury 3 JSON — raw content:', content);
       return generateDeterministicSuggestions(candidate, job, whitelist);
     }
 

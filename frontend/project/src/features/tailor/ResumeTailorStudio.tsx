@@ -98,11 +98,9 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
         setSuggestions(res.suggestions);
         // Pre-populate any accepted suggestions if returned from backend
         const initialApplied = new Set<string>();
-        for (const s of res.suggestions) {
-          if (s.status === 'accepted') {
-            initialApplied.add(s.id);
-          }
-        }
+        res.suggestions.forEach((s) => {
+          if (s.status === 'accepted') initialApplied.add(s.id);
+        });
         setAppliedIds(initialApplied);
       } else {
         setSuggestions([]);
@@ -122,17 +120,18 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
   // Handle Accept & Apply
   const handleAccept = async (suggestion: TailorSuggestion) => {
     if (applyingId) return;
+
     setApplyingId(suggestion.id);
     setError(null);
 
     try {
       const result = await applySuggestion(resumeId, jobId, {
         suggestionId: suggestion.id,
-        acceptedText: suggestion.suggestedText,
         section: suggestion.section,
-        bulletIndex: suggestion.bulletIndex,
         itemIndex: suggestion.itemIndex,
+        bulletIndex: suggestion.bulletIndex,
         originalText: suggestion.originalText,
+        acceptedText: suggestion.suggestedText,
       });
 
       if (result.success) {
@@ -140,12 +139,16 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
         setActiveBanner(result);
         setExistingTailoredId(result.tailoredResumeId);
 
-        // Notify parent JobDetail and JobCard to update scores in real-time
-        if (onScoreUpdated) {
-          onScoreUpdated(result.updatedScores.atsScore, result.updatedScores.semanticScore);
+        // Notify parent JobsPage of real-time score updates
+        if (
+          typeof result.updatedScores.atsScore === 'number' &&
+          typeof result.updatedScores.semanticScore === 'number'
+        ) {
+          onScoreUpdated?.(
+            result.updatedScores.atsScore,
+            result.updatedScores.semanticScore
+          );
         }
-      } else {
-        setError('Failed to apply suggestion. Please try again.');
       }
     } catch (err: unknown) {
       console.error('[ResumeTailorStudio] Error applying suggestion:', err);
@@ -167,21 +170,21 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
     (existingTailoredId ? `/api/v1/resumes/${existingTailoredId}/download` : '');
 
   return (
-    <div className="space-y-5 rounded-2xl border border-amber-500/30 bg-stone-950/80 p-5 shadow-2xl backdrop-blur-md">
+    <div className="space-y-5 rounded-2xl border border-stone-200 bg-white p-6 shadow-xl text-stone-900">
       {/* Studio Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-stone-800 pb-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-stone-100 pb-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="p-1.5 rounded-lg bg-amber-400/10 text-amber-300">
-              <Sparkles size={18} className="fill-amber-400" />
+            <span className="p-1.5 rounded-lg bg-amber-100 text-amber-800">
+              <Sparkles size={18} className="fill-amber-600" />
             </span>
-            <h2 className="text-base font-bold text-white">
+            <h2 className="text-base font-bold text-stone-900">
               In-Place Resume Studio
             </h2>
           </div>
-          <p className="mt-1 text-xs text-stone-400">
+          <p className="mt-1 text-xs text-stone-600">
             Tailoring for{' '}
-            <span className="font-semibold text-stone-200">{jobTitle || 'Target Role'}</span>
+            <span className="font-semibold text-stone-900">{jobTitle || 'Target Role'}</span>
             {companyName ? ` at ${companyName}` : ''}
           </p>
         </div>
@@ -191,7 +194,7 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
             type="button"
             onClick={loadStudioData}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-stone-400 hover:text-stone-200 hover:bg-stone-800 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-stone-700 hover:text-stone-900 hover:bg-stone-100 border border-stone-200 transition-colors disabled:opacity-50"
             title="Refresh suggestions"
           >
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
@@ -202,7 +205,7 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
             <button
               type="button"
               onClick={() => setIsPreviewOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-amber-300 bg-amber-950/30 border border-amber-800/40 hover:bg-amber-900/30 transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-amber-900 bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors"
             >
               <FileText size={13} />
               <span>Preview PDF</span>
@@ -213,7 +216,7 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-800 transition-colors"
+              className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors"
               aria-label="Close Studio"
             >
               <X size={16} />
@@ -236,16 +239,16 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
 
       {/* Error alert */}
       {error && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-900/40 bg-red-950/20 p-4 text-xs text-red-300">
-          <AlertCircle size={16} className="shrink-0 text-red-400 mt-0.5" />
+        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-800">
+          <AlertCircle size={16} className="shrink-0 text-red-600 mt-0.5" />
           <div className="flex-1">
             <p className="font-semibold">Unable to complete request</p>
-            <p className="mt-0.5 text-stone-400">{error}</p>
+            <p className="mt-0.5 text-stone-600">{error}</p>
           </div>
           <button
             type="button"
             onClick={() => setError(null)}
-            className="text-stone-400 hover:text-stone-200"
+            className="text-stone-400 hover:text-stone-700"
           >
             <X size={14} />
           </button>
@@ -256,11 +259,11 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
       <div>
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-stone-300">
+            <span className="text-xs font-semibold text-stone-800">
               Recommended Bullet Improvements
             </span>
             {!loading && suggestions.length > 0 && (
-              <span className="rounded-full bg-stone-800 px-2 py-0.5 text-[10px] font-semibold text-stone-400">
+              <span className="rounded-full bg-amber-100 text-amber-900 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold">
                 {suggestions.filter((s) => !rejectedIds.has(s.id)).length} available
               </span>
             )}
@@ -271,10 +274,10 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
         </div>
 
         {loading ? (
-          <div className="space-y-4 py-8 text-center">
-            <Loader2 size={24} className="mx-auto animate-spin text-amber-400" />
-            <div className="text-xs text-stone-400">
-              <p className="font-medium text-stone-300">
+          <div className="space-y-4 py-8 text-center bg-stone-50 rounded-xl border border-stone-200">
+            <Loader2 size={24} className="mx-auto animate-spin text-amber-600" />
+            <div className="text-xs text-stone-600">
+              <p className="font-semibold text-stone-800">
                 Analyzing role requirements against verified resume evidence…
               </p>
               <p className="mt-1 text-[11px] text-stone-500">
@@ -283,9 +286,9 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
             </div>
           </div>
         ) : suggestions.length === 0 ? (
-          <div className="rounded-xl border border-stone-800/80 bg-stone-900/40 p-6 text-center text-xs text-stone-400">
-            <CheckCircle2 size={22} className="mx-auto text-emerald-400 mb-2" />
-            <p className="font-medium text-stone-300">No immediate bullet weaknesses found!</p>
+          <div className="rounded-xl border border-stone-200 bg-stone-50 p-6 text-center text-xs text-stone-600">
+            <CheckCircle2 size={22} className="mx-auto text-emerald-600 mb-2" />
+            <p className="font-semibold text-stone-800">No immediate bullet weaknesses found!</p>
             <p className="mt-1 text-stone-500">
               Your resume bullets are already well-quantified and aligned with target role keywords.
             </p>

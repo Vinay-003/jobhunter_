@@ -160,7 +160,7 @@ export const VERB_ALTERNATIVES: Record<string, string[]> = {
   increased: ['Amplified', 'Elevated', 'Expanded', 'Boosted', 'Maximized', 'Accelerated'],
   partnered: ['Collaborated', 'Liaised', 'Aligned', 'Coordinated', 'Teamed'],
   executed: ['Delivered', 'Completed', 'Carried out', 'Accomplished', 'Realized'],
-  maintained: ['Sustained', 'Preserved', 'Upheld', 'Managed', 'Supported', 'Stabilized'],
+  maintained: ['Optimized', 'Refactored', 'Managed', 'Engineered', 'Supported', 'Scaled'],
   reworked: ['Refactored', 'Optimized', 'Modernized', 'Overhauled', 'Streamlined'],
   shipped: ['Delivered', 'Released', 'Deployed', 'Launched', 'Published'],
 };
