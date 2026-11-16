@@ -558,6 +558,7 @@ function JobDetail({
             jobId={String(job.id ?? job.jobId)}
             jobTitle={displayValue(job.title) || 'Role'}
             companyName={displayValue(job.company) || ''}
+            initialSuggestions={inlineSuggestions}
             onScoreUpdated={(ats, semantic) => {
               onScoreUpdate?.(String(job.id ?? job.jobId), ats, semantic);
             }}

@@ -25,6 +25,7 @@ export interface ResumeTailorStudioProps {
   jobId: string;
   jobTitle?: string;
   companyName?: string;
+  initialSuggestions?: TailorSuggestion[];
   onScoreUpdated?: (updatedAtsScore: number, updatedSemanticScore: number) => void;
   onClose?: () => void;
 }
@@ -34,11 +35,14 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
   jobId,
   jobTitle,
   companyName,
+  initialSuggestions,
   onScoreUpdated,
   onClose,
 }) => {
-  const [suggestions, setSuggestions] = useState<TailorSuggestion[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [suggestions, setSuggestions] = useState<TailorSuggestion[]>(
+    initialSuggestions && initialSuggestions.length > 0 ? initialSuggestions : []
+  );
+  const [loading, setLoading] = useState(!initialSuggestions || initialSuggestions.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [applyingId, setApplyingId] = useState<string | null>(null);
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
@@ -47,11 +51,22 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
   const [existingTailoredId, setExistingTailoredId] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
+  // Sync if initialSuggestions updates from parent
+  useEffect(() => {
+    if (initialSuggestions && initialSuggestions.length > 0) {
+      setSuggestions(initialSuggestions);
+      setLoading(false);
+    }
+  }, [initialSuggestions]);
+
   // Load existing tailored resume (if any) and fetch new suggestions without prompting user
-  const loadStudioData = useCallback(async () => {
+  const loadStudioData = useCallback(async (forceRefresh = false) => {
     if (!resumeId || !jobId) return;
 
-    setLoading(true);
+    const hasInitial = !forceRefresh && initialSuggestions && initialSuggestions.length > 0;
+    if (!hasInitial) {
+      setLoading(true);
+    }
     setError(null);
 
     try {
@@ -92,18 +107,20 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
         // Non-fatal if existing check fails
       }
 
-      // 2. Zero-prompt suggestion generation
-      const res = await fetchJobSuggestions(resumeId, jobId);
-      if (res?.suggestions) {
-        setSuggestions(res.suggestions);
-        // Pre-populate any accepted suggestions if returned from backend
-        const initialApplied = new Set<string>();
-        res.suggestions.forEach((s) => {
-          if (s.status === 'accepted') initialApplied.add(s.id);
-        });
-        setAppliedIds(initialApplied);
-      } else {
-        setSuggestions([]);
+      // 2. Fetch suggestions only if not provided or forceRefresh
+      if (!hasInitial) {
+        const res = await fetchJobSuggestions(resumeId, jobId);
+        if (res?.suggestions) {
+          setSuggestions(res.suggestions);
+          // Pre-populate any accepted suggestions if returned from backend
+          const initialApplied = new Set<string>();
+          res.suggestions.forEach((s) => {
+            if (s.status === 'accepted') initialApplied.add(s.id);
+          });
+          setAppliedIds(initialApplied);
+        } else {
+          setSuggestions([]);
+        }
       }
     } catch (err: unknown) {
       console.error('[ResumeTailorStudio] Failed to load suggestions:', err);
@@ -111,7 +128,7 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [resumeId, jobId]);
+  }, [resumeId, jobId, initialSuggestions]);
 
   useEffect(() => {
     loadStudioData();
@@ -192,7 +209,7 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={loadStudioData}
+            onClick={() => loadStudioData(true)}
             disabled={loading}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-stone-700 hover:text-stone-900 hover:bg-stone-100 border border-stone-200 transition-colors disabled:opacity-50"
             title="Refresh suggestions"

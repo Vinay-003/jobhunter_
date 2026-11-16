@@ -420,7 +420,11 @@ export async function applySuggestionHandler(req: Request, res: Response) {
     const normalizedJob = toNormalizedJob(jobRow, jobDescription);
 
     const recRes = await pool.query(
-      'SELECT fit_score, breakdown_json FROM recommendations WHERE user_id=$1 AND job_id=$2 LIMIT 1',
+      `SELECT r.fit_score, r.breakdown_json 
+       FROM recommendations r
+       JOIN recommendation_runs rr ON rr.id = r.run_id
+       WHERE rr.user_id = $1 AND r.job_id = $2
+       ORDER BY rr.created_at DESC LIMIT 1`,
       [userId, jobId]
     ).catch(() => ({ rows: [] }));
     const savedRecScore = recRes.rows[0]?.fit_score;
@@ -592,9 +596,12 @@ export async function applySuggestionHandler(req: Request, res: Response) {
     // 12. Sync updated score to recommendations table so job card and header stay aligned
     try {
       await pool.query(
-        `UPDATE recommendations
-         SET fit_score = $1, breakdown_json = $2, score_details = $3, updated_at = now()
-         WHERE user_id = $4 AND job_id = $5`,
+        `UPDATE recommendations r
+         SET fit_score = $1,
+             breakdown_json = $2,
+             job_snapshot_json = jsonb_set(COALESCE(r.job_snapshot_json, '{}'::jsonb), '{scoreDetails}', $3::jsonb)
+         FROM recommendation_runs rr
+         WHERE r.run_id = rr.id AND rr.user_id = $4 AND r.job_id = $5`,
         [
           updatedScores.semanticScore,
           JSON.stringify(newRank?.breakdown || {}),

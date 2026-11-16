@@ -304,7 +304,8 @@ ${candidateSkillsList.slice(0, 80).join(', ')}
    - Any suggestion introducing a skill absent from this whitelist will be programmatically rejected by guardrails.
 
 OUTPUT FORMAT:
-Return a valid JSON object with a single key "suggestions" containing an array of suggestion objects:
+You MUST respond with ONLY a valid raw JSON object. Do NOT write ANY introduction, greeting, preamble, thinking, or markdown block wrapping.
+Format:
 {
   "suggestions": [
     {
@@ -363,7 +364,7 @@ Provide up to 5 customized bullet rewrite suggestions specifically tailored to b
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-        temperature: 0.6,
+        temperature: 0.2,
         max_tokens: 4096,
         response_format: { type: 'json_object' },
       },
@@ -376,16 +377,40 @@ Provide up to 5 customized bullet rewrite suggestions specifically tailored to b
       }
     );
 
-    const content = response.data?.choices?.[0]?.message?.content;
-    if (!content) {
+    const content = response.data?.choices?.[0]?.message?.content || response.data?.choices?.[0]?.text;
+    if (!content || typeof content !== 'string' || !content.trim()) {
       console.warn('[suggestionService] Mercury 3 returned empty content — falling back to deterministic');
       return generateDeterministicSuggestions(candidate, job, whitelist);
     }
 
     let parsedPayload: any;
     try {
-      const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-      parsedPayload = JSON.parse(cleaned);
+      // 1. Try markdown code block ```json ... ```
+      const matchBlock = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (matchBlock) {
+        try { parsedPayload = JSON.parse(matchBlock[1].trim()); } catch {}
+      }
+      // 2. Try outermost { ... }
+      if (!parsedPayload) {
+        const firstBrace = content.indexOf('{');
+        const lastBrace = content.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+          try { parsedPayload = JSON.parse(content.slice(firstBrace, lastBrace + 1).trim()); } catch {}
+        }
+      }
+      // 3. Try outermost [ ... ]
+      if (!parsedPayload) {
+        const firstBracket = content.indexOf('[');
+        const lastBracket = content.lastIndexOf(']');
+        if (firstBracket !== -1 && lastBracket > firstBracket) {
+          try { parsedPayload = JSON.parse(content.slice(firstBracket, lastBracket + 1).trim()); } catch {}
+        }
+      }
+      // 4. Try cleaned direct parse
+      if (!parsedPayload) {
+        const cleaned = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        parsedPayload = JSON.parse(cleaned);
+      }
     } catch (e: any) {
       console.warn('[suggestionService] Failed to parse Mercury 3 JSON — raw content:', content);
       return generateDeterministicSuggestions(candidate, job, whitelist);
