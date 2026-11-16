@@ -74,6 +74,19 @@ export function buildCandidateSkillWhitelist(
     whitelist.add(s.toLowerCase());
   }
 
+  // Expand composite / alias skills (e.g. C/C++ -> C, C++; REST API -> REST, API Design)
+  const currentSkills = Array.from(whitelist);
+  for (const s of currentSkills) {
+    if (s === 'c/c++' || s === 'c and c++') {
+      whitelist.add('c');
+      whitelist.add('c++');
+    }
+    if (s.includes('rest') || s.includes('api design')) {
+      whitelist.add('rest');
+      whitelist.add('api design');
+    }
+  }
+
   return whitelist;
 }
 

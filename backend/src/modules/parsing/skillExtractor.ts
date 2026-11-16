@@ -12,10 +12,12 @@ const goPattern = /(?:(?<=\b(?:in|using|written in|built in|developed in|coded i
 
 const expressPattern = /(?<![\p{L}\p{N}_+#])Express(?!\s*(?:interest|ideas|gratitude|concern|opinions|satisfaction|delivery|mail|way|lane|train)\b)(?:(?=\s*(?:framework|server|backend|middleware|app|router|api|apis|\.js)\b)|(?<=[\/,|•·:;\(\[]\s*Express)|(?=\s*[\/,|•·\)\];])|(?<=\b(?:Node|React|MERN|MEAN)\s*[\/,]\s*Express)|(?<=Express\s*[\/,]\s*(?:Node|Mongo|Postgres))|(?=\s*,\s*(?:[\p{L}\p{N}_+#])))(?![\p{L}\p{N}_+#])/gui;
 
-const cPattern = /(?:(?<=\b(?:in|using|written in|built in|developed in|coded in|programming in)\s+)C(?=[\s,.;\/\)\]]|$)|(?<![\p{L}\p{N}_+#])C(?!\s*(?:to|through|ahead|level|suite|corp|inc|llc|class|sharp|plus)\b)(?:(?=\s*(?:language|programming|developer|engineer|compiler|code)\b)|(?<=[\/,|•·:;\(\[]\s*C(?=[\/,|•·\)\];,\.]|\s*$|\s+(?:and|or)\b))|(?<=\b(?:Languages|Programming Languages|Skills)\s*[:\-][^\n]*\bC(?=[\s,;]))|(?<=\b(?:ANSI|Embedded)\s+C\b)))(?![\p{L}\p{N}_+#])/gu;
+const cPattern = /(?:(?<=\b(?:in|using|written in|built in|developed in|coded in|programming in)\s+)C(?=[\s,.;\/\)\]]|$)|(?<![\p{L}\p{N}_+#])C(?!\s*(?:to|through|ahead|level|suite|corp|inc|llc|class|sharp|plus)\b)(?:(?=\s*(?:language|programming|developer|engineer|compiler|code)\b)|(?<=[\/,|•·:;\(\[]\s*C(?=[\/,|•·\)\];,\.]|\s*$|\s+(?:and|or)\b))|(?<=\b(?:Languages|Programming Languages|Skills)\s*[:\-][^\n]*\bC(?=[\s,;]))|(?<=\b(?:ANSI|Embedded)\s+C\b)|(?=[\s,;/]+(?:C\+\+|C#|Python|Java|Rust|Go|SQL|JavaScript|TypeScript)(?![\p{L}\p{N}_+#]))|(?<=\b(?:C\+\+|C#|Python|Java|Rust|Go|SQL|JavaScript|TypeScript)[\s,;/]+)C(?=[\s,;./]|$)|(?=\s*[\/]\s*C\+\+)))(?![\p{L}\p{N}_+#])/gu;
+
+const restPattern = /(?:(?<![\p{L}\p{N}_+#])REST(?![\p{L}\p{N}_+#])|(?<![\p{L}\p{N}_+#])(?:RESTful|restful)(?!\p{L})|(?<![\p{L}\p{N}_+#])rest\s+(?:apis?|services?|endpoints?|architecture|web\s+services?|design(?:ing)?|development|framework)(?!\p{L})|(?<=\b(?:GraphQL|gRPC|SOAP|JSON|HTTP|API)\s*[\/,|•·]\s*)rest\b)/gu;
 
 const caseSensitiveTechnicalPatterns: Array<[RegExp, string]> = [
-  [/(?<![\p{L}\p{N}_+#])REST(?![\p{L}\p{N}_+#])/gu, 'REST'],
+  [restPattern, 'REST'],
   [goPattern, 'Go'],
   [/(?<![\p{L}\p{N}_+#])TS(?![\p{L}\p{N}_+#])/gu, 'TypeScript'],
   [expressPattern, 'Express'],
@@ -37,6 +39,13 @@ export function extractSkillMatches(text: string): SkillEvidence[] {
       if (occupied.some(([a, b]) => start < b && end > a)) continue;
       occupied.push([start, end]);
       matches.push({ skill, alias: match[0], start, end });
+      if (skill === 'API Design' && /rest/i.test(match[0])) {
+        matches.push({ skill: 'REST', alias: 'REST', start, end });
+      }
+      if (skill === 'C/C++') {
+        matches.push({ skill: 'C', alias: 'C', start, end });
+        matches.push({ skill: 'C++', alias: 'C++', start, end });
+      }
     }
   }
 
@@ -48,6 +57,13 @@ export function extractSkillMatches(text: string): SkillEvidence[] {
       if (occupied.some(([a, b]) => start < b && end > a)) continue;
       occupied.push([start, end]);
       matches.push({ skill, alias: match[0], start, end });
+      if (skill === 'API Design' && /rest/i.test(match[0])) {
+        matches.push({ skill: 'REST', alias: 'REST', start, end });
+      }
+      if (skill === 'C/C++') {
+        matches.push({ skill: 'C', alias: 'C', start, end });
+        matches.push({ skill: 'C++', alias: 'C++', start, end });
+      }
     }
   }
 

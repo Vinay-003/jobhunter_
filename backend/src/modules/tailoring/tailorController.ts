@@ -22,6 +22,7 @@ import { parseJd, type ParsedJobDescription } from '../jd/jdParser.js';
 import { matchJd } from '../jd/matcher.js';
 import { scoreJdRubric, JD_RUBRIC_VERSION } from '../analysis/jdRubric.js';
 import { rankJob } from '../jobs/ranking.js';
+import type { NormalizedJob } from '../../providers/jobs/JobProvider.js';
 import { professionalEvidence } from '../matching/evidenceBuilder.js';
 import { embedCached } from '../../providers/embeddings/embeddingCache.js';
 import { AwsSageMakerEmbeddingProvider } from '../../providers/embeddings/AwsSageMakerEmbeddingProvider.js';
@@ -217,6 +218,40 @@ function isUuid(val: string): boolean {
   return typeof val === 'string' && UUID_REGEX.test(val);
 }
 
+function toNormalizedJob(jobRow: any, jobDescription: string): NormalizedJob {
+  return {
+    id: jobRow.id,
+    source: jobRow.source || 'db',
+    externalId: jobRow.external_id || jobRow.id,
+    title: jobRow.title || '',
+    company: jobRow.company || '',
+    location: jobRow.location || null,
+    description: jobDescription,
+    url: jobRow.url || null,
+    salary: jobRow.salary || null,
+    postedAt: jobRow.posted_at || null,
+    workMode: jobRow.work_mode || (jobRow as any).workMode || null,
+    descriptionQuality: (jobRow.description_quality || (jobRow as any).descriptionQuality || 'full') as any,
+    providerSkills: jobRow.provider_skills || (jobRow as any).providerSkills || [],
+  };
+}
+
+async function getUserSearchPreferences(userId: string) {
+  try {
+    const prefRes = await pool.query('SELECT * FROM user_job_preferences WHERE user_id=$1 LIMIT 1', [userId]);
+    const pref = prefRes.rows[0];
+    if (!pref) return undefined;
+    return {
+      targetRoles: pref.target_roles || null,
+      locations: pref.locations || null,
+      workModes: pref.work_modes || null,
+      emphasizedSkills: pref.target_skills || null,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * POST /api/v1/resumes/:resumeId/tailor/:jobId/suggestions
  * Generates tailor suggestions with zero user prompt.
@@ -267,7 +302,9 @@ export async function getTailorSuggestionsHandler(req: Request, res: Response) {
     const sectionsData = buildParsedResumeSections(parsedDoc, profile);
 
     // 4. Compute current rank & identify specific gaps
-    const rank = await rankJob(profile, jobRow as any, { ownerId: userId }).catch(() => null);
+    const searchPreferences = await getUserSearchPreferences(userId);
+    const normalizedJob = toNormalizedJob(jobRow, jobDescription);
+    const rank = await rankJob(profile, normalizedJob, { preferences: searchPreferences, ownerId: userId }).catch(() => null);
     const responsibilityMatches = rank?.scoreDetails?.responsibilityMatches || [];
     const unmatchedResponsibilities = responsibilityMatches
       .filter((r: any) => !r.supported || (typeof r.similarity === 'number' && r.similarity < 0.40))
@@ -379,8 +416,19 @@ export async function applySuggestionHandler(req: Request, res: Response) {
     // 4. Calculate previous scores
     const targetSeniority = (currentProfile.seniority as any) || undefined;
     const oldReadiness = scoreReadiness(currentParsedDoc, currentProfile, targetSeniority);
-    const oldRank = await rankJob(currentProfile, jobRow as any, { ownerId: userId }).catch(() => null);
-    const oldSemanticScore = oldRank?.fitScore ?? (await computeSemanticScore(currentProfile, parsedJd, userId)).score;
+    const searchPreferences = await getUserSearchPreferences(userId);
+    const normalizedJob = toNormalizedJob(jobRow, jobDescription);
+
+    const recRes = await pool.query(
+      'SELECT fit_score, breakdown_json FROM recommendations WHERE user_id=$1 AND job_id=$2 LIMIT 1',
+      [userId, jobId]
+    ).catch(() => ({ rows: [] }));
+    const savedRecScore = recRes.rows[0]?.fit_score;
+
+    const oldRank = await rankJob(currentProfile, normalizedJob, { preferences: searchPreferences, ownerId: userId }).catch(() => null);
+    const oldSemanticScore = (typeof savedRecScore === 'number' && savedRecScore > 0)
+      ? savedRecScore
+      : (oldRank?.fitScore ?? (await computeSemanticScore(currentProfile, parsedJd, userId)).score);
     const previousScores = {
       atsScore: oldReadiness.score,
       semanticScore: oldSemanticScore,
@@ -441,7 +489,7 @@ export async function applySuggestionHandler(req: Request, res: Response) {
 
     // 7. Recalculate new scores
     const newReadiness = scoreReadiness(updatedParsedDoc, updatedProfile, targetSeniority);
-    const newRank = await rankJob(updatedProfile, jobRow as any, { ownerId: userId }).catch(() => null);
+    const newRank = await rankJob(updatedProfile, normalizedJob, { preferences: searchPreferences, ownerId: userId }).catch(() => null);
     const newSemanticScore = newRank?.fitScore ?? (await computeSemanticScore(updatedProfile, parsedJd, userId)).score;
 
     const updatedScores = {
@@ -539,6 +587,24 @@ export async function applySuggestionHandler(req: Request, res: Response) {
       );
     } catch (dbErr: any) {
       console.warn('[tailorController] Failed to save analysis snapshot (non-fatal):', dbErr.message);
+    }
+
+    // 12. Sync updated score to recommendations table so job card and header stay aligned
+    try {
+      await pool.query(
+        `UPDATE recommendations
+         SET fit_score = $1, breakdown_json = $2, score_details = $3, updated_at = now()
+         WHERE user_id = $4 AND job_id = $5`,
+        [
+          updatedScores.semanticScore,
+          JSON.stringify(newRank?.breakdown || {}),
+          JSON.stringify(newRank?.scoreDetails || {}),
+          userId,
+          jobId,
+        ]
+      );
+    } catch (recErr: any) {
+      console.warn('[tailorController] Failed to sync recommendations table (non-fatal):', recErr.message);
     }
 
     return res.json({

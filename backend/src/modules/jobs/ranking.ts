@@ -61,7 +61,23 @@ export type RankResult = {
 };
 
 function normalizeSkillSet(skills: string[]): Set<string> {
-  return new Set(skills.map((s) => normalizeSkill(s).toLowerCase()));
+  const set = new Set<string>();
+  for (const s of skills) {
+    const norm = normalizeSkill(s).toLowerCase();
+    set.add(norm);
+    if (norm === 'c/c++' || norm === 'c and c++') {
+      set.add('c');
+      set.add('c++');
+    }
+    if (norm === 'c++') {
+      set.add('c');
+    }
+    if (norm.includes('rest') || norm.includes('api design') || norm.includes('apis')) {
+      set.add('rest');
+      set.add('api design');
+    }
+  }
+  return set;
 }
 
 // Major Indian metros/states — Jooble returns city names ("Delhi") while users
@@ -174,13 +190,24 @@ export async function rankJobsBatch(
     ...((profile as any).projects ?? []).map((p: any) => `${p.title || ''} ${p.description || ''}`),
   ].join('\n'));
 
-  const candidateSkills = [...new Set([
+  const rawCandidateSkills = [
     ...(profile.skills ?? []),
     ...(profile.skillsNormalized ?? []),
     ...((profile as any).declaredSkills ?? []),
     ...((profile as any).demonstratedSkills ?? []),
     ...experienceSkills,
-  ].map((s) => s.trim()).filter(Boolean))];
+  ].map((s) => s.trim()).filter(Boolean);
+
+  const candidateSkills = [...new Set([
+    ...rawCandidateSkills,
+    ...rawCandidateSkills.flatMap(s => {
+      const lower = s.toLowerCase();
+      const extra: string[] = [];
+      if (lower === 'c/c++' || lower === 'c and c++') extra.push('C', 'C++');
+      if (lower.includes('rest') || lower.includes('api design')) extra.push('REST', 'API Design');
+      return extra;
+    }),
+  ])];
 
   // Corpus for the semantic gate below: a job skill is only semantically trusted
   // when the candidate's own text mentions it — raw label-vs-label embeddings
@@ -463,6 +490,8 @@ export async function rankJobsBatch(
         const avg = total > 0 ? responsibilityMatches.reduce((sum, r) => sum + r.similarity, 0) / total : 0;
         if (supported === 0) {
           responsibilitySemantic = 0;
+        } else if (supported === total) {
+          responsibilitySemantic = 25;
         } else {
           const scoreRatio = (coverageRatio * 0.70) + (Math.min(1, Math.max(0, avg / 0.55)) * 0.30);
           responsibilitySemantic = Math.round(scoreRatio * 25);
