@@ -53,6 +53,12 @@ CONCEPTS: dict[str, str] = {
     "otp_email": r"otp|nodemailer",
     "storage": r"supabaseStorage|Storage|bucket",
     "pdf_parsing": r"pdf-?parse|pdfParser|pdfjs",
+    "resume_tailoring": r"tailor|suggestion|recalculat",
+    "mercury_inference": r"mercury|inceptionlabs",
+    "pdf_generation": r"pdfgenerator|generateresumepdf|pdf-lib",
+    "guardrail_verification": r"guardrail|whitelist|unpossessed",
+    "score_recalculation": r"scoredelta|updatedscores|recalculat",
+    "job_isolated_storage": r"isolated|jobs/|storage_object_path",
 }
 
 SYMBOL_RE = [

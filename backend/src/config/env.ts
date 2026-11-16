@@ -55,6 +55,9 @@ const envSchema = z.object({
   EMBEDDING_PROVIDER: z.enum(['mock','local','aws','auto']).default('auto'),
   LOCAL_EMBEDDING_MODEL: z.string().optional(),
   PYTHON_SERVICE_URL: z.string().optional(),
+  MERCURY_API_KEY: z.string().optional(),
+  MERCURY_BASE_URL: z.string().default('https://api.inceptionlabs.ai/v1/chat/completions'),
+  MERCURY_MODEL: z.string().default('mercury-3'),
 }).superRefine((data, ctx) => {
   if (!data.PG_DATABASE_STRING && !data.DATABASE_URL && !data.SUPABASE_DB_URL) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'One of PG_DATABASE_STRING, DATABASE_URL, SUPABASE_DB_URL required', path: ['PG_DATABASE_STRING'] });

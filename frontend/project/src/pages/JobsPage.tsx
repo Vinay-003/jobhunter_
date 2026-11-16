@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../lib/api';
 import { displayValue, safeText } from '../lib/display';
 import { buildMatchReport } from '../lib/matchReport';
 import { Tag, Eyebrow } from '../components/UI';
+import ResumeTailorStudio from '../features/tailor/ResumeTailorStudio';
 import './jobs.css';
 import {
   ArrowUpRight,
@@ -209,8 +210,23 @@ function JobCard({ job, active, onSelect }: { job: Job; active: boolean; onSelec
   );
 }
 
-function JobDetail({ job, onRecheck, onReportClosed, checking }: { job: Job; onRecheck?:()=>void; onReportClosed?:()=>void; checking?:boolean }) {
+function JobDetail({
+  job,
+  selectedResume,
+  onRecheck,
+  onReportClosed,
+  checking,
+  onScoreUpdate,
+}: {
+  job: Job;
+  selectedResume?: string;
+  onRecheck?: () => void;
+  onReportClosed?: () => void;
+  checking?: boolean;
+  onScoreUpdate?: (jobId: string, updatedAtsScore: number, updatedSemanticScore: number) => void;
+}) {
   const [showFullDesc, setShowFullDesc] = useState(false);
+  const [isTailoring, setIsTailoring] = useState(false);
   const score = scoreOf(job);
   const external = safeExternalUrl(job.link ?? job.url);
   const description = safeText(job.snippet ?? job.description);
@@ -386,11 +402,36 @@ function JobDetail({ job, onRecheck, onReportClosed, checking }: { job: Job; onR
       )}
 
        <div className="job-detail__actions flex flex-wrap items-center gap-3 border-t pt-5">
+          {selectedResume && (
+            <button
+              type="button"
+              onClick={() => setIsTailoring((prev) => !prev)}
+              className="jh-button-primary bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 font-bold flex items-center gap-2 px-4 py-2 rounded-xl shadow-lg shadow-amber-500/20 transition-all"
+            >
+              <Sparkles size={16} className="text-stone-950 fill-stone-950" />
+              <span>{isTailoring ? 'Hide Tailoring Studio' : 'Tailor Resume for this Job'}</span>
+            </button>
+          )}
           {onRecheck&&<button onClick={onRecheck} disabled={checking} className="jh-button-ghost">{checking?'Checking…':'Check current availability'}</button>}
           {onReportClosed&&job.availability?.status!=='closed'&&<button onClick={onReportClosed} disabled={checking} className="jh-button-ghost">Report expired / closed</button>}
            {external && job.availability?.status !== 'closed' ? <a href={external} target="_blank" rel="noopener noreferrer" className="jh-button-primary">View role <ArrowUpRight size={14} /></a> : <span className="text-xs text-slate-600">{job.availability?.status === 'closed' ? 'Closed posting — link disabled' : 'Original job link unavailable'}</span>}
         <span className="text-[10px] text-slate-700">Fit score should guide prioritization, not replace reading the full JD.</span>
       </div>
+
+      {isTailoring && selectedResume && (
+        <div className="mt-6 border-t border-amber-500/20 pt-6">
+          <ResumeTailorStudio
+            resumeId={selectedResume}
+            jobId={String(job.id ?? job.jobId)}
+            jobTitle={displayValue(job.title) || 'Role'}
+            companyName={displayValue(job.company) || ''}
+            onScoreUpdated={(ats, semantic) => {
+              onScoreUpdate?.(String(job.id ?? job.jobId), ats, semantic);
+            }}
+            onClose={() => setIsTailoring(false)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -427,6 +468,22 @@ export default function JobsPage() {
   const [targetRoles, setTargetRoles] = useState<string[]>([]);
   const [roleDiscovery, setRoleDiscovery] = useState<any>(null);
   const [roleDiscoveryError, setRoleDiscoveryError] = useState('');
+
+  const handleScoreUpdate = useCallback((jobId: string, _updatedAts: number, updatedSemantic: number) => {
+    setJobs((prevJobs) =>
+      prevJobs.map((job) => {
+        const id = String(job.id ?? job.jobId);
+        if (id === jobId) {
+          return {
+            ...job,
+            fitScore: updatedSemantic,
+            matchScore: updatedSemantic,
+          };
+        }
+        return job;
+      })
+    );
+  }, []);
   const [lastRunDiagnostics, setLastRunDiagnostics] = useState<any>({});
   const [includeUnknownDates, setIncludeUnknownDates] = useState(true);
   const [verifiedOpenOnly, setVerifiedOpenOnly] = useState(false);
@@ -929,7 +986,18 @@ export default function JobsPage() {
            </div>
 
            <div className="jobs-detail-rail"><button className="jobs-back" onClick={()=>setMobileDetail(false)}>← All matches</button>
-             {selected ? <JobDetail job={selected} onRecheck={recheckAvailability} onReportClosed={reportClosed} checking={checkingAvailability} /> : <div className="py-20 text-center text-sm text-slate-600">Select a job to inspect its match report.</div>}
+             {selected ? (
+                <JobDetail
+                  job={selected}
+                  selectedResume={selectedResume}
+                  onRecheck={recheckAvailability}
+                  onReportClosed={reportClosed}
+                  checking={checkingAvailability}
+                  onScoreUpdate={handleScoreUpdate}
+                />
+              ) : (
+                <div className="py-20 text-center text-sm text-slate-600">Select a job to inspect its match report.</div>
+              )}
           </div>
         </section>
       )}

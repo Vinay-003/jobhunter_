@@ -4,6 +4,7 @@ import resumes from './resumes.js';
 import analyses from './analyses.js';
 import profile from './profile.js';
 import recommendations from './recommendations.js';
+import tailor from './tailor.js';
 import keepalive from '../keepalive.js';
 import { probeStorage } from '../../modules/storage/supabaseStorage.js';
 import { issueCsrfToken } from '../../middleware/csrf.js';
@@ -17,6 +18,7 @@ router.use('/profile', profile);
 router.get('/csrf', issueCsrfToken);
 router.use('/recommendation-runs', recommendations);
 router.use('/recommendations', recommendations);
+router.use('/tailor', tailor);
 router.use('/keepalive', keepalive);
 
 // ?deep=1 also probes Supabase Storage (Issue 1 fix 5): storage: ok | error <code> | not-configured

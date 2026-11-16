@@ -17,16 +17,9 @@ describe('formatMetricValue', () => {
 });
 
 describe('evictionNotice', () => {
-  test('stays silent when no resume was evicted', () => {
+  test('stays silent because retention cap has been removed', () => {
     expect(evictionNotice(0)).toBe('');
-  });
-
-  test('tells the user their oldest resume was deleted', () => {
-    expect(evictionNotice(1)).toContain('your oldest resume was deleted');
-    expect(evictionNotice(1)).toContain('3 resumes');
-  });
-
-  test('counts multiple evicted resumes', () => {
-    expect(evictionNotice(2)).toContain('2 older resumes were deleted');
+    expect(evictionNotice(1)).toBe('');
+    expect(evictionNotice(2)).toBe('');
   });
 });

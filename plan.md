@@ -1,227 +1,536 @@
-# Real-data end-to-end audit and correction plan
+# PLAN — Bug Investigation & Fix Plan (2026-10-03)
 
-## Constraints
-- Use the supplied resume, real Supabase database/storage, and actual provider results; no synthetic resume, seeded jobs, or substitute database.
-- Use local embeddings for the initial audit and fix/retest cycles. Invoke SageMaker only for the final comparison.
-- Complete the first end-to-end audit and record observed discrepancies before changing application behavior.
-- Preserve existing users, uploads, preferences, and recommendation history. Do not delete or evict existing records for testing.
-- Keep credentials, session state, resume text, contact details, and private response payloads out of this plan and other tracked artifacts.
+> **Status (2026-10-03): all of Issues 1–4 + S1–S8 pushed to `origin/dev` (through
+> `64e66c3`).** Issue 1 is **RESOLVED and verified live** (root cause: Render ran Node 20;
+> `@supabase/supabase-js` ≥2.117 `createClient()` needs native WebSocket → Node 22+ →
+> every Render upload silently fell to disk). Fix = fail-loud logs + `/health?deep=1`
+> probe (`fee869b`, `58c24d2`) + Render `NODE_VERSION` 22.14.0 (`64e66c3`); prod upload
+> re-probed end-to-end (`storage_bucket='resumes'`, object listed, download roundtrip,
+> DELETE cleans object — §8.1). **Round 2 (2026-10-03, user-directed):** S9 FK-race fix
+> (`efe9a26`), S1 executed as **removal** (user chose delete over marking: 8 dead rows
+> purged, 1 alive resume kept), retention cap **max 3 resumes/user** (`4411010`,
+> live-probed), Q7 lockfile single-source (`1c8ade1`), Q6 majors shipped — rr7+vite8
+> (`d153268`, tsc/build/E2E green). **Still open:** nothing from the §8 backlog —
+> S2 closed by user decision (**no cron**), Q2 answered (user cleared bucket).
+> Q1/Q5 answered earlier (env vars correct; Node 22 shipped).
+>
+> **Line refs:** re-verified 2026-10-03 against current `HEAD`. Issue sections whose bugs
+> are fixed label their evidence **[pre-fix @ `114773a`]** — those line numbers describe
+> the code before the fix; current locations are listed in each section's status banner.
+>
+> **Branch:** `dev`. **Method:** code read first, then live probes against production
+> (`https://jobhunter-backend-lkkf.onrender.com` = `https://api.vinaybuilds.me`, same instance)
+> and the shared Supabase project (`vaflmkhzyvqmglstmadg`). All test rows created during
+> investigation were deleted (verified 0 orphans — see §7). Render logs analyzed 2026-10-02
+> (Issue 1 narrowed, new Issue 4 added).
 
-## Preflight findings — first audit has not started
+---
 
-### SETUP-01: Real database lacks the required recommendation schema field
-- Confirmed by read-only queries on 2026-10-04: migrations 001–008 are applied; migration 009 is absent.
-- `recommendation_runs.profile_version` is absent.
-- Current `backend/src/db/schemaReadiness.ts` requires both migration 009 and that column before serving requests.
-- Existing `backend/migrations/009_recommendation_profile_version.sql` adds a nullable text column with `IF NOT EXISTS`; it does not delete or rewrite existing records.
-- Blocker: the current app cannot be browser-tested against this database until this schema prerequisite is approved/applied. Do not bypass readiness checks.
-- Status: user approved the prerequisite; migration 009 was applied successfully to real Supabase. No existing rows were deleted. No application fixes were made during the first audit.
+## 0. Working agreement (process rules — binding for every fix below)
 
-### Access and model configuration
-- Real Supabase database connectivity and storage configuration confirmed without exposing credentials.
-- Application login credentials are not present in the checked environment. Signup of a fresh audit account is requested; do not reset an existing user's password or impersonate an account.
-- The attachment exists in the workspace. It has not yet been uploaded during this audit.
-- No SageMaker endpoint is set in the backend environment. AWS CLI configuration files exist, but credentials and endpoint access have not been verified. No AWS inference has run.
+1. **Small, focused commits.** One logical change per commit with a proper message
+   (what + why), e.g. `fix(api): log supabase import/createClient errors instead of
+   silently falling back to disk`. Never mix refactors/formatting with fixes.
+2. **Never push before everything is tested locally and green.** Per-commit gates:
+   `cd backend && npm run build && npm test` · `cd frontend/project && npm run build` ·
+   full local browser run of all features (rules 3–5). Red tests = no commit, no push.
+3. **Local setup must store resumes in Supabase Storage too.** After a local upload,
+   assert in the DB that `storage_bucket == 'resumes'` (local `.env` points at the shared
+   project, so this must behave exactly like production). A local upload falling back to
+   `local` is a bug, not "dev mode".
+4. **Test every feature locally before calling any fix done:** login, resume upload,
+   analysis (readiness → report), resumes list/view/download/delete, jobs list,
+   recommendations, logout — via curl **and** via the UI.
+5. **Drive the browser like a cursor — automate the UI.** Use Playwright (headless,
+   scripted) to exercise the real pages: log in, upload, navigate, assert on visible
+   content, capture screenshots as evidence. Keep the scripts (e.g. `e2e/`) so every fix
+   is verified by re-running the browser suite, not by eyeballing. Run against local
+   first; after each deploy, re-run the same suite against production.
+6. **Test account** (owner-provided): `vinayjadam2003@gmail.com` — the password is
+   **deliberately not stored in this repo** (never commit credentials); take it from the
+   owner when a manual login is needed. Automated runs should prefer throwaway
+   `qa.*@example.com` users that are deleted afterwards (cleanup verified, §7).
+7. **Loading states = skeleton screens.** Any view waiting > ~300 ms for data must show a
+   **skeleton** (shimmer placeholder mirroring the real layout) — preferred over spinners;
+   spinners only for small inline actions. Mandatory targets: the login gate (blank div
+   today), Resumes list, Analysis page, Jobs recommendations, ATS analysis progress
+   (backend work measured at 25–50 s, see Issue 3). **Never ship a blank screen.**
+8. **No secrets in the repo or commits** (`.env` stays gitignored — `.gitignore:22,29`).
+   No force-push; no committing while tests are red.
 
-## First-round audit checklist
-- [x] Signup, login, logout/relogin, signed-out route protection and reload/session handling exercised. Exhaustive malformed-input/security fuzzing is not claimed.
-- [x] Actual PDF uploaded to Supabase; page metadata and downloaded SHA-256 verified; saved-resume view opened.
-- [x] Education, future graduation, four-month internship, three projects, skills and leadership boundaries inspected against the document.
-- [x] Resume Health categories, totals, detail messages, priorities and export controls inspected; discrepancies recorded below.
-- [x] Three real source JDs tested; explicit required/optional skills, scope and tenure findings recorded.
-- [x] Architect and Workday postings used as genuine negative controls, not invented JDs.
-- [x] Every first-round recommendation selected and every source URL visited. External content verification remains blocked for 29 first-round sources.
-- [x] Score filters, pagination, cached reload, saved preferences and stored snapshots exercised. Identical-input retry with a force-refresh idempotency key is outside this browser checklist.
-- [x] Desktop/mobile rendering checked, including a desktop-to-mobile resize after selecting the last card.
-- [x] Inaccessible source pages and untested destructive/security flows explicitly recorded as gaps.
+---
 
-## Fix and verification stages
-1. Finish the first-round checklist; add evidence-backed findings with expected/actual behavior and affected files below.
-2. Implement bounded fixes only after that audit, preserving existing work and unrelated data.
-3. Run targeted regressions, backend checks and frontend checks.
-4. Repeat the same real-data browser audit using local embeddings; investigate any remaining discrepancies.
-5. Verify the configured SageMaker model and privacy boundary, then perform the final comparison on the same resume/JDs/jobs. Report model identity and any differences; do not claim exact equality across different models.
+## Issue 1 — Resumes uploaded in production never reach Supabase Storage
 
-## First-round results (2026-10-04)
+**Severity: high (data loss risk) · Confidence: confirmed by live test**
 
-The first audit used the actual uploaded PDF, a newly signed-up audit account, real Supabase storage/database, and actual provider results. No seeded jobs or substituted database were used. Raw resume-bearing evidence and session state remain private under `/tmp/opencode/jobhunter-real-audit/`, not in the repository.
+> **Status: RESOLVED** — fixes `fee869b` + `58c24d2` + `64e66c3`, prod-verified
+> 2026-10-03 00:08–00:10 UTC. **Root cause (final):** Render ran **Node 20.11.0**
+> (`render.yaml` NODE_VERSION); `@supabase/supabase-js@2.117.2` `createClient()` throws
+> *"Node.js detected but native WebSocket not found — run Node.js 22+ or provide a
+> WebSocket transport"*. The throw hit the silent `catch` in `getSupabaseClient()`
+> (leading hypothesis below — cause was Node version, not URL format) → `client=null` →
+> disk fallback with **zero log lines**. Decisive evidence: new `/health?deep=1` on prod
+> returned `storage:"error client-unavailable (create-client: Node.js detected but
+> native WebSocket not found…)"` on Node 20, and `storage:"ok"` after the Node 22.14.0
+> deploy. (The "intermittent" 23:34 success was a **localhost** upload — bun has
+> WebSocket + the same shared Supabase — Render itself failed 100% of the time.)
+> *Pre-fix evidence below.*
 
-- Signup/login, logout/relogin, signed-out route protection: passed.
-- Real PDF uploaded to Supabase; downloaded bytes match the upload SHA-256. Two-page metadata correct.
-- Resume Health, its category/detail views, report download, clipboard export, print rendering, saved resume view and reload were exercised.
-- Saved preferences were submitted in the browser and reloaded.
-- Recommendation run retrieved 153 deduplicated candidates and stored 34 results. All 34 cards were selected; one crashed the detail page. Pagination and cached reload were exercised.
-- All 34 source URLs were visited. Five LinkedIn source pages were readable; 28 Jooble pages returned a 403 challenge and one LinkedIn page returned a 429/authwall. These 29 sources remain **unverified**, not correct-by-assumption. No challenge or login barrier was bypassed.
-- Real source JDs were tested in Tailored Match: a junior AI role, a Java architect role, and a Workday integration role. All three HTTP requests succeeded, exposing the scoring issues below.
-- Local inference was confirmed in two JD reports. The initial recommendation run fell back to keyword-only after an embedding-cache database connection failure, despite successful local model warmup.
-- Account/resume deletion was intentionally not performed. Live-provider results can change; source availability is not guaranteed. Final SageMaker validation has not run.
+### Symptom
+Uploads "succeed" in the UI, but the Supabase Storage bucket contains almost nothing.
+The bucket `resumes` contains exactly **one** folder (`301b4e73-…`) holding a
+**1,396-byte** test file — see §6 (orphan). The user's real uploads go to disk instead.
 
-## Confirmed discrepancies and proposed fixes
+### Evidence (all probed 2026-10-02 22:10–22:12 UTC)
+1. Fresh upload through **production** backend:
+   ```
+   POST /api/v1/resumes  →  200, resume id fc1767ac-65e2-42be-a8c8-e7a1d1ad7e64
+   DB row: storage_bucket = "local"          ← should be "resumes"
+   ```
+2. Every row in the shared DB falls back:
+   ```
+   GET /rest/v1/resumes?select=storage_bucket
+   → Counter({'local': 14})   total: 14      ← 100% local, incl. all Aug/Sep rows
+   ```
+3. Bucket root list (service key) → only `301b4e73-…` (orphan test folder, §5).
+4. Contrast: **local** backend (same code, `backend/.env` + local `node_modules`) uploads fine:
+   ```
+   POST http://localhost:3001/api/v1/resumes → 200 in 2.3s
+   DB row: storage_bucket = "resumes"
+   bucket list → ['301b4e73-…', 'cb95d000-…']  (new folder created ✅)
+   ```
+   (Both test users/resumes deleted afterwards.)
+5. **Render logs (provided 2026-10-02):** build of `114773a` succeeded
+   (`npm ci --include=dev && npm run build` → `tsc`, 299 packages, "Build successful"),
+   service live at `https://api.vinaybuilds.me` (+ domain alias; `/health` timestamps prove
+   it is the same instance as `jobhunter-backend-lkkf.onrender.com`). The runtime log
+   contains `⚠️ Node.js 20 and below are deprecated … @supabase/supabase-js` → the package
+   **is installed and was imported** in the running process. The pasted logs show **no**
+   `[supabaseStorage]` line.
+6. **Re-probe after logs (22:31 UTC):** fresh production upload through
+   `api.vinaybuilds.me` → still `storage_bucket = "local"`
+   (row `037f616d-…`, test user deleted afterwards).
 
-### P1 — Resume skill-section boundary loss / contradictory ATS evidence
-- Actual: Resume Health shows 14 skills, while `skills_focus` reports 0 normalized hard skills; the persisted profile has no declared skills. Java, JavaScript, SQL, Docker and other listed skills can be reported missing.
-- Cause: `Languages:` inside Technical Skills is treated as a new top-level languages section, taking the rest of the technical inventory with it. Inspect hard-skill counting against the normalizer's canonical keys as well.
-- Files: `modules/parsing/pdfParser.ts`, `resumeProfile.ts`, skill extraction/normalization and the Resume Health scorer.
-- Fix: keep technical subcategories in the skills section; distinguish natural-language sections from programming-language lists; make counts and scoring use the same canonical inventory. Add generalized regressions without copying the private resume into git. Bump profile/scorer versions where behavior changes.
+### Root cause (chain)
+1. **Silent fallback by design:** `backend/src/modules/storage/supabaseStorage.ts:27-36`
+   — `getSupabaseClient()` wraps `await import('@supabase/supabase-js')` in
+   `try { … } catch { return null }`. If the package is missing at runtime, the upload
+   **silently** writes to local disk (`supabaseStorage.ts:80-88`) and returns
+   `{ bucket: 'local' }`. No error reaches the API response, so the upload "succeeds".
+2. **Missing dependency until yesterday:** `@supabase/supabase-js` was only added to
+   `backend/package.json` in commit `92f7116` (2026-10-02 20:02 UTC, message:
+   *"add missing supabase-js dep (Render uploads hit disk)"*). Until that deploy, **every**
+   Render upload fell into (1). This explains all pre-deploy rows — and is now
+   **eliminated for the current image** by log evidence 5 (package loads). The fallback
+   logic itself dates back to `8006a03` (V2 core).
+3. **Response hides the failure:** `backend/src/routes/v1/resumes.ts:122` returns only
+   `id/fileName/uploadDate/status/sha256/pageCount` — never `storage_bucket`. The list
+   endpoint (`resumes.ts:140`) omits it too, so neither the UI nor an API consumer can tell
+   local vs Supabase.
+4. **The catch at `supabaseStorage.ts:33-34` swallows more than import errors:**
+   `createClient(env.SUPABASE_URL!, …)` runs *inside* the same `try`. A malformed URL makes
+   it **throw** — verified locally: `createClient('vaflmkhzyvqmglstmadg', key)` →
+   `Invalid supabaseUrl: Must be a valid HTTP or HTTPS URL.` — the `catch` returns `null`
+   **without logging anything**, and `uploadFile` then falls to disk with no warn at all
+   (`:81` only warns when the *env vars* are missing). This path explains **all current
+   evidence at once**: deprecation warning present (import ran) + zero `[supabaseStorage]`
+   lines + `bucket=local`. Two rival paths remain (they do print a warn) — table below.
 
-### P2 — Explicit experience requirements and senior roles incorrectly admitted
-- Actual: recommendation entry 4 is a Java architect posting requiring 8–15 years (and 10+ years in qualifications), but is marked eligible for an internship-stage candidate. Entry 6 explicitly asks for 6+ years in Workday integration and is also marked eligible.
-- Source checks: the displayed title can differ from the role stated in the description. `Experience: 8-15 years`, `Exp:6+ Years`, and `10+ years in software engineering` are missed.
-- Files: `modules/jd/jdParser.ts`, `jobs/seniority.ts`, `jobs/eligibility.ts`, `analysis/jdRubric.ts`.
-- Fix: parse bounded professional-experience labels and reversed phrasing; honor explicit role labels without promoting candidates based on coworker mentions. Use canonical seniority in JD qualification checks. Preserve harsh upward penalties; no downward penalty.
+### ~~Open (needs Render dashboard)~~ — **answered 2026-10-03**
+Environment vars were correct all along (Q1 — `SUPABASE_URL` has `https://`, key set,
+`SUPABASE_RESUME_BUCKET=resumes`). The "no `[supabaseStorage]` line" row below was right:
+`createClient()` threw inside the silent catch — actual throw message captured live via
+the new probe (Node/WebSocket, not URL). Superseded by the status banner above.
 
-### P3 — JD requirements disappear and title-only evidence becomes 100% fit
-- Actual: the junior AI JD's `Core Requirements` are not recognized (Python/Git and vector-database requirements disappear). The Java architect JD is `uncertain` instead of failing the explicit experience/scope requirement. The Workday JD displays **100%** from role alignment alone (15/15 applicable points) with no matched requirements or semantic evidence.
-- Files: JD parser/matcher/rubric and analysis response construction.
-- Fix: heading aliases including Core Requirements and Qualifications & experience, truthful AND/OR and partial coverage, deduplicated missing skills, scope/tenure checks, and insufficient-evidence handling rather than inflating a title-only denominator. Score and evidence must reconcile across direct response, persisted snapshot and UI.
+| Observation | Meaning | Action |
+|---|---|---|
+| `[supabaseStorage] Supabase upload failed, falling back to local: <msg>` | env set, import OK, storage API rejected the call (401 bad key / missing bucket / region) | fix per `<msg>` |
+| `[supabaseStorage] Supabase not configured — writing to local uploads folder` | secrets missing (they are `sync: false`, `render.yaml:43-46`, must be set manually) — *contradicts the deprecation warning unless it came from an older deploy* | set both secrets, restart |
+| **no `[supabaseStorage]` line at all** (**leading hypothesis**) | `createClient()` threw inside the silent catch (`supabaseStorage.ts:33-34`) → client `null` → disk, zero logging. Classic cause: `SUPABASE_URL` missing `https://` | fix URL format **and** make the catch log (fix 1.2 below); expected value `https://vaflmkhzyvqmglstmadg.supabase.co` |
 
-### P4 — Job detail runtime crash
-- Actual: selecting entry 19 (Labor Planning & Forecasting) throws `Objects are not valid as a React child (found: object with keys {raw})`.
-- Files: `frontend/project/src/pages/JobsPage.tsx` and shared display helpers if needed.
-- Fix: normalize provider salary/other untrusted structured fields to display strings, never render raw objects. Verify all 34 cards again.
+**Environment tab check:** `SUPABASE_URL` (must start with `https://`), and
+`SUPABASE_SERVICE_ROLE_KEY` (41-char `sb_secret_…`). Note: `backend/.env` is **not** in
+git (`.gitignore:29`) and `env.ts:31-32` reads `process.env` — so Render sees **only**
+dashboard values, nothing else.
 
-### P5 — False confidence, source omissions and misleading model label
-- Actual: short ~300-character snippets lacking qualification details display `No confirmed barrier`; specialized Workday/SAP jobs are treated as generic software roles. Provider fallback/error diagnostics are absent from the page. The header refers to SageMaker even though this audit uses local inference.
-- Fix: flag missing qualification evidence as uncertain, retain specialty compatibility checks, show actual semantic status, provider fallbacks and exclusion counts. Don't claim external source verification from successful provider retrieval.
+### Proposed fix — **all done (see status banner)**
+1. ✅ **Verify prod state first** — env vars confirmed via user screenshot (Q1); the
+   failing branch identified live via `?deep=1` instead of a log grep.
+2. ✅ **Fail loudly** — `fee869b`: `getSupabaseClient()` logs `reason=import|create-client`;
+   `uploadFile()` **throws in production** on env/client-null/upload-error (dev keeps disk
+   fallback with a `FALLBACK reason=` token).
+3. ✅ **Surface storage state in the API** — `fee869b`: `storageBucket` on upload (`resumes.ts:122`)
+   and list (`:140`) responses (list also fixed `fileName/uploadDate` for `SELECT *` rows).
+4. ✅ **Structured warning** — `[supabaseStorage] FALLBACK reason=import|create-client|env|client-null|upload-error`.
+5. ✅ **Health check** — `fee869b` + `58c24d2`: `GET /api/v1/health?deep=1` →
+   `storage: ok | error <code/reason> | not-configured` (never leaks the key).
+6. ✅ **Re-deploy + re-run the exact probe** — after `64e66c3` (Node 22.14.0):
+   `?deep=1` → `storage:"ok"`; prod signup+upload → `storageBucket:"resumes"`,
+   DB row `storage_bucket='resumes'`, bucket folder listed, download 200 (173,303 B,
+   `%PDF-1.5`), `DELETE /resumes/<id>` removed the object; cleanup verified
+   (0 qa users, 0 orphan rows, bucket `[]`).
 
-### P6 — Pagination disappears when minimum score hides loaded results
-- Actual: setting minimum fit to 100 hides all loaded matches and also hides Load more, despite 34 stored results and a remaining page.
-- Fix: render pagination independently of visible-result count. Distinguish an empty visible page from an empty stored run.
+### Consequence already realized (fix separately, §6)
+The legacy rows (now 10 total: 9 `bucket='local'` + 1 `bucket='resumes'` whose object
+was removed from the bucket) have **no reachable bytes** — Render's ephemeral disk was
+wiped by today's deploys, local `backend/uploads/` holds no PDFs, and the one Supabase
+object is gone. UX is honest already (`8e4b127`: analysis → **410** + re-upload copy;
+download → 404 with resume-view copy); remaining optional step = S1 status marking.
+Confirmed earlier in Render logs: `readiness error Error: Local
+file not found: /opt/render/project/src/backend/uploads/hc/test.pdf`.
 
-### P7 — Mobile overflow
-- Actual: at 390px viewport, Jobs summary cards expand to about 524px due to long resume filename/grid min-content sizing.
-- Fix: min-width constraints and safe wrapping/truncation across summary cards, job details and report filenames. Recheck actual PDF name on mobile, not only short synthetic names.
+**Resolved 2026-10-03 — user chose removal over marking:** the 8 dead `bucket='local'`
+rows were deleted (cascade cleaned analyses/runs); the sole surviving row (`35cb26ae…`,
+`bucket='resumes'`) was verified to still have its 174,204 B object and was kept.
+Incident note: a bucket-wide sweep during that cleanup over-removed that object; it was
+restored byte-identical from `~/Downloads/resume/resuem_clgf.pdf` (sha256 matches the
+DB row) — bucket state verified after.
 
-### P8 — Optional embedding-cache failure disables healthy local inference
-- Actual: local model warmup succeeded; a Supabase `Connection terminated unexpectedly` during batch/cache work caused all 34 recommendations to use keyword-only scoring.
-- Files: embedding cache, ranking and database lifecycle.
-- Fix: bound cache reads/writes and allow validated model inference when optional cache I/O fails; preserve model/user cache boundaries and make fallback visible. Release the initial database connection after readiness probing. Do not suppress failures of required recommendation/result writes.
+---
 
-### P9 — Repeated/misleading skill gaps and incomplete source evidence
-- Actual: one .NET job repeats C#, .NET and SQL in its missing-skill list. Some full provider descriptions are downgraded to snippet quality on DB fallback.
-- Fix: canonical deduplication in public evidence lists; preserve description quality in fallback reads. Do not collapse same-title openings with distinct verified requisitions merely because they share a company.
+## Issue 2 — Resumes "View" dead-ends in a misleading "Analysis not found"
 
-## Implementation order and acceptance gates
-1. Parsing + Resume Health consistency (P1), JD/relevance/eligibility correctness (P2/P3/P5 backend/P9), and safe UI rendering/diagnostics (P4/P5 UI/P6/P7) may be implemented independently.
-2. Main integration handles cache/database reliability (P8), version consistency and real-data regression evidence.
-3. Run tests/builds, restart only the audit app processes, then rerun the same stored PDF and the same source JDs locally. Compare every reported score component and previously failing card.
-4. Review a new real-provider run, record each result/source status, and repeat if a concrete discrepancy remains. Unavailable external sources remain explicit gaps.
-5. Only after local checks pass, identify/authorize the configured SageMaker endpoint and run the final provider comparison. No AWS inference before this stage.
+**Severity: high (core flow broken/confused) · Confidence: root cause confirmed in code;
+intent corrected per user — "View" must open the clicked resume, and the resume id in the
+link is therefore CORRECT; the route/page/error are wrong**
 
-## Implemented corrections and second-pass evidence
-- P1: technical language/subcategory boundaries repaired; profile version 5.1.0 and scorer version 4.1.0. On the real PDF, recognized skills increased from 14 to 35. Health is now 80.5, not artificially increased: broader declared skills change the evidence ratio and focus score. Category points reconcile.
-- P2/P3: explicit tenure labels, requirement headings and canonical scope checks repaired. The same architect JD now fails qualifications and scores 0 after the 50-point principal gap. The same Workday JD fails its six-year requirement and has unavailable fit instead of title-only 100. The junior AI JD recognizes Python/Git and vector-store alternatives and scored 71 with local inference.
-- P4/P5/P6/P9: object-valued salaries render safely; source/fallback and exclusion diagnostics are visible; snippets are marked uncertain; missing skills are deduplicated; pagination is outside the score-filter empty state; fallback reads preserve description quality.
-- P7: second browser pass still exposed min-content grid overflow after selecting the last card then resizing from desktop. Applied explicit one-column minmax grid/min-width constraints; the focused retest measured 390px content in a 390px viewport.
-- P8: optional cache I/O is bounded to four concurrent requests; a cache outage no longer prevents validated model inference. Required analysis/recommendation writes still propagate errors. Database startup connection is released and idle pool errors are handled.
-- Removed unused resume-derived role-title vectors from public job cache batches; private professional vectors remain owner-scoped.
-- Recommendation cache identity now includes provider/model/endpoint configuration, so a local cached run cannot count as an AWS test.
-- AWS preparation: authenticated CLI identity exists; listing endpoints is denied. The user supplied the exact existing endpoint name. SDK now uses the default credential chain (including shared profiles/workload roles) and cancels timed-out invokes rather than requiring pasted static keys. No keys were added to repository/config files.
+> **Status: FIXED** — backend `30933e9`, frontend `9a58578`, E2E `8a7b506` (18/18, re-run
+> green after Issue 3 as `0ba71a1`'s suite). Evidence below is **[pre-fix @ `114773a`]**.
+> Current locations: `ResumesPage.tsx:123` (View → `/app/resumes/${id}`), `router.tsx:116`
+> (route `resumes/:id` → `ResumeViewPage`), `analyses.ts:256` (`GET /analyses` with
+> `resumeId`/`latest` filters), `analyses.ts:278/:283` (404 vs honest 500),
+> `AtsPage.tsx` honors `?resumeId`, `ResumesPage.tsx:8` `id: string`.
 
-### Actual checks so far
-- Backend full suite: 117 passed, 3 opt-in skips; the real local model suite run separately: 2 passed.
-- Backend TypeScript build: passed.
-- Frontend formatter regression: 1 passed; TypeScript check and production build: passed.
-- Frontend lint: 0 errors, 7 existing warnings. Build retains a bundle-size warning.
-- Second real-data browser pass: all 13 current cards rendered, real local embeddings used, architect/Workday excluded, cached scores persisted. Mobile failure found and fixed as above; a third full pass is in progress.
-- Public source ledger: `artifacts/real-audit/source-checks.csv` (34 first-round entries; blocked sources explicitly marked).
+### Symptom
+Resumes page → **View** → error page "Analysis not found". Misleading: the id in the URL
+is a valid **resume** id — nothing is missing except the assumption that it's an analysis id.
 
-### External limitations (not papered over)
-- Adzuna India requests return HTTP 404 and use database fallback. This is shown as a provider error/fallback, not live success. Provider configuration/access needs confirmation; do not silently switch the user's country to obtain unrelated jobs.
-- Jooble challenge pages and the LinkedIn authwall remain inaccessible. Provider snippets are not independently verified full postings.
-- No deployment or git push has been performed. These fixes run in the local app connected to the real Supabase database/storage.
-- Third local round completed with 31 browser/data assertions passed and no browser errors. Twelve current recommendations were inspected; all used local semantic evidence. The additional HCL Commerce source link was visited and also returned a Jooble 403 challenge.
-- Final SageMaker round completed: 31 checks passed, 0 failed, 0 browser errors. No deployment was initiated.
+### Evidence / root cause
+1. **Right id, wrong target.** `ResumesPage.tsx:102` builds
+   `/app/analysis/${r.id}` from the **resume** id — correct for "open this resume" — but
+   the only detail route is `analysis/:id` (`router.tsx:124`), and `AnalysisPage.tsx:339`
+   fetches `GET /analyses/<id>` treating the param as an **analysis** id →
+   `analyses.ts:244` → **404 "Analysis not found"** every time. (Genuine analysis ids
+   reach the page only from AtsPage's SPA navigation state, `AtsPage.tsx:159`.)
+2. **No resume view exists.** Routes (`router.tsx:121-128`): ats, analysis/:id, jobs,
+   resumes, profile — nothing can "open a resume".
+3. **Backend already has the pieces:**
+   - `GET /resumes/:id` (`resumes.ts:143`) → `{fileName, uploadDate, status, sha256, pageCount}`
+   - `GET /resumes/:id/download` (`resumes.ts:191`)
+   - `GET /analyses` list (`analyses.ts:231`) → newest 50, `SELECT *` (includes `resume_id`)
+   - `AnalysisPage` accepts `location.state.initialAnalysis` (`AnalysisPage.tsx:315`) — the
+     report renderer can be reused with fetched data.
+4. **Even a correct analysis id can dead-end:** some resumes have zero analyses rows
+   (screenshot resume `1769d56b-…`, see §6), and "not found" is indistinguishable from
+   "DB failed": `GET /analyses/:id`'s `catch` also returns **404 "Analysis not found"**
+   (`analyses.ts:246`), while insert/list failures are swallowed
+   (`analyses.ts:97`, `:221`, list `:236` → `[]`).
+5. **AtsPage cannot re-analyze an existing resume** — its only flow is upload-new-file →
+   analyze (`AtsPage.tsx:145-154`); no `?resumeId` handling exists, which an
+   "Analyze this resume" CTA requires.
+6. Minor: `ResumesPage.tsx:8` types `id: number` although ids are UUID strings (typing lie).
 
-## Final local versus SageMaker comparison
-- Same real Supabase-stored PDF, same three saved source JDs, same application code.
-- AWS run used `AwsSageMakerEmbeddingProvider` against the explicitly supplied endpoint; recommendation logs confirm 12 jobs / 36 texts. The provider-specific run ID differed from the local run.
-- Both semantic JD cases returned real, 384-dimensional embeddings with no mock fallback. The configured model is `anass1209/resume-job-matcher-all-MiniLM-L6-v2`; the AWS response does not expose an immutable model revision, so revision equality is not claimed.
-- Junior AI JD: 71 locally and 71 on AWS; identical breakdown and qualification status.
-- Architect JD: 0 locally and 0 on AWS after the principal-stage penalty; both ineligible with the explicit experience gap.
-- Workday JD: fit unavailable on both (no substantive responsibilities/recognized skills to score), ineligible on both for the six-year requirement. No semantic inference is needed for this case; its unavailable embedding status is not an AWS failure.
-- All 12 recommendation IDs matched across runs; all 12 fit scores were identical. Persisted reloads retained the scores/evidence and mobile rendering passed.
-- These are observed agreements for the tested inputs, not a guarantee that all future model outputs or provider postings are identical.
-- Redacted result summary: `artifacts/real-audit/verification-summary.json`.
-- Source ledger covers all 35 distinct postings visited across the audit. Five pages were readable, 30 were blocked (29 Jooble challenges plus one LinkedIn authwall). Blocked postings remain unverified and snippet recommendations remain explicitly uncertain.
+### Proposed fix (View opens the resume; resume id stays in the URL)
+1. **New route + resume view:** add `/app/resumes/:id` (`router.tsx`):
+   - `GET /resumes/:id` → 404 → friendly "Resume not found" + back link (never raw backend text);
+   - fetch the resume's latest analysis (2) → if present, render the existing report UI
+     (reuse AnalysisPage's renderer via `initialAnalysis` state, as AtsPage does);
+   - if none → resume card: fileName, upload date, status, **Download**
+     (`/resumes/:id/download`), and **"Analyze this resume"** CTA → `/app/ats?resumeId=<id>`.
+   Keep `analysis/:id` for real report URLs (hard-refresh/back-nav).
+2. **Backend:** add `resumeId` (+ optional `latest=true`) filter to `GET /analyses`
+   (`analyses.ts:231`); in `GET /analyses/:id` return **500** on query failure and 404
+   only for genuinely missing rows (`analyses.ts:239-247`).
+3. **AtsPage:** honor `?resumeId=` — skip upload, call `/analyses/readiness|jd-match`
+   with the given id (already keyed on resumeId, `AtsPage.tsx:153-154`) so the CTA
+   re-analyzes the stored file.
+4. **ResumesPage:** point View at `/app/resumes/${r.id}`; fix the `id` typing; show the
+   list **skeleton** while loading (§0 rule 7) instead of spinner-only.
+5. **Error handling:** `analyses.ts:97`/`:221` → `console.error` at minimum (an id handed
+   to the SPA with no row is a guaranteed broken link — consider failing the request);
+   list `:236` → log the error instead of silent `[]`.
+6. **Copy:** AnalysisPage/ResumeView map fetch failures to contextual messages
+   ("This resume hasn't been analyzed yet" / "Resume not found") — never show raw
+   "Analysis not found" for a resume id.
 
-## Status at completion of the SageMaker audit
-- Confirmed first-round application failures were fixed and the local-test/fix loop repeated before the final AWS pass.
-- Code changes are uncommitted and not deployed. Migration 009 and audit account/data writes were made against real Supabase with authorization.
-- Adzuna 404 resolved in the follow-up below; source-site access restrictions remain. No claim of universal correctness or complete external verification is made.
-- Rotate credentials pasted in chat; they were not copied into repository artifacts or new configuration files. Raw audit files/session state remain in the restricted private audit directory.
+### Verification (browser E2E, §0 rule 5)
+- Resumes → View on an analyzed resume → report renders; hard refresh also renders.
+- View on an un-analyzed resume → resume card + Download + Analyze CTA → AtsPage runs the
+  analysis on the existing file (no re-upload) → report.
+- Unknown id → "Resume not found" with back link; **never** "Analysis not found".
+- `grep -rn "app/analysis/" frontend/project/src` → only AtsPage's `analysisId` navigation.
+- Stop the DB → readiness/list log a 500 with a log line, not a silent 404 masquerade.
 
-## Adzuna follow-up — 2026-10-04
+---
 
-### Proven cause and official contract
-- Official references: https://developer.adzuna.com/overview, https://developer.adzuna.com/docs/search and https://developer.adzuna.com/swagger/spec/test2.json.
-- Search uses `GET /v1/api/jobs/{country}/search/{page}` with `app_id`, `app_key`, `what`, `where`, `results_per_page` and optional `max_days_old`. Country path values are lowercase.
-- Same existing local credentials: `in` returned HTTP 200 (27,247 software-engineer results); `IN` returned HTTP 404 `UNSUPPORTED_COUNTRY`. `countryCodeForLocation('India')` supplies uppercase `IN`, which the old Adzuna provider passed straight into the URL. This was not a demonstrated credential/account-alert problem.
-- Adzuna documents descriptions as excerpts capped at 500 characters. Returning exactly 500 characters is not proof of a full JD. The previous length-based `full` label was wrong.
-- Screenshot shows a live Trial Access app. Local credentials work; Render's actual environment and deployed code were not inspected or changed.
+## Issue 3 — Login page slow to load
 
-### Implemented and tested
-- Normalize config/query countries with trim + lowercase; validate documented country codes before reserving quota. No silent switch away from the requested country.
-- Preserve API snippet text, label it `snippet`, retain zero-valued salaries, request JSON explicitly, and expose safe HTTP error codes without credentials or raw response payloads.
-- Successful empty responses remain empty rather than silently returning unrelated cached jobs.
-- Jobs detail identifies provider text versus API excerpts and explicitly warns about omitted requirements and independent source verification.
-- Retrieval version now participates in search-cache and completed-run identity so old mislabeled Adzuna results are not reused after deployment.
-- Direct call through the fixed provider with uppercase `IN`: status `ok`, four normalized junior-software-engineer jobs from 187 total matches. Every description was 500 characters, classified as snippet, and persisted unchanged to real Supabase.
-- Real browser refresh: 15 recommendations, including two Adzuna entries; all 15 cards inspected, 0 browser errors. Adzuna pages 1–3 were successful cached provider responses during this browser pass; direct live retrieval was verified separately, not inferred from those cache hits.
-- Latest backend suite: 122 passed, 3 opt-in skips; TypeScript build passed. Frontend formatter test: 1 passed; TypeScript and production build passed; lint: 0 errors, 7 existing warnings. Existing bundle-size warning remains.
+**Severity: medium · Confidence: mechanisms confirmed; exact share per visit not isolated**
 
-### Retained-JD audit and remaining limitations
-- All 15 response descriptions exactly match their immutable recommendation snapshots, and all 15 scores match persisted values. All descriptions match the jobs table after HTML/entity normalization; nine Jooble raw snippets contain markup that the jobs table strips. This is expected normalization, not lost JD text.
-- All 11 excerpt descriptions (nine Jooble, two Adzuna) exactly match retained provider-cache text and are explicitly `uncertain`. The four JobsPipe descriptions are substantive provider text, not proof of current source-page accessibility.
-- The Adzuna Navtech and Fortanix results contain mostly company introductions, so omitted skills/tenure cannot be verified from those excerpts. Higher retrieval coverage does not guarantee stronger qualification evidence.
-- Two Bosch descriptions end with the bare text `4 to 8`, without units, and discuss Embedded C/Autosar. This remains a manual-review ambiguity, not a confirmed four-year requirement or a proven candidate fit. One is currently labeled eligible (30 fit); the other uncertain (25 fit). These expose a remaining limitation in incomplete provider requirements and specialization handling; universal scoring correctness is not claimed.
-- The 30 previously blocked original pages are still unverified. Built-in browser opening timed out and tab inspection showed no open tab; no CAPTCHA was solved and no challenge bypass was attempted. Provider-text auditing proceeded as requested instead.
-- Redacted follow-up receipt: `artifacts/real-audit/adzuna-verification.json`; per-result text audit: `artifacts/real-audit/retained-jd-checks.csv`. Raw text, screenshot, session and response files remain private and excluded from git.
-- No Render deployment or git push is included. Rotate the key exposed in the screenshot/chat; configure replacement secrets privately.
-- The requested local commit includes application fixes, migration 009, regression tests and redacted audit reports only. Credentials, attachments, session files and generated screenshots are excluded. Staged files were checked for configured secrets and common credential patterns; no matches found.
-- After the cache-version change, backend build and the 122-test suite passed again; the restarted local backend health endpoint returned `ok`. No extra metered provider refresh was run solely for this cache-version change.
+> **Status: FIXED** — `165d7ba` (session cap + single-flight, optimistic `PublicOnly`,
+> `SessionGuard` via context, font `<link>`, skeletons on Analysis/Jobs/ATS/Resumes) +
+> E2E `0ba71a1` (2/2 with a 6 s-delayed `/auth/session`). Evidence below is
+> **[pre-fix @ `114773a`]**. Current locations: `router.tsx:75-89` (optimistic `PublicOnly`),
+> `router.tsx:62-70` (`SessionGuard` → `AppShellSkeleton`, no `/latest-resume`),
+> `AuthContext.tsx:51` (single-flight `inflight`), `index.css:1` (fonts via `index.html`
+> `<link>`, `grep fonts.googleapis dist/assets/*.css` → 0).
 
-## Multi-role retrieval and evidence follow-up — 2026-10-05 (Asia/Calcutta)
+### What we measured (production, 2026-10-02 22:10–22:12 UTC, both services warm)
+| Probe | Result |
+|---|---|
+| `GET https://jobhunter-r773.onrender.com/login` (cold-ish) | TTFB 1.01 s |
+| same, warm | TTFB 0.53 s |
+| main bundle `/assets/index-p3ll3DTJ.js` (gzip) | 138 kB, 0.71 s |
+| `GET /api/v1/auth/session` (warm, 401 expected) | 1.02 s |
 
-### Scope and implementation
-- User authorized local implementation and real-data verification, followed by a GitHub push if checks passed. AWS and Render configuration remain unchanged; no alternative embedding/reranker model was evaluated or installed.
-- Apinex role discovery uses only `free/gpt-6-luna`. The backend sends contact-redacted professional text with numbered evidence passages, validates referenced passages and role support, and returns up to three distinct titles. Manual overrides remain available. Owner/input/version-scoped AI caches persist in the existing profile JSON; no schema migration was needed.
-- Role inference no longer selects frontend merely because React occurs first, and the planner no longer discards the second/third target roles. All selected titles receive first-page provider coverage before deeper searches, subject to provider quotas and availability. No invented new-graduate status.
-- Independent retrieval uses bounded waves: at most four concurrent requests and one per provider within a run, at most 18 planned calls. JobsPipe cursor chains stop at absent/repeated cursors; provider network timeouts own cancellation. Timings separate discovery, retrieval, local ranking, availability and persistence.
-- The UI requires an explicit search after reviewing roles; it defaults to India and seven days, with visible newest/match, unknown-date, unknown-geography and verified-open controls. Unknown date/geography opt-ins are explicit. Jooble `updated` is no longer treated as posting time. Adzuna newest requests use its date sort.
-- Availability checks use a bounded shortlist (maximum 20), HTTPS host allowlisting, public DNS validation with pinned connections, validated redirects and bounded bodies/timeouts. HTTP 200 or generic Apply text alone is insufficient. Challenges/authwalls remain unknown. Matching JobPosting metadata and application evidence can support open status. Rechecks and user-reported closure are persisted; user reports are not mislabeled as independent verification and suppress that URL for the account for 24 hours.
-- The user-supplied expired Indeed screenshot was recorded as a user report on the existing audit recommendation. Automated HTTP 401 access was not represented as verification of closure.
-- Reports preserve every loaded result's retained provider JD, evidence, source/provenance, searched titles, dates, availability, qualifications, component points, penalties/caps, confidence and actual run diagnostics. Export scope explicitly says loaded/filtered, not all results. Canonical skills are deduplicated. Unknown seniority/location earn no compatibility points; upward penalties remain harsh and downward seniority has no penalty.
+**Backend work observed in Render logs** (what the UI actually waits on, per request):
+analysis readiness / jd-match **29.7 s** (SageMaker embed), recommendation ranking batch
+embed **25.7 / 43.5 / 50.5 s** (on top of Jooble + 4 other provider scrapes), plus the
+cold-start penalty above. So even after the login gate is fixed, the heavy screens still
+wait tens of seconds — those are the mandatory **skeleton-screen** targets (§0 rule 7):
+AtsPage analysis progress, JobsPage recommendations, ResumesPage list, AnalysisPage.
 
-### Actual verification
-- Backend: 139 passing tests, zero failures; three opt-in skips in the default run. The opt-in real local embedding file was separately run: two tests passed. TypeScript build passed.
-- Frontend: three tests passed; TypeScript and production build passed; lint zero errors/seven existing warnings. Existing bundle-size warning remains.
-- Real-resume browser checklist: 20/20 passed, zero browser exceptions, mobile width 390 with no horizontal overflow. No seeded jobs or substitute database were used.
-- Newest run: 23 results; every result within the requested seven-day window, sorted correctly across pagination; reported expired URL and observed Paris/US/LATAM leakage excluded. Verified-open-only returned three results. Every loaded retained JD appeared in the clipboard report. On-demand availability recheck persisted successfully.
-- Live timing from that run: retrieval 15,978 ms, local ranking 3,115 ms, availability 3,661 ms, persistence 4,609 ms; backend total 27,858 ms. Provider diagnostic intervals demonstrated peak overlap of four. These are measurements, not a controlled speedup comparison against the older AWS run.
-- Explicit empty-target-role acceptance was additionally tested, so saved/manual titles could not mask automatic discovery. Latest AI titles were Full Stack Developer, Backend Engineer and Frontend Engineer; 26 real results, all score arithmetic verified. Persisted preferences and same-input cache reuse passed. Response count differs as the live queries/feeds differ.
-- Resume Health remained 80.5, and three retained real JDs remained 71/uncertain, 0/ineligible (architect), and unavailable/ineligible (Workday). Browser report reload passed for all four analyses with zero errors.
-- Redacted receipt: `artifacts/real-audit/multi-role-verification.json`. Raw text, API responses, screenshots, sessions and scripts stay in the existing private audit directory, excluded from git.
+Warm numbers are fine — so the pain is the **cold / gated** path. Four contributors, in
+likely order of impact:
+1. **Blank-screen session gate on `/login`** — `frontend/project/src/app/router.tsx:77-93`
+   (`PublicOnly`, `router.tsx:77-92`): renders `<div className="min-h-screen bg-[#0C0A09]" />`
+   (**completely blank, no spinner**, `router.tsx:89`) until `GET /auth/session` resolves.
+   If the Render free backend is asleep, that call waits out a cold start while the user
+   stares at black. Axios `timeout: 60000` (`lib/api.ts:32`) is the worst case.
+2. **Duplicate session calls** — `PublicOnly` (`router.tsx:82`) **and**
+   `AuthProvider` mount refresh (`features/auth/AuthContext.tsx:51-53`) both hit
+   `/auth/session`; `SessionGuard` adds a third (with a legacy fallback to
+   `/latest-resume`, `router.tsx:43`). All must settle before usable UI.
+3. **Render free-tier cold starts** — both services spin down when idle:
+   static site (`jobhunter-r773`) and backend (`jobhunter-backend`). Backend cold start
+   observed today (instance started ≈22:01:43 UTC, `/health` uptime probe).
+4. **Render-blocking Google Fonts import** — `frontend/project/src/index.css:1`
+   `@import url('https://fonts.googleapis.com/…')` as the *first line of the entry CSS*.
+   CSS `@import` blocks rendering until the Google response arrives; on networks where
+   `fonts.googleapis.com` is slow (common in IN), first paint waits on it.
 
-### Honest remaining limitations and deployment notes
-- Apinex returned empty/truncated/malformed responses during live testing before later successful responses. Bounded missing-final-delimiter repair is allowed, but missing fields, invalid evidence and other invalid JSON fail to the visible deterministic fallback; no automatic paid fallback or network retry. Provider responses reported zero cost tokens, which is not an independently verified billing statement or guaranteed daily allowance.
-- Availability is time-sensitive, best-effort and shortlist-limited. Unverified results remain visible unless verified-only is selected. No challenge/CAPTCHA bypass occurred, and historical blocked source pages are still unverified. Users should recheck before applying.
-- Remotive exhausted its existing daily quota during these tests; its fallback status was visible, not counted as successful live retrieval. Strict date filtering intentionally excludes Jooble records without a trustworthy posting date.
-- First-seen time is left unavailable where the current schema/provider does not establish it; update/fetch dates are not fabricated as posting/first-seen dates.
-- The key is stored only in ignored local backend configuration. The template documents `APINEX_API_KEY` and `APINEX_ROLE_MODEL=free/gpt-6-luna`; set a rotated key privately in Render when deployment configuration is authorized. No secret is included in the commit. The exposed key should be rotated.
+### Proposed fix
+1. **`PublicOnly`:** replace the empty div (`router.tsx:89`) with a **login-form
+   skeleton** (§0 rule 7 — never a blank screen), and render the form immediately — only
+   *redirect* after the session check resolves (optimistic render, gate only the redirect).
+2. **Skeletize every slow view** (per §0 rule 7): Resumes list, Analysis page, Jobs
+   recommendations, ATS progress — shimmer placeholders matching each layout instead of
+   blank/spinner states while the 25–50 s backend work runs.
+3. **Deduplicate session calls:** one source of truth — `AuthProvider.refresh()` only;
+   `PublicOnly`/`SessionGuard` consume context instead of their own `api.get`.
+   Remove the `/latest-resume` legacy fallback (`router.tsx:43`).
+4. **Timeouts:** per-request timeout for `/auth/session` (e.g., 5–8 s) instead of the
+   global 60 s; on timeout treat as guest and render the form.
+5. **Fonts:** self-host Fraunces/Inter/JetBrains Mono (Vite `assets/` + `@font-face`) or
+   at least `<link rel="preconnect">` + `display=swap` link in `index.html` instead of a
+   CSS `@import` chain.
+6. **Optional:** Render paid/always-on instance if cold starts remain the dominant cost
+   (or keep-alive pings — the repo already has `KEEPALIVE.md` / `005_keepalive.sql`;
+   verify what it actually pings and whether it covers the **backend**).
 
-## Requested MiMo fallback — 2026-10-05
-- Confirmed exact catalog ID at `https://apinex.bond/api/public/models`: `free/mimo-v2.6-pro`, live and `allowFree: true` at verification time.
-- The role-discovery chain is now Luna first, then one MiMo attempt only when a received Luna response fails output/evidence validation. Both use the same evidence checks; actual successful model identity is retained in output and cache. If both fail, the visible deterministic fallback remains.
-- Configuration/auth/rate-limit/network errors do not trigger another model call. No paid model and no same-model retry were added. Inference budget is 70 seconds total (45 Luna, 25 MiMo); UI discovery timeout is 90 seconds. Version/cache identity includes the ordered chain.
-- AWS/Render configuration and embedding models were not changed. No additional key is needed for the fallback.
+### Verification
+- Lighthouse / WebPageTest on `/login` with cold cache: first paint before session
+  response; blank-screen duration ≈ 0.
+- With backend deliberately asleep: login page still shows the form within ~1 s
+  (session check resolves in background, redirect happens when it completes).
+- `grep -c "fonts.googleapis" frontend/project/dist/assets/*.css` → 0 after self-hosting.
 
-## APInex Role Discovery & MiMo Fallback Fix — 2026-10-07
-- Resolved issue where Luna transport failures (HTTP 429 rate limit, 5xx gateway errors, inference timeouts) escaped the model retry loop and aborted before attempting the fallback model.
-- The model loop now catches transport and network errors on `free/gpt-6-luna` and cleanly falls back to `free/mimo-v2.6-pro`.
-- Added model alias support: `free/mimo2.6` and `mimo2.6` automatically normalize to `free/mimo-v2.6-pro`.
-- Relaxed `APINEX_ROLE_MODEL` in `backend/src/config/env.ts` from `z.literal('free/gpt-6-luna')` to `z.string()`, and added `isAllowedFreeModel` guard preventing paid model invocation while allowing all authorized free models (`free/gpt-6-luna`, `free/mimo-v2.6-pro`, `free/mimo2.6`).
-- Enhanced `parseRoleOutput` to extract JSON from markdown fences (` ```json `) and strip conversational preambles/trailing commentary from LLM outputs.
-- Verified with live APInex key: `free/gpt-6-luna` and `free/mimo-v2.6-pro` both return validated occupational roles.
-- All 177 unit and regression tests pass without error; TypeScript compilation passes.
+---
 
+## Issue 4 — Dependency vulnerabilities & deprecated runtime (from Render logs)
+
+**Severity: medium (1 critical, prod-relevant) · Source: Render build/runtime logs + `npm audit`**
+
+> **Status: PARTIAL** — fix 1 done (`2532a45`: backend audit clean, 0 vulns), fix 2 done
+> (`f56492a`: frontend 11 → 4 vulns, all remaining are majors), fix 5 done (`64e66c3`:
+> `NODE_VERSION` 22.14.0, forced by Issue 1). Fixes 3–4 (majors Q6, lockfile Q7) await
+> user decisions; evidence below is as-of 2026-10-02.
+
+### Evidence (2026-10-02)
+1. Render build log: `10 vulnerabilities (4 moderate, 5 high, 1 critical)` after `npm ci`,
+   with the standard *"To address all (including breaking changes): npm audit fix --force"*
+   hint (do **not** run `--force` blindly).
+2. Local `cd backend && npm audit` — and **all 7 are prod-relevant** (`npm audit --omit=dev`
+   reports the same set, so none are dev-only):
+   | Severity | Package | Advisory |
+   |---|---|---|
+   | **critical** | `tar` ≤7.5.20 | arbitrary file creation/overwrite via hardlink path traversal |
+   | high | `@mapbox/node-pre-gyp` ≤1.0.11 | sits on the `tar` chain |
+   | high | `brace-expansion` ≤1.1.20 | quadratic-time CPU DoS (ReDoS-style) |
+   | moderate | `express` 4.22.x | fix available |
+   | moderate | `body-parser`, `qs` | array-limit bypass / parsing issues |
+   | moderate | `ip-address` | `isInSubnet()` cross-family allowlist bypass |
+   All 7 show `fixAvailable: true`.
+3. **Frontend** — Render static-site build log confirms the same numbers as local
+   (`11 vulnerabilities (3 low, 5 moderate, 3 high)`; `cd frontend/project && npm audit`):
+   | Severity | Package | Advisory | Fix path |
+   |---|---|---|---|
+   | **high** | `vite` ≤6.4.2 (repo: 5.4.x) | path traversal in optimized-deps `.map` handling | **major** — `fixAvailable: via vite@8.3.2` |
+   | **high** | `brace-expansion` | ReDoS (quadratic expansion) | non-breaking |
+   | **high** | `browserslist` ≤4.28.6 | unbounded memory growth → OOM | non-breaking |
+   | moderate | `react-router` + `react-router-dom` ≤7.17 | open redirect via backslash in `<Link>`/`useNavigate` (CVE-2025-68470 bypass) — **user-facing** | **major** — `via react-router-dom@7.18.4` (6 → 7) |
+   | moderate | `esbuild` ≤0.24.2 | dev server accepts requests from any website | **major** (bundled with vite 8) |
+   | moderate | `@vitejs/plugin-react` ≤4.3.3 | toolchain | non-breaking |
+   | moderate | `@humanfs/node` <0.16.8 | recursive copy follows symlinks (eslint toolchain) | non-breaking |
+   | low | `eslint` 9.10–9.26 · `@eslint/plugin-kit` · `postcss-selector-parser` | ReDoS / AST-recursion DoS (lint-only) | non-breaking |
+   Runtime-relevant for users: `react-router-dom` (open redirect). `vite`/`esbuild` are
+   build/dev-time only (not shipped), but keep them patched — CI/dev machines run them.
+4. **Frontend Render specifics (from the static-site log):**
+   - Node **24.14.1 (default)** — frontend service sets no `NODE_VERSION`
+     (`render.yaml:117-122` only has `VITE_*`) → fine (matches local); **backend stays on
+     20.11.0** — see evidence below.
+   - Render runs its default **`bun install` first, then `npm ci`** (buildCommand) →
+     double install, and bun printed **"Saved lockfile"** — i.e. the tracked `bun.lock`
+     was stale vs `package.json` at deploy time. **Both** `bun.lock` and
+     `package-lock.json` are committed → two lockfiles drift; builds are not fully
+     reproducible (bun resolved `vite@5.4.8` while npm ci uses the npm lock).
+   - Harmless noise: Rollup `@__PURE__` annotation warnings from `node_modules/zod`
+     (comment placement); build still succeeds (2.78 s, bundle 459 kB / 138 kB gzip).
+5. **Runtime deprecations in the Render logs:**
+   - `NodeVersionSupportWarning` (AWS SDK v3): **node ≥ 22 required from Jan 2027**;
+     Render backend runs `20.11.0` (`render.yaml:26-27`); local dev runs **v24** — version
+     skew between test and prod.
+   - `⚠️ Node.js 20 and below are deprecated … @supabase/supabase-js` — supabase-js will
+     drop Node < 22 support.
+   - (Harmless but noisy: `WEB_CONCURRENCY=1` default notice.)
+
+### Proposed fix (separate commits, after Issue 1)
+1. **Backend audit (non-breaking):** `cd backend && npm audit fix` (review the diff) →
+   build + tests + browser E2E (§0) → **commit**. Re-run `npm audit`; if majors remain
+   (e.g. express 5), list them here as accepted/follow-up — never `audit fix --force`
+   without a review.
+2. **Frontend audit (non-breaking first):** `cd frontend/project && npm audit fix` →
+   fixes `brace-expansion`, `browserslist`, `@humanfs/node`, `@vitejs/plugin-react`,
+   `eslint`/`@eslint/plugin-kit`, `postcss-selector-parser` → `npm run build` + browser
+   E2E → **commit**.
+3. **Frontend majors (own commits, each with full browser E2E):**
+   - `react-router-dom` 6 → **7.18.4** (open-redirect CVE + route API changes —
+     retest every route/guard: PublicOnly, SessionGuard, nested `/app` children);
+   - `vite` 5 → **8.x** (pulls patched `esbuild`; rebuild + compare `dist/` output, check
+     the zod/Rollup warnings still benign). If either major proves too risky, document it
+     here as an accepted risk with a re-test date instead of forcing it.
+4. **Lockfile single-sourcing:** pick **one** package manager — recommended: keep
+   `package-lock.json`, set `installCommand: npm ci --include=dev` on the frontend service
+   in `render.yaml` (stops Render's default `bun install` + "Saved lockfile" drift), then
+   either delete `bun.lock` or regenerate it in the same commit if bun is still wanted
+   locally. Verify the next deploy installs exactly once.
+5. **Runtime bump:** `render.yaml:27` `NODE_VERSION: 20.11.0 → 22` (or 24 to match local),
+   add `"engines": { "node": ">=22" }` to `backend/package.json` and
+   `frontend/project/package.json` → redeploy → **verify both deprecation warnings are
+   gone** from the logs and all flows still work → **commit** (blueprint + engines together).
+6. **Verification:** backend/frontend `npm audit` → 0 critical/high (or accepted risks
+   documented above), Render logs free of the Node-20 deprecation warnings, deploy log
+   shows a single install, browser E2E green.
+
+---
+
+## 5. Secondary findings (fix alongside the above)
+
+| # | Finding | Where (current @ HEAD) | Suggested fix | Status |
+|---|---|---|---|---|
+| S1 | All 10 remaining resume rows now have unreachable bytes (9 `storage_bucket='local'`, disk wiped by deploys; 1 `='resumes'` whose object is gone) → download 404, re-analysis 410. **Live proof in prod logs:** `readiness error Error: Local file not found: /opt/render/project/src/backend/uploads/hc/test.pdf` (hand-crafted test row — path lacks the `<userId>/<resumeId>/` prefix — since deleted) | `resumes.ts:213`, `analyses.ts:45-64`; rows: 9 `local` + 1 `resumes` (object gone) | Backfill impossible (bytes gone) → for unrecoverable rows mark `processing_status='lost'` + UI: "re-upload required" | **✅ resolved — user chose removal over marking (2026-10-03):** 8 dead `local` rows deleted (cascade), 1 alive row (`35cb26ae`, object verified) kept; lost-file UX still done (`8e4b127`: analysis on a missing file → **410**, download → 404) |
+| S2 | Orphaned storage object: `resumes/301b4e73-…/1769d56b-…/hc_resume.pdf`, 1,396 bytes, created 2026-10-02 19:50:13 UTC; owner not in `users`, no `resumes`/`analyses` rows | Supabase bucket | ~~Ask user before deleting~~ | **Gone** — 2026-10-03 probe: bucket root list `[]`, object GET → 404 (user confirmed they cleared it). **Sweep job closed by user decision 2026-10-03: no cron** — orphan sources are (a) storage upload OK + DB insert fails, (b) row-first delete with storage failure, (c) manual dashboard edits; fail-loud + retention eviction make (a) rare. Revisit only if orphans reappear → then a manual `scripts/` sweep |
+| S3 | PDF parsed twice per upload (page count + profile) | `resumes.ts:61` (parse) → `:117` (reuse) | Parse once, reuse `parsed` | ✅ `d2d36b7` |
+| S4 | `loadResumeBuffer` fallback did `fs.existsSync(path)` on a *relative* object path — never matches | `analyses.ts:45-64` (fallback removed) | Remove or resolve against `localUploadsDir()` | ✅ `8e4b127` (removed; `downloadFile` already resolves local paths; missing bytes now tagged `STORED_FILE_MISSING` → 410) |
+| S5 | Resume delete must clean storage by the **recorded** bucket (not hardcode) | `resumes.ts:179` (deletes by the recorded bucket) | Delete by recorded bucket; orphan sweep (S2) as backstop | ✅ live-verified 2026-10-03: prod `DELETE /resumes/<id>` on a `bucket='resumes'` row removed the Supabase object (bucket `[]` after) |
+| S6 | Docs claim green: README "2026-10-02 green sweep" while prod storage is broken | `README.md` (status section), `SYSTEM_DESIGN.md` §17 | Re-verify & update **in the same commit** as the fixes | ✅ this docs commit — README audit note + `SYSTEM_DESIGN.md` §17 |
+| S7 | `SessionGuard` legacy fallback `GET /latest-resume` can mark a user "authed" on a 200 from an unrelated endpoint | `router.tsx:62-70` (fallback removed) | Drop fallback; rely on `/auth/session` 401 → guest | ✅ `165d7ba` |
+| S8 | Startup banner printed `💾 Database: Not configured` while the DB was actually connected (it checked only `DATABASE_URL`; the app connects via `PG_DATABASE_STRING`) | `server.ts:114-127`, `env.ts:67-69` | Use `getDatabaseUrl()` presence (or the pool) for the banner; print a masked DSN source instead of a misleading status | ✅ `c675764` — banner prints `configured via PG_DATABASE_STRING` (source name only, never the DSN); live-verified |
+| S9 | Recommendation run hits `recommendation_runs.resume_id` FK (23503) when the resume is deleted during the ~55–140s ranking phase (entry ownership check passed earlier); response still claimed `success:true` with a phantom `runId` | `recommendations.ts` persist block (was `:177`) | Re-check resume exists right before insert; skip persist with one-line warn; respond `runId:null, persisted:false` (JobsPage only reads `recommendations`, GET `/:id` already 404s) | ✅ live-probed both paths: race → warn + no FK + `persisted:false`; happy → `persisted:true` + GET `/:id` 200; E2E 18/18 + 2/2 |
+| S10 | No per-user resume cap — unlimited uploads, no eviction policy | `resumes.ts` POST `/` | User rule: **max 3 resumes/user**; after insert evict oldest beyond the cap (row first → cascade, then storage object best-effort); expose `evicted[]` in upload response | ✅ `4411010` — live-probed: uploads 1–3 clean, 4th evicted #1 (row+object gone), GET list → 3; E2E 18/18 + 2/2 |
+
+---
+
+## 6. Orphan inventory (as of 2026-10-02 22:31 UTC)
+
+- **Storage:** exactly one folder, `resumes/301b4e73-eeb7-4501-b981-eba4be5c4766/`
+  → `1769d56b-…/hc_resume.pdf`, 1,396 B, created 2026-10-02T19:50:13Z.
+  `301b4e73-…` does **not** exist in `users`; no `resumes` or `analyses` rows reference it.
+  (Not deleted by us — pending user confirmation, S2.)
+- **Local disk:** `backend/uploads/` holds 3 files, all for user `37de4290-…` (Sep 22–23);
+  the other 11 historical rows' bytes are gone (S1).
+- **DB:** no orphan rows found; all investigation test data removed (§7).
+
+---
+
+## 7. Investigation test data — cleanup log (verified)
+
+| Test | Created | Removed |
+|---|---|---|
+| Render signup/login/upload/analysis (`qa.e2e.1790979078@…`, user `8df327f9-…`, resume `fc1767ac-…`, analysis `0b8eeb02-…`) | 22:11 UTC | `DELETE /resumes/fc1767ac…` (cascades analyses/profiles) + `DELETE /rest/v1/users?id=eq.8df327f9…` |
+| Local signup/upload (`qa.local.1790979777@…`, user `cb95d000-…`, resume `ae893a43-…`) | 22:22 UTC | `DELETE /resumes/ae893a43…` (removes Supabase object too) + `DELETE /rest/v1/users?id=eq.cb95d000…` |
+| Render re-probe after logs (`qa.v3.*@example.com`, user `c7b4e1d9-…`, resume `037f616d-…`) | 22:31 UTC | `DELETE` by `user_id` on `resumes`/`sessions` (204) + `DELETE /rest/v1/users?id=eq.c7b4e1d9…` (204); analysis list `[]` |
+| Issue 1 fix verification on prod (`qa.prodnode22@example.com`, user `04808ddf-…`, resume `d85d4661-…`) | 2026-10-03 00:08 UTC | `DELETE /resumes/d85d4661…` (removed DB row **and** Supabase object) + psql `sessions`/`users` (1 row each); bucket root `[]`, qa/orphan counts 0/0 |
+
+Final verification (all empty for the three test users):
+```
+users/resumes/analyses/sessions filtered by
+  8df327f9…, cb95d000…, c7b4e1d9…            → [] each
+storage bucket root list                      → ['301b4e73-…']  (pre-existing, §6)
+overall counts (owner's real data, untouched): users 15, resumes 13, analyses 24, sessions 30
+```
+Local backend process stopped. No secrets committed; `.env`, cookies, and test artifacts
+lived only in `/tmp/opencode/jh/`.
+
+---
+
+## 8. Execution order (when fixes start)
+
+**§0 applies to every step: small commits · local-first · browser-E2E green before push.**
+
+1. ✅ **Render triage + fix for Issue 1** — env vars confirmed (user screenshot, Q1);
+   root cause pinned live via `/health?deep=1` (no dashboard log access needed);
+   fixes 1.2–1.5 (`fee869b`, `58c24d2`) + `NODE_VERSION` 22.14.0 (`64e66c3`) →
+   redeployed → prod upload probe: `storage_bucket='resumes'` + object visible +
+   download roundtrip + DELETE cleans it (2026-10-03 00:08–00:10 UTC).
+2. ✅/⏳ **Issue 4 (deps/runtime):** backend `npm audit fix` → **done** (`2532a45`, 0 vulns);
+   frontend `npm audit fix` (non-breaking) → **done** (`f56492a`, 11 → 4);
+   frontend majors (`react-router-dom@7`, `vite@8`) → **done** (`d153268`: rr 7.18.4,
+   vite 8.3.2, plugin-react 6.1.1; tsc + build + E2E 18/18 + 2/2 green); lockfile
+   single-source (`installCommand: npm ci`, bun.lock dropped, engines added) →
+   **done** (`1c8ade1`);
+   `NODE_VERSION` → **done** (`64e66c3`: 22.14.0 in `render.yaml`, required by Issue 1).
+3. ✅ **Issue 2 (resume view):** `/app/resumes/:id` route + resume view (report if analyzed,
+   card+Download+Analyze CTA if not) + `?resumeId` on AtsPage + backend `resumeId` filter
+   + error-status/copy fixes → **done** (`30933e9`, `9a58578`); browser test: Resumes →
+   View (analyzed → report; un-analyzed → resume card → Analyze without re-upload) →
+   unknown id → friendly "Resume not found" → **E2E 18/18 green** (`8a7b506`, re-run
+   `0ba71a1`).
+4. ✅ **Issue 3** (login skeleton, session dedupe, fonts, **skeletize all slow views**) →
+   **done** (`165d7ba`); browser test: cold-ish `/login` shows form immediately, no blank
+   screen → **E2E 2/2 green** (`0ba71a1`).
+5. ✅ **S1–S8 + docs** — banner fix (S8 `c675764`), lost-file UX (S1 partial `8e4b127`),
+   S3 `d2d36b7`, S4 `8e4b127`, S7 (in `165d7ba`), README/SYSTEM_DESIGN re-verify (S6),
+   full file:line re-check of this plan → **this commit**. S2/S5 await Issue 1 + Q2.
+6. ✅ **Per-commit gates:** `cd backend && npm run build && npm test` (23/23 each time) ·
+   `cd frontend/project && npx tsc --noEmit && npm run build` · local feature run (§0 rule 4) · scripted
+   browser suite (§0 rule 5: 18/18 + 2/2) · live curl probes from Issues 1–2.
+   **Pushed** — `origin/dev` at `64e66c3` (everything through Issue 1).
+7. ✅ **Round 2 (2026-10-03, user-directed):** S9 FK-race fix (`efe9a26`) · S1 removal
+   executed (data op: 8 dead rows purged, alive row kept) · S10 retention cap 3/user
+   (`4411010`) · Q7 lockfile/engines (`1c8ade1`) · Q6 majors rr7+vite8 (`d153268`) ·
+   PLAN docs (this commit). Gates green per unit; pushed.
+
+## 9. Open questions for the user
+
+1. ~~**Render checks for Issue 1**~~ **answered 2026-10-03:** (a) env vars all set,
+   `https://` URL correct; (b) the log grep was superseded — `/health?deep=1` captured
+   the failure reason directly (`createClient: native WebSocket not found`).
+2. ~~**Orphan file (S2):**~~ **answered 2026-10-03:** yes, the user cleared the bucket
+   themselves; and the sweep job is **closed by decision — no cron** (sources explained;
+   revisit only if orphans recur, then manual `scripts/` sweep).
+3. **Screenshot account:** your screenshots show resume records, but `301b4e73…` (from
+   your signed URL) has no rows in the DB — which login was the app using? (Determines
+   whether your real account's data is among the 14 `local` rows.)
+4. **Keep-alive:** is the backend on Render asleep often? If yes, decide whether to rely
+   on `KEEPALIVE.md`'s cron or upgrade the instance (dominant factor in Issue 3).
+5. ~~**Node version for Issue 4:**~~ **done** — Render moved to 22.14.0 (`64e66c3`,
+   forced by Issue 1). Local dev still runs bun; consider aligning later.
+6. ~~**Frontend majors (Issue 4 fix 3):**~~ **done** — `react-router-dom@7.18.4` +
+   `vite@8.3.2` shipped (`d153268`) with full E2E (18/18 + 2/2).
+7. ~~**Package manager (Issue 4 fix 4):**~~ **done** — `installCommand: npm ci` set for
+   both services, stale `bun.lock` + orphan root lockfile dropped, `engines` added
+   (`1c8ade1`). Bun remains your local runner (`bun run src/server.ts`).
+   Note: `render.yaml` changes apply on the next Render **blueprint sync/deploy** —
+   sync the blueprint in the dashboard if the installCommand isn't picked up.

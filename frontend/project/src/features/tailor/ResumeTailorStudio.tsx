@@ -1,0 +1,324 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Sparkles,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+  FileText,
+  X,
+  RefreshCw,
+} from 'lucide-react';
+import { getApiErrorMessage } from '../../lib/api';
+import {
+  fetchJobSuggestions,
+  applySuggestion,
+  fetchExistingTailoredResume,
+  type TailorSuggestion,
+  type ApplySuggestionResult,
+} from '../../lib/tailorApi';
+import SuggestionCard from './SuggestionCard';
+import ScoreRecalculationBanner from './ScoreRecalculationBanner';
+import PdfPreviewModal from '../../components/PdfPreviewModal';
+
+export interface ResumeTailorStudioProps {
+  resumeId: string;
+  jobId: string;
+  jobTitle?: string;
+  companyName?: string;
+  onScoreUpdated?: (updatedAtsScore: number, updatedSemanticScore: number) => void;
+  onClose?: () => void;
+}
+
+export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
+  resumeId,
+  jobId,
+  jobTitle,
+  companyName,
+  onScoreUpdated,
+  onClose,
+}) => {
+  const [suggestions, setSuggestions] = useState<TailorSuggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
+  const [rejectedIds, setRejectedIds] = useState<Set<string>>(new Set());
+  const [activeBanner, setActiveBanner] = useState<ApplySuggestionResult | null>(null);
+  const [existingTailoredId, setExistingTailoredId] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // Load existing tailored resume (if any) and fetch new suggestions without prompting user
+  const loadStudioData = useCallback(async () => {
+    if (!resumeId || !jobId) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      // 1. Check if a tailored version already exists
+      try {
+        const existing = await fetchExistingTailoredResume(resumeId, jobId);
+        if (existing?.tailoredResume?.id) {
+          setExistingTailoredId(existing.tailoredResume.id);
+          if (
+            typeof existing.tailoredResume.atsScore === 'number' &&
+            typeof existing.tailoredResume.semanticScore === 'number'
+          ) {
+            // Set existing score banner if available
+            setActiveBanner({
+              success: true,
+              tailoredResumeId: existing.tailoredResume.id,
+              storagePath: existing.tailoredResume.storagePath || '',
+              previousScores: {
+                atsScore: existing.tailoredResume.atsScore,
+                semanticScore: existing.tailoredResume.semanticScore,
+              },
+              updatedScores: {
+                atsScore: existing.tailoredResume.atsScore,
+                semanticScore: existing.tailoredResume.semanticScore,
+              },
+              scoreDelta: {
+                atsDelta: 0,
+                semanticDelta: 0,
+              },
+              pdfUrl: existing.tailoredResume.pdfUrl || `/api/v1/resumes/${existing.tailoredResume.id}/file`,
+              downloadUrl:
+                existing.tailoredResume.downloadUrl ||
+                `/api/v1/resumes/${existing.tailoredResume.id}/download`,
+            });
+          }
+        }
+      } catch {
+        // Non-fatal if existing check fails
+      }
+
+      // 2. Zero-prompt suggestion generation
+      const res = await fetchJobSuggestions(resumeId, jobId);
+      if (res?.suggestions) {
+        setSuggestions(res.suggestions);
+        // Pre-populate any accepted suggestions if returned from backend
+        const initialApplied = new Set<string>();
+        for (const s of res.suggestions) {
+          if (s.status === 'accepted') {
+            initialApplied.add(s.id);
+          }
+        }
+        setAppliedIds(initialApplied);
+      } else {
+        setSuggestions([]);
+      }
+    } catch (err: unknown) {
+      console.error('[ResumeTailorStudio] Failed to load suggestions:', err);
+      setError(getApiErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [resumeId, jobId]);
+
+  useEffect(() => {
+    loadStudioData();
+  }, [loadStudioData]);
+
+  // Handle Accept & Apply
+  const handleAccept = async (suggestion: TailorSuggestion) => {
+    if (applyingId) return;
+    setApplyingId(suggestion.id);
+    setError(null);
+
+    try {
+      const result = await applySuggestion(resumeId, jobId, {
+        suggestionId: suggestion.id,
+        acceptedText: suggestion.suggestedText,
+        section: suggestion.section,
+        bulletIndex: suggestion.bulletIndex,
+        itemIndex: suggestion.itemIndex,
+        originalText: suggestion.originalText,
+      });
+
+      if (result.success) {
+        setAppliedIds((prev) => new Set([...prev, suggestion.id]));
+        setActiveBanner(result);
+        setExistingTailoredId(result.tailoredResumeId);
+
+        // Notify parent JobDetail and JobCard to update scores in real-time
+        if (onScoreUpdated) {
+          onScoreUpdated(result.updatedScores.atsScore, result.updatedScores.semanticScore);
+        }
+      } else {
+        setError('Failed to apply suggestion. Please try again.');
+      }
+    } catch (err: unknown) {
+      console.error('[ResumeTailorStudio] Error applying suggestion:', err);
+      setError(getApiErrorMessage(err));
+    } finally {
+      setApplyingId(null);
+    }
+  };
+
+  // Handle Reject
+  const handleReject = (suggestion: TailorSuggestion) => {
+    setRejectedIds((prev) => new Set([...prev, suggestion.id]));
+  };
+
+  const currentPdfUrl =
+    activeBanner?.pdfUrl || (existingTailoredId ? `/api/v1/resumes/${existingTailoredId}/file` : '');
+  const currentDownloadUrl =
+    activeBanner?.downloadUrl ||
+    (existingTailoredId ? `/api/v1/resumes/${existingTailoredId}/download` : '');
+
+  return (
+    <div className="space-y-5 rounded-2xl border border-amber-500/30 bg-stone-950/80 p-5 shadow-2xl backdrop-blur-md">
+      {/* Studio Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-stone-800 pb-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="p-1.5 rounded-lg bg-amber-400/10 text-amber-300">
+              <Sparkles size={18} className="fill-amber-400" />
+            </span>
+            <h2 className="text-base font-bold text-white">
+              In-Place Resume Studio
+            </h2>
+          </div>
+          <p className="mt-1 text-xs text-stone-400">
+            Tailoring for{' '}
+            <span className="font-semibold text-stone-200">{jobTitle || 'Target Role'}</span>
+            {companyName ? ` at ${companyName}` : ''}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={loadStudioData}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-stone-400 hover:text-stone-200 hover:bg-stone-800 transition-colors disabled:opacity-50"
+            title="Refresh suggestions"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+            <span>Regenerate</span>
+          </button>
+
+          {currentPdfUrl && (
+            <button
+              type="button"
+              onClick={() => setIsPreviewOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-amber-300 bg-amber-950/30 border border-amber-800/40 hover:bg-amber-900/30 transition-colors"
+            >
+              <FileText size={13} />
+              <span>Preview PDF</span>
+            </button>
+          )}
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-800 transition-colors"
+              aria-label="Close Studio"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Recalculated Score Delta Banner (shown when a suggestion has been applied) */}
+      {activeBanner && (
+        <ScoreRecalculationBanner
+          previousScores={activeBanner.previousScores}
+          updatedScores={activeBanner.updatedScores}
+          scoreDelta={activeBanner.scoreDelta}
+          pdfUrl={activeBanner.pdfUrl}
+          downloadUrl={activeBanner.downloadUrl}
+          onPreviewPdf={() => setIsPreviewOpen(true)}
+        />
+      )}
+
+      {/* Error alert */}
+      {error && (
+        <div className="flex items-start gap-3 rounded-xl border border-red-900/40 bg-red-950/20 p-4 text-xs text-red-300">
+          <AlertCircle size={16} className="shrink-0 text-red-400 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-semibold">Unable to complete request</p>
+            <p className="mt-0.5 text-stone-400">{error}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="text-stone-400 hover:text-stone-200"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Suggestions List */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-stone-300">
+              Recommended Bullet Improvements
+            </span>
+            {!loading && suggestions.length > 0 && (
+              <span className="rounded-full bg-stone-800 px-2 py-0.5 text-[10px] font-semibold text-stone-400">
+                {suggestions.filter((s) => !rejectedIds.has(s.id)).length} available
+              </span>
+            )}
+          </div>
+          <span className="text-[11px] text-stone-500">
+            Accepting updates the job-isolated PDF & re-scores
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="space-y-4 py-8 text-center">
+            <Loader2 size={24} className="mx-auto animate-spin text-amber-400" />
+            <div className="text-xs text-stone-400">
+              <p className="font-medium text-stone-300">
+                Analyzing role requirements against verified resume evidence…
+              </p>
+              <p className="mt-1 text-[11px] text-stone-500">
+                Enforcing zero-hallucination guardrail on candidate skills
+              </p>
+            </div>
+          </div>
+        ) : suggestions.length === 0 ? (
+          <div className="rounded-xl border border-stone-800/80 bg-stone-900/40 p-6 text-center text-xs text-stone-400">
+            <CheckCircle2 size={22} className="mx-auto text-emerald-400 mb-2" />
+            <p className="font-medium text-stone-300">No immediate bullet weaknesses found!</p>
+            <p className="mt-1 text-stone-500">
+              Your resume bullets are already well-quantified and aligned with target role keywords.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {suggestions.map((suggestion) => (
+              <SuggestionCard
+                key={suggestion.id}
+                suggestion={suggestion}
+                onAccept={handleAccept}
+                onReject={handleReject}
+                isApplying={applyingId === suggestion.id}
+                isApplied={appliedIds.has(suggestion.id)}
+                isRejected={rejectedIds.has(suggestion.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* PDF Preview Modal */}
+      {currentPdfUrl && (
+        <PdfPreviewModal
+          isOpen={isPreviewOpen}
+          onClose={() => setIsPreviewOpen(false)}
+          pdfUrl={currentPdfUrl}
+          downloadUrl={currentDownloadUrl}
+          title={`Tailored Resume: ${jobTitle || 'Role'}`}
+        />
+      )}
+    </div>
+  );
+};
+
+export default ResumeTailorStudio;

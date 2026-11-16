@@ -20,6 +20,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # dotenv environment variable files
 .env
+*.env
+.env.*
 .env.development.local
 .env.test.local
 .env.production.local
@@ -56,4 +58,6 @@ __pycache__/
 graphify-out/cache/
 graphify-out/.graphify_python
 .vercel
+uploads/
+.agents/
 .env*

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api, { getApiErrorMessage } from '../lib/api';
-import { evictionNotice } from '../lib/display';
 import { Button, Eyebrow, SelectMenu, Tag } from '../components/UI';
 import { ArrowRight, Briefcase, Check, ChevronDown, FileText, LockKeyhole, ShieldCheck, Target, Upload } from 'lucide-react';
 import './analysis.css';
@@ -55,7 +54,7 @@ export default function AtsPage() {
   const analyze = async () => {
     if (!existing && !file) { setError('Choose a PDF resume first.'); return; }
     if (mode === 'match' && jobDescription.trim().length < 20) { setError('Paste at least 20 characters from the job description you want to match against.'); return; }
-    let evictionMessage = '';
+    const evictionMessage = '';
     setLoading(true); setError(''); setNotice(''); setPhase(existing ? 'analyze' : 'upload');
     try {
       let resumeId: string;
@@ -67,12 +66,8 @@ export default function AtsPage() {
         const uploaded = upload.data as { resume?: { id?: string }; id?: string; evicted?: string[] };
         resumeId = uploaded?.resume?.id ?? uploaded?.id ?? '';
         if (!resumeId) throw new Error('Upload succeeded but no resume id was returned.');
-        // The 3-resume retention cap deletes the oldest file on upload; say so
-        // instead of letting a saved resume disappear without a word.
-        if (uploaded?.evicted?.length) {
-          evictionMessage = evictionNotice(uploaded.evicted.length);
-          setNotice(evictionMessage);
-        }
+        // The 3-resume retention cap has been removed for per-job tailoring.
+        // Resumes are retained indefinitely; eviction notices are disabled.
         fileName = file!.name;
         setExisting({ id: resumeId, fileName });
       }

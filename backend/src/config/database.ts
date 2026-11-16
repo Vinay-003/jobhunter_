@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: '.env' });
+dotenv.config({ path: 'backend/.env' });
 
 // Prefer a single connection string for Supabase/hosted Postgres
 const connectionString =

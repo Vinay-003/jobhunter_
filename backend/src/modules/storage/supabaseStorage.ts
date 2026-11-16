@@ -63,16 +63,37 @@ function localUploadsDir(): string {
   return path.resolve(process.cwd(), 'uploads');
 }
 
+export interface UploadOptions {
+  jobId?: string;
+  customPath?: string;
+}
+
 export async function uploadFile(
   userId: string,
   resumeId: string,
   buffer: Buffer,
   filename: string,
+  options?: UploadOptions | string,
 ): Promise<StorageRef> {
   const sha256 = crypto.createHash('sha256').update(buffer).digest('hex');
   const bucket = getBucket();
   const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'resume.pdf';
-  const objectPath = `${userId}/${resumeId}/${safeFilename}`;
+  
+  let objectPath: string;
+  if (typeof options === 'string') {
+    if (options.includes('/')) {
+      objectPath = options;
+    } else {
+      objectPath = `${userId}/jobs/${options}/${resumeId}/${safeFilename}`;
+    }
+  } else if (options?.customPath) {
+    objectPath = options.customPath;
+  } else if (options?.jobId) {
+    objectPath = `${userId}/jobs/${options.jobId}/${resumeId}/${safeFilename}`;
+  } else {
+    objectPath = `${userId}/${resumeId}/${safeFilename}`;
+  }
+
   // Issue 1 fix 1.2: production must never pretend success while writing to the
   // ephemeral disk (that's how all 14 rows became bucket='local' with lost bytes).
   const isProd = process.env.NODE_ENV === 'production';
@@ -108,6 +129,16 @@ export async function uploadFile(
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, buffer);
   return { bucket: 'local', path: objectPath, sha256 };
+}
+
+export async function uploadJobTailoredFile(
+  userId: string,
+  jobId: string,
+  resumeId: string,
+  buffer: Buffer,
+  filename: string,
+): Promise<StorageRef> {
+  return uploadFile(userId, resumeId, buffer, filename, { jobId });
 }
 
 /** Non-secret storage probe for GET /health?deep=1 (Issue 1 fix 5). */

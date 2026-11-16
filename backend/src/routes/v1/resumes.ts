@@ -10,10 +10,21 @@ import { cacheParsedResume } from '../../modules/parsing/parsedResumeCache.js';
 import { makeTiming } from '../../utils/serverTiming.js';
 import { buildResumeProfile, PROFILE_VERSION } from '../../modules/parsing/resumeProfile.js';
 import { uploadFile, deleteFile, downloadFile } from '../../modules/storage/supabaseStorage.js';
+import {
+  getTailorSuggestionsHandler,
+  applySuggestionHandler,
+  getTailoredResumeHandler,
+} from '../../modules/tailoring/tailorController.js';
 
 const router = Router();
 
 const uuidParam = validate({ params: z.object({ id: z.string().uuid() }) });
+const tailorUuidParams = validate({
+  params: z.object({
+    resumeId: z.string().uuid(),
+    jobId: z.string().uuid(),
+  }),
+});
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -97,28 +108,8 @@ router.post('/', requireSession, upload.single('resume'), async (req:any,res)=>{
     cacheParsedResume(row.id, parsed);
     timing.lap('db');
 
-    // Retention: max 3 resumes per user — evict the oldest beyond the cap
-    // (row first so a failed delete can never orphan storage; storage best-effort after).
-    const MAX_RESUMES_PER_USER = 3;
+    // Retention: Unlimited resumes per user allowed (retention cap disabled for multi-version & per-job tailoring)
     const evicted: string[] = [];
-    try {
-      const olds = await pool.query(
-        'SELECT id, storage_bucket, storage_object_path FROM resumes WHERE user_id=$1 AND id<>$2 ORDER BY created_at ASC',
-        [userId, row.id]);
-      const extra = olds.rows.length - (MAX_RESUMES_PER_USER - 1);
-      for (const old of olds.rows.slice(0, Math.max(0, extra))) {
-        try {
-          const d = await pool.query('DELETE FROM resumes WHERE id=$1', [old.id]);
-          if (d.rowCount) {
-            evicted.push(old.id);
-            if (old.storage_object_path) {
-              try { await deleteFile({ bucket: old.storage_bucket || 'resumes', path: old.storage_object_path, sha256: '' }); } catch{}
-            }
-          }
-        } catch(e){ console.warn('retention eviction failed for', old.id, e); }
-      }
-      if (evicted.length) console.warn(`[retention] evicted ${evicted.length} oldest resume(s) for user ${userId} (cap ${MAX_RESUMES_PER_USER})`);
-    } catch(e){ console.warn('retention check warning', e); }
     timing.lap('retention');
 
     try {
@@ -225,5 +216,36 @@ router.get('/:id/download', requireSession, uuidParam, async (req:any,res)=>{
     }
   } catch(e:any){ res.status(500).json({ success:false, message:e.message}); }
 });
+
+router.get('/:id/file', requireSession, uuidParam, async (req:any,res)=>{
+  const userId = String(req.user.id);
+  const id = req.params.id;
+  try {
+    const r = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [id, userId]);
+    let row = r.rows[0];
+    if (!row) {
+      const r2 = await pool.query('SELECT * FROM resumes WHERE id=$1', [id]);
+      if (r2.rows[0] && String(r2.rows[0].user_id)!==userId) return res.status(403).json({ success:false, message:'Forbidden'});
+      row = r2.rows[0];
+    }
+    if (!row) return res.status(404).json({ success:false, message:'Resume not found'});
+    const bucket = row.storage_bucket || 'resumes';
+    const path = row.storage_object_path || row.file_path;
+    try {
+      const data = await downloadFile({bucket, path, sha256: ""});
+      const safe = String(row.original_filename||row.file_name).replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,100);
+      res.setHeader('Content-Type','application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${safe}"`);
+      return res.send(data);
+    } catch(e:any){
+      return res.status(404).json({ success:false, message:'File not found in storage'});
+    }
+  } catch(e:any){ res.status(500).json({ success:false, message:e.message}); }
+});
+
+// Per-job tailoring routes
+router.post('/:resumeId/tailor/:jobId/suggestions', requireSession, tailorUuidParams, getTailorSuggestionsHandler);
+router.post('/:resumeId/tailor/:jobId/apply-suggestion', requireSession, tailorUuidParams, applySuggestionHandler);
+router.get('/:resumeId/tailor/:jobId', requireSession, tailorUuidParams, getTailoredResumeHandler);
 
 export default router;

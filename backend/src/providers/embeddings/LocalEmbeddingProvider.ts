@@ -68,7 +68,13 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
 
   private start() {
     if (this.worker && !this.worker.killed) return;
-    const candidates = [process.env.PYTHON_PATH, path.resolve(process.cwd(), 'backend/python/venv/bin/python'), path.resolve(process.cwd(), 'python/venv/bin/python')].filter(Boolean) as string[];
+    const candidates = [
+      process.env.PYTHON_PATH,
+      path.resolve(process.cwd(), 'backend/python/venv/bin/python'),
+      path.resolve(process.cwd(), 'python/venv/bin/python'),
+      path.resolve(process.cwd(), 'backend/python/venv/Scripts/python.exe'),
+      path.resolve(process.cwd(), 'python/venv/Scripts/python.exe'),
+    ].filter(Boolean) as string[];
     const python = candidates.find(candidate => fs.existsSync(candidate)) ?? 'python3';
     const worker = spawn(python, ['-u', SCRIPT, this.modelId], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1' } });
     this.worker = worker;
