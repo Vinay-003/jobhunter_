@@ -171,26 +171,67 @@ export function generateDeterministicSuggestions(
 
       // Substantive domain enhancement: weave in target-aligned verified skills and gap coverage
       if (!rewrite || rewrite === bullet) {
-        const gapText = (job.unmatchedResponsibilities || []).join(' ').toLowerCase();
+        const gaps = (job.unmatchedResponsibilities && job.unmatchedResponsibilities.length > 0)
+          ? job.unmatchedResponsibilities
+          : (job.responsibilities || []);
+        const gapIdx = (suggestions.length) % Math.max(1, gaps.length);
+        const targetGap = (gaps[gapIdx] || '').toLowerCase();
         const missingSkillList = (job.missingSkills || []).map((s) => s.toLowerCase());
         const hasSkill = (s: string) => whitelist.has(s.toLowerCase());
+        const trimmed = bullet.replace(/[.;\s]+$/, '');
 
-        // Target API / Backend / Microservices gaps
-        if ((gapText.includes('api') || gapText.includes('backend') || gapText.includes('service') || missingSkillList.some(s => s.includes('rest') || s.includes('api'))) && (hasSkill('rest') || hasSkill('api design') || hasSkill('express') || hasSkill('fastapi'))) {
-          if (/storefront|server|app|backend|application/i.test(bullet) && !/rest api/i.test(bullet)) {
-            const trimmed = bullet.replace(/[.;\s]+$/, '');
-            rewrite = `${trimmed}, incorporating structured REST API design and modular architecture to improve service reliability.`;
-            rationale = `Evidences REST API and modular backend architecture to directly address target role service gaps.`;
-          }
+        // 1. Debugging, code reviews, testing, quality assurance, documentation gaps
+        if (
+          targetGap.includes('debug') ||
+          targetGap.includes('review') ||
+          targetGap.includes('test') ||
+          targetGap.includes('quality') ||
+          targetGap.includes('document')
+        ) {
+          rewrite = `${trimmed}, conducting rigorous debugging and peer code reviews while maintaining comprehensive technical documentation for release stability.`;
+          rationale = `Directly evidences debugging, code review practices, and documentation standards to satisfy target quality responsibilities.`;
         }
-
-        // Target Cloud / Infrastructure / Pipeline gaps
-        if (!rewrite && (gapText.includes('cloud') || gapText.includes('deploy') || gapText.includes('pipeline') || gapText.includes('infrastructure')) && (hasSkill('aws') || hasSkill('docker') || hasSkill('render') || hasSkill('supabase'))) {
-          if (/pipeline|deploy|cloud|stack/i.test(bullet) && !/ci\/cd|cloud/i.test(bullet)) {
-            const trimmed = bullet.replace(/[.;\s]+$/, '');
-            rewrite = `${trimmed}, establishing automated cloud deployment workflows and scalable data persistence.`;
-            rationale = `Highlights cloud deployment and persistence workflows to satisfy role infrastructure criteria.`;
-          }
+        // 2. Target API / Backend / Microservices / REST gaps
+        else if (
+          targetGap.includes('api') ||
+          targetGap.includes('backend') ||
+          targetGap.includes('service') ||
+          missingSkillList.some((s) => s.includes('rest') || s.includes('api'))
+        ) {
+          const apiSkill = hasSkill('rest') ? 'REST API design' : hasSkill('fastapi') ? 'FastAPI service' : 'modular API';
+          rewrite = `${trimmed}, incorporating structured ${apiSkill} and modular backend architecture to ensure reliable inter-service communication.`;
+          rationale = `Evidences structured API design and backend architecture to directly bridge service integration gaps.`;
+        }
+        // 3. Target Cloud / Infrastructure / Pipeline / Deployment gaps
+        else if (
+          targetGap.includes('cloud') ||
+          targetGap.includes('deploy') ||
+          targetGap.includes('pipeline') ||
+          targetGap.includes('infrastructure') ||
+          targetGap.includes('geospatial')
+        ) {
+          rewrite = `${trimmed}, establishing automated cloud deployment pipelines and reliable multi-environment data workflows.`;
+          rationale = `Demonstrates cloud deployment and data pipeline engineering to satisfy target infrastructure criteria.`;
+        }
+        // 4. Target UI / Visualization / Frontend / Dashboard gaps
+        else if (
+          targetGap.includes('ui') ||
+          targetGap.includes('visual') ||
+          targetGap.includes('dashboard') ||
+          targetGap.includes('component')
+        ) {
+          rewrite = `${trimmed}, engineering responsive UI components and data visualization interfaces for intuitive real-time monitoring.`;
+          rationale = `Evidences frontend UI and data visualization capabilities to meet user interface engineering requirements.`;
+        }
+        // 5. Target Collaboration / Teamwork / Cross-functional gaps
+        else if (
+          targetGap.includes('collaborat') ||
+          targetGap.includes('senior') ||
+          targetGap.includes('ramp') ||
+          targetGap.includes('team')
+        ) {
+          rewrite = `${trimmed}, collaborating closely with cross-functional engineers to accelerate release cycles and technical alignment.`;
+          rationale = `Demonstrates close engineering collaboration and rapid codebase onboarding to fulfill team delivery expectations.`;
         }
       }
 
@@ -317,11 +358,15 @@ export async function generateTailorSuggestions(
   const systemPrompt = `You are an expert resume tailoring and ATS/Semantic matching optimization engine. Your goal is to maximize the candidate's Job Similarity Score (Semantic Match) and ATS readiness for a specific target job.
 
 CRITICAL OBJECTIVES & INTEGRITY CONSTRAINTS:
-1. TARGET SPECIFIC SCORING GAPS: Look closely at the "PRIMARY SCORING GAPS TO IMPROVE" section in the user prompt (unmatched responsibilities and missing criteria where candidate fit score is currently low). Your primary mission is to reframe and enhance the candidate's existing achievements so they directly evidence and semantically mirror those unmatched responsibilities.
-2. NO TRIVIAL / COSMETIC EDITS:
-   - Do NOT just substitute a single verb (e.g. NEVER change "Maintained" to "Sustained" or "Built" to "Developed" without adding substantive technical depth).
-   - Do NOT just insert a single buzzword like "production".
-   - Rewrites MUST substantive: clearly explain the architecture, engineering outcome, scale, or workflow (e.g., cloud data pipelines, visualization systems, API design, testing) using the candidate's actual projects and technologies.
+1. 1-TO-1 DISTINCT GAP BRIDGING (CRITICAL):
+   Look closely at the "PRIMARY SCORING GAPS TO IMPROVE" section below. Each listed gap is a specific responsibility or skill requirement where the candidate is currently losing points.
+   - Suggestion #1 MUST directly bridge Gap #1.
+   - Suggestion #2 MUST directly bridge Gap #2.
+   - Suggestion #3 MUST directly bridge Gap #3.
+   Do NOT generate multiple suggestions that all target the same responsibility or technology! Each suggestion must target a different gap from the list, so that accepting each suggestion incrementally turns an unmatched requirement into a matched one and monotonically increases the score.
+2. SUBSTANTIVE TECHNICAL DEPTH:
+   - Do NOT just substitute a single verb or add cosmetic buzzwords.
+   - Rewrites MUST be substantive: clearly explain the architecture, engineering outcome, scale, or workflow (e.g., debugging & peer code review, automated data pipelines, responsive UI visualization, API design, testing) using the candidate's actual projects and technologies.
 3. NEVER INVENT UNVERIFIED SKILLS OR FALSE CLAIMS:
    - You must NEVER invent, infer, or recommend adding any skill, technology, tool, credential, framework, or experience that the candidate does not already possess.
    - The candidate's verified skills whitelist is:
@@ -345,8 +390,8 @@ Format:
 }`;
 
   const gapsSection = (job.unmatchedResponsibilities && job.unmatchedResponsibilities.length > 0)
-    ? `Target Responsibilities Currently UNMATCHED (Scoring Gaps):\n${job.unmatchedResponsibilities.map((r) => `  - [GAP] ${r}`).join('\n')}`
-    : `Key Job Responsibilities:\n${job.responsibilities.length ? job.responsibilities.slice(0, 8).map((r) => `  - ${r}`).join('\n') : 'See Job Description below.'}`;
+    ? `Target Responsibilities Currently UNMATCHED (Scoring Gaps):\n${job.unmatchedResponsibilities.map((r, i) => `  - [GAP #${i + 1}] ${r}`).join('\n')}`
+    : `Key Job Responsibilities:\n${job.responsibilities.length ? job.responsibilities.slice(0, 8).map((r, i) => `  - [GAP #${i + 1}] ${r}`).join('\n') : 'See Job Description below.'}`;
 
   const missingSkillsSection = (job.missingSkills && job.missingSkills.length > 0)
     ? `Missing / Desired Skills: ${job.missingSkills.join(', ')}`
@@ -374,10 +419,10 @@ ${JSON.stringify(projectBullets.slice(0, 8), null, 2)}
 
 TASK:
 Provide up to 5 customized bullet rewrite suggestions specifically tailored to bridge the PRIMARY SCORING GAPS above for ${job.title} at ${job.company || 'the target company'}.
+- MANDATORY: Suggestion 1 bridges Gap #1, Suggestion 2 bridges Gap #2, Suggestion 3 bridges Gap #3. Distribute across different gaps so each accepted suggestion provides an incremental score gain.
 - Target specific bullets from Candidate Experience or Project lists.
 - Set "section" to "experience" when rewriting an experience bullet, or "projects" when rewriting a project bullet.
-- Reframe candidate's existing work to semantically cover the unmatched responsibilities (e.g. data pipelines, UI visualization, testing, cloud infrastructure) using ONLY verified candidate skills from the whitelist.
-- Reject superficial 1-word changes; make meaningful improvements that directly increase semantic job match.
+- Reframe candidate's existing work to semantically cover the unmatched responsibilities (e.g. data pipelines, UI visualization, testing & code reviews, cloud infrastructure) using ONLY verified candidate skills from the whitelist.
 - Strictly adhere to the candidate verified skills whitelist.`;
 
   try {

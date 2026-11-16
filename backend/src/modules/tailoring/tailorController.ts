@@ -413,36 +413,70 @@ export async function applySuggestionHandler(req: Request, res: Response) {
       });
     }
 
-    // 4. Calculate previous scores
-    const targetSeniority = (currentProfile.seniority as any) || undefined;
-    const oldReadiness = scoreReadiness(currentParsedDoc, currentProfile, targetSeniority);
-    const searchPreferences = await getUserSearchPreferences(userId);
-    const normalizedJob = toNormalizedJob(jobRow, jobDescription);
-
-    const recRes = await pool.query(
-      `SELECT r.fit_score, r.breakdown_json 
-       FROM recommendations r
-       JOIN recommendation_runs rr ON rr.id = r.run_id
-       WHERE rr.user_id = $1 AND r.job_id = $2
-       ORDER BY rr.created_at DESC LIMIT 1`,
-      [userId, jobId]
-    ).catch(() => ({ rows: [] }));
-    const savedRecScore = recRes.rows[0]?.fit_score;
-
-    const oldRank = await rankJob(currentProfile, normalizedJob, { preferences: searchPreferences, ownerId: userId }).catch(() => null);
-    const oldSemanticScore = (typeof savedRecScore === 'number' && savedRecScore > 0)
-      ? savedRecScore
-      : (oldRank?.fitScore ?? (await computeSemanticScore(currentProfile, parsedJd, userId)).score);
-    const previousScores = {
-      atsScore: oldReadiness.score,
-      semanticScore: oldSemanticScore,
-    };
-
-    // 5. Build and update structured resume data (incrementally build on this job's existing tailored version if present)
+    // 4. Check for existing tailored resume for this user & job to establish true baseline
     const existingTailored = await pool.query(
       `SELECT * FROM resumes WHERE user_id=$1 AND job_id=$2 ORDER BY created_at DESC LIMIT 1`,
       [userId, jobId]
     );
+
+    const targetSeniority = (currentProfile.seniority as any) || undefined;
+    const searchPreferences = await getUserSearchPreferences(userId);
+    const normalizedJob = toNormalizedJob(jobRow, jobDescription);
+
+    let baselineAtsScore: number;
+    let baselineSemanticScore: number;
+
+    if (existingTailored.rows[0]) {
+      // Incremental baseline: fetch the score directly recorded on the previous tailored resume
+      const prevAnalysis = await pool.query(
+        `SELECT readiness_score, jd_match_score FROM analyses 
+         WHERE user_id=$1 AND job_id=$2 AND resume_id=$3 
+         ORDER BY created_at DESC LIMIT 1`,
+        [userId, jobId, existingTailored.rows[0].id]
+      ).catch(() => ({ rows: [] }));
+
+      if (
+        prevAnalysis.rows[0] &&
+        prevAnalysis.rows[0].readiness_score != null &&
+        prevAnalysis.rows[0].jd_match_score != null
+      ) {
+        baselineAtsScore = Number(prevAnalysis.rows[0].readiness_score);
+        baselineSemanticScore = Number(prevAnalysis.rows[0].jd_match_score);
+      } else {
+        const tailoredBuf = await loadResumeBuffer(existingTailored.rows[0]);
+        const tailoredParsedDoc = await parsePdfBuffer(tailoredBuf);
+        const tailoredProfile = buildResumeProfile(tailoredParsedDoc);
+        const oldReadiness = scoreReadiness(tailoredParsedDoc, tailoredProfile, targetSeniority);
+        const oldRank = await rankJob(tailoredProfile, normalizedJob, { preferences: searchPreferences, ownerId: userId }).catch(() => null);
+        baselineAtsScore = oldReadiness.score;
+        baselineSemanticScore = oldRank?.fitScore ?? (await computeSemanticScore(tailoredProfile, parsedJd, userId)).score;
+      }
+    } else {
+      // First suggestion baseline: master base resume
+      const oldReadiness = scoreReadiness(currentParsedDoc, currentProfile, targetSeniority);
+      const recRes = await pool.query(
+        `SELECT r.fit_score 
+         FROM recommendations r
+         JOIN recommendation_runs rr ON rr.id = r.run_id
+         WHERE rr.user_id = $1 AND r.job_id = $2
+         ORDER BY rr.created_at DESC LIMIT 1`,
+        [userId, jobId]
+      ).catch(() => ({ rows: [] }));
+      const savedRecScore = recRes.rows[0]?.fit_score;
+
+      const oldRank = await rankJob(currentProfile, normalizedJob, { preferences: searchPreferences, ownerId: userId }).catch(() => null);
+      baselineAtsScore = oldReadiness.score;
+      baselineSemanticScore = (typeof savedRecScore === 'number' && savedRecScore > 0)
+        ? savedRecScore
+        : (oldRank?.fitScore ?? (await computeSemanticScore(currentProfile, parsedJd, userId)).score);
+    }
+
+    const previousScores = {
+      atsScore: baselineAtsScore,
+      semanticScore: baselineSemanticScore,
+    };
+
+    // 5. Build and update structured resume data (incrementally build on this job's existing tailored version if present)
     let structured: StructuredResumeData;
     if (existingTailored.rows[0]?.tailored_content_json && typeof existingTailored.rows[0].tailored_content_json === 'object') {
       structured = existingTailored.rows[0].tailored_content_json as StructuredResumeData;
@@ -452,20 +486,37 @@ export async function applySuggestionHandler(req: Request, res: Response) {
       structured = extractStructuredResumeData(currentParsedDoc, currentProfile);
     }
 
-    // Apply the edit
+    // Apply the edit with whitespace-normalized resilient matching
+    const normalizeText = (s: string) => s.replace(/\s+/g, ' ').replace(/[.\s]+$/, '').trim().toLowerCase();
+    const normOrig = originalText ? normalizeText(originalText) : '';
     const targetSection = section || 'experience';
+
     if (targetSection === 'experience') {
       structured.experience = structured.experience || [];
       const expItem = structured.experience[itemIndex] || structured.experience[0];
       if (expItem) {
         expItem.bullets = expItem.bullets || [];
-        if (originalText && expItem.bullets.includes(originalText)) {
-          const idx = expItem.bullets.indexOf(originalText);
-          expItem.bullets[idx] = acceptedText.trim();
-        } else if (expItem.bullets[bulletIndex]) {
-          expItem.bullets[bulletIndex] = acceptedText.trim();
+        let matchIdx = normOrig ? expItem.bullets.findIndex((b) => normalizeText(b) === normOrig) : -1;
+        // Fallback: search across all experience items if not in target item
+        if (matchIdx === -1 && normOrig) {
+          for (const item of structured.experience) {
+            item.bullets = item.bullets || [];
+            const found = item.bullets.findIndex((b) => normalizeText(b) === normOrig);
+            if (found !== -1) {
+              item.bullets[found] = acceptedText.trim();
+              matchIdx = found;
+              break;
+            }
+          }
+        }
+        if (matchIdx === -1) {
+          if (typeof bulletIndex === 'number' && expItem.bullets[bulletIndex] !== undefined) {
+            expItem.bullets[bulletIndex] = acceptedText.trim();
+          } else {
+            expItem.bullets.push(acceptedText.trim());
+          }
         } else {
-          expItem.bullets.push(acceptedText.trim());
+          expItem.bullets[matchIdx] = acceptedText.trim();
         }
       }
     } else if (targetSection === 'projects') {
@@ -473,13 +524,27 @@ export async function applySuggestionHandler(req: Request, res: Response) {
       const projItem = structured.projects[itemIndex] || structured.projects[0];
       if (projItem) {
         projItem.bullets = projItem.bullets || [];
-        if (originalText && projItem.bullets.includes(originalText)) {
-          const idx = projItem.bullets.indexOf(originalText);
-          projItem.bullets[idx] = acceptedText.trim();
-        } else if (projItem.bullets[bulletIndex]) {
-          projItem.bullets[bulletIndex] = acceptedText.trim();
+        let matchIdx = normOrig ? projItem.bullets.findIndex((b) => normalizeText(b) === normOrig) : -1;
+        // Fallback: search across all project items if not in target item
+        if (matchIdx === -1 && normOrig) {
+          for (const item of structured.projects) {
+            item.bullets = item.bullets || [];
+            const found = item.bullets.findIndex((b) => normalizeText(b) === normOrig);
+            if (found !== -1) {
+              item.bullets[found] = acceptedText.trim();
+              matchIdx = found;
+              break;
+            }
+          }
+        }
+        if (matchIdx === -1) {
+          if (typeof bulletIndex === 'number' && projItem.bullets[bulletIndex] !== undefined) {
+            projItem.bullets[bulletIndex] = acceptedText.trim();
+          } else {
+            projItem.bullets.push(acceptedText.trim());
+          }
         } else {
-          projItem.bullets.push(acceptedText.trim());
+          projItem.bullets[matchIdx] = acceptedText.trim();
         }
       }
     } else if (targetSection === 'summary') {

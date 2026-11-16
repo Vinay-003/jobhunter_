@@ -493,7 +493,7 @@ export async function rankJobsBatch(
         } else if (supported === total) {
           responsibilitySemantic = 25;
         } else {
-          const scoreRatio = (coverageRatio * 0.70) + (Math.min(1, Math.max(0, avg / 0.55)) * 0.30);
+          const scoreRatio = (coverageRatio * 0.65) + (Math.min(1, Math.max(0, avg / 0.50)) * 0.35);
           responsibilitySemantic = Math.round(scoreRatio * 25);
         }
         evidence.push(vec.size ? `Responsibility coverage ${supported}/${responsibilityMatches.length} via ${modelId}` : 'Keyword-only fallback; semantic responsibility evidence unavailable');
