@@ -21,7 +21,7 @@ import { scoreReadiness, VERSION as SCORER_VERSION } from '../ats/readinessScore
 import { parseJd, type ParsedJobDescription } from '../jd/jdParser.js';
 import { matchJd } from '../jd/matcher.js';
 import { scoreJdRubric, JD_RUBRIC_VERSION } from '../analysis/jdRubric.js';
-import { rankJob } from '../jobs/ranking.js';
+import { rankJob, getRankingEmbeddingProvider } from '../jobs/ranking.js';
 import type { NormalizedJob } from '../../providers/jobs/JobProvider.js';
 import { professionalEvidence } from '../matching/evidenceBuilder.js';
 import { embedCached } from '../../providers/embeddings/embeddingCache.js';
@@ -74,12 +74,11 @@ async function computeSemanticScore(
     return { score: rubric.score ?? 0, breakdown: rubric.breakdown, responsibilityCoverage: fallbackCoverage };
   }
 
-  const provider = getEmbeddingProvider();
-  const identity = {
-    modelId: provider.modelId,
-    dimension: provider.dimension,
-    modelRevision: (provider as any).modelRevision,
-  };
+  const provider = getRankingEmbeddingProvider();
+  const identity = (provider as any).modelRevision ? {
+    modelId: String(provider.modelId || 'anass1209/resume-job-matcher-all-MiniLM-L6-v2'),
+    modelRevision: String((provider as any).modelRevision),
+  } : null;
 
   let responsibilityCoverage = (jd.responsibilities || []).map((resp) => ({
     responsibility: resp,
@@ -687,6 +686,7 @@ export async function applySuggestionHandler(req: Request, res: Response) {
       updatedScores,
       scoreDelta,
       updatedBreakdown: newRank?.breakdown || null,
+      updatedScoreDetails: newRank?.scoreDetails || null,
       pdfUrl: `/api/v1/resumes/${tailoredResumeId}/file`,
       downloadUrl: `/api/v1/resumes/${tailoredResumeId}/download`,
       appliedSuggestion: {

@@ -486,15 +486,21 @@ export async function rankJobsBatch(
       if (responsibilityMatches.length) {
         const supported = responsibilityMatches.filter(r => r.supported).length;
         const total = responsibilityMatches.length;
-        const coverageRatio = total > 0 ? supported / total : 0;
-        const avg = total > 0 ? responsibilityMatches.reduce((sum, r) => sum + r.similarity, 0) / total : 0;
         if (supported === 0) {
           responsibilitySemantic = 0;
         } else if (supported === total) {
           responsibilitySemantic = 25;
         } else {
-          const scoreRatio = (coverageRatio * 0.65) + (Math.min(1, Math.max(0, avg / 0.50)) * 0.35);
-          responsibilitySemantic = Math.round(scoreRatio * 25);
+          // Continuous per-responsibility scoring: combines coverage validation (50%)
+          // and similarity depth (50%) so improvements on each bullet register responsively.
+          const totalPoints = responsibilityMatches.reduce((sum, r) => {
+            if (!r.supported && r.similarity < 0.25) return sum;
+            const depth = Math.min(1, Math.max(0, (r.similarity - 0.20) / 0.45));
+            const itemVal = (r.supported ? 0.50 : 0.15) + (depth * 0.50);
+            return sum + Math.min(1, itemVal);
+          }, 0);
+          const scoreRatio = total > 0 ? totalPoints / total : 0;
+          responsibilitySemantic = Math.min(25, Math.round(scoreRatio * 25));
         }
         evidence.push(vec.size ? `Responsibility coverage ${supported}/${responsibilityMatches.length} via ${modelId}` : 'Keyword-only fallback; semantic responsibility evidence unavailable');
       } else if (vec.size && resumeChunks.length) {

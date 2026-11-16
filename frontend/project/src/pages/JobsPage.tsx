@@ -224,7 +224,13 @@ function JobDetail({
   onRecheck?: () => void;
   onReportClosed?: () => void;
   checking?: boolean;
-  onScoreUpdate?: (jobId: string, updatedAtsScore: number, updatedSemanticScore: number) => void;
+  onScoreUpdate?: (
+    jobId: string,
+    updatedAtsScore: number,
+    updatedSemanticScore: number,
+    updatedBreakdown?: Record<string, number> | BreakdownItem[] | null,
+    updatedScoreDetails?: ScoreDetails | null
+  ) => void;
 }) {
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [isTailoring, setIsTailoring] = useState(false);
@@ -559,8 +565,8 @@ function JobDetail({
             jobTitle={displayValue(job.title) || 'Role'}
             companyName={displayValue(job.company) || ''}
             initialSuggestions={inlineSuggestions}
-            onScoreUpdated={(ats, semantic) => {
-              onScoreUpdate?.(String(job.id ?? job.jobId), ats, semantic);
+            onScoreUpdated={(ats, semantic, breakdown, scoreDetails) => {
+              onScoreUpdate?.(String(job.id ?? job.jobId), ats, semantic, breakdown, scoreDetails);
             }}
             onClose={() => setIsTailoring(false)}
           />
@@ -604,15 +610,29 @@ export default function JobsPage() {
   const [roleDiscovery, setRoleDiscovery] = useState<any>(null);
   const [roleDiscoveryError, setRoleDiscoveryError] = useState('');
 
-  const handleScoreUpdate = useCallback((jobId: string, _updatedAts: number, updatedSemantic: number) => {
+  const handleScoreUpdate = useCallback((
+    jobId: string,
+    _updatedAts: number,
+    updatedSemantic: number,
+    updatedBreakdown?: Record<string, number> | BreakdownItem[] | null,
+    updatedScoreDetails?: ScoreDetails | null
+  ) => {
     setJobs((prevJobs) =>
       prevJobs.map((job) => {
         const id = String(job.id ?? job.jobId);
         if (id === jobId) {
+          let mappedBreakdown = job.breakdown;
+          if (updatedBreakdown) {
+            mappedBreakdown = Array.isArray(updatedBreakdown)
+              ? updatedBreakdown
+              : Object.entries(updatedBreakdown).map(([label, value]) => ({ label, value: Number(value) }));
+          }
           return {
             ...job,
             fitScore: updatedSemantic,
             matchScore: updatedSemantic,
+            breakdown: mappedBreakdown,
+            scoreDetails: updatedScoreDetails ?? job.scoreDetails,
           };
         }
         return job;

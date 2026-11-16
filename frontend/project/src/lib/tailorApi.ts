@@ -38,6 +38,8 @@ export interface ApplySuggestionResult {
   previousScores: ScoreBreakdown;
   updatedScores: ScoreBreakdown;
   scoreDelta: ScoreDelta;
+  updatedBreakdown?: Record<string, number> | null;
+  updatedScoreDetails?: any;
   pdfUrl: string;
   downloadUrl?: string;
   appliedSuggestion?: {

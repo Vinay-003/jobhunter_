@@ -26,7 +26,12 @@ export interface ResumeTailorStudioProps {
   jobTitle?: string;
   companyName?: string;
   initialSuggestions?: TailorSuggestion[];
-  onScoreUpdated?: (updatedAtsScore: number, updatedSemanticScore: number) => void;
+  onScoreUpdated?: (
+    updatedAtsScore: number,
+    updatedSemanticScore: number,
+    updatedBreakdown?: Record<string, number> | null,
+    updatedScoreDetails?: any
+  ) => void;
   onClose?: () => void;
 }
 
@@ -75,33 +80,6 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
         const existing = await fetchExistingTailoredResume(resumeId, jobId);
         if (existing?.tailoredResume?.id) {
           setExistingTailoredId(existing.tailoredResume.id);
-          if (
-            typeof existing.tailoredResume.atsScore === 'number' &&
-            typeof existing.tailoredResume.semanticScore === 'number'
-          ) {
-            // Set existing score banner if available
-            setActiveBanner({
-              success: true,
-              tailoredResumeId: existing.tailoredResume.id,
-              storagePath: existing.tailoredResume.storagePath || '',
-              previousScores: {
-                atsScore: existing.tailoredResume.atsScore,
-                semanticScore: existing.tailoredResume.semanticScore,
-              },
-              updatedScores: {
-                atsScore: existing.tailoredResume.atsScore,
-                semanticScore: existing.tailoredResume.semanticScore,
-              },
-              scoreDelta: {
-                atsDelta: 0,
-                semanticDelta: 0,
-              },
-              pdfUrl: existing.tailoredResume.pdfUrl || `/api/v1/resumes/${existing.tailoredResume.id}/file`,
-              downloadUrl:
-                existing.tailoredResume.downloadUrl ||
-                `/api/v1/resumes/${existing.tailoredResume.id}/download`,
-            });
-          }
         }
       } catch {
         // Non-fatal if existing check fails
@@ -163,7 +141,9 @@ export const ResumeTailorStudio: React.FC<ResumeTailorStudioProps> = ({
         ) {
           onScoreUpdated?.(
             result.updatedScores.atsScore,
-            result.updatedScores.semanticScore
+            result.updatedScores.semanticScore,
+            result.updatedBreakdown,
+            result.updatedScoreDetails
           );
         }
       }

@@ -134,7 +134,84 @@ export function generateDeterministicSuggestions(
   const suggestions: TailorSuggestion[] = [];
   let sugId = 1;
 
-  // Inspect experience bullets
+  const buildGapRewrite = (bullet: string, gap: string): { rewrite: string; rationale: string } | null => {
+    const targetGap = (gap || '').toLowerCase();
+    const missingSkillList = (job.missingSkills || []).map((s) => s.toLowerCase());
+    const hasSkill = (s: string) => whitelist.has(s.toLowerCase());
+    const trimmed = bullet.replace(/[.;\s]+$/, '');
+
+    // 1. Debugging, code reviews, testing, quality assurance, documentation gaps
+    if (
+      targetGap.includes('debug') ||
+      targetGap.includes('review') ||
+      targetGap.includes('test') ||
+      targetGap.includes('quality') ||
+      targetGap.includes('document')
+    ) {
+      return {
+        rewrite: `${trimmed}, conducting rigorous debugging and peer code reviews while maintaining comprehensive technical documentation for release stability.`,
+        rationale: `Directly evidences debugging, code review practices, and documentation standards to satisfy target quality responsibilities.`,
+      };
+    }
+    // 2. Target API / Backend / Microservices / REST gaps
+    if (
+      targetGap.includes('api') ||
+      targetGap.includes('backend') ||
+      targetGap.includes('service') ||
+      missingSkillList.some((s) => s.includes('rest') || s.includes('api'))
+    ) {
+      const apiSkill = hasSkill('rest') ? 'REST API design' : hasSkill('fastapi') ? 'FastAPI service' : 'modular API';
+      return {
+        rewrite: `${trimmed}, incorporating structured ${apiSkill} and modular backend architecture to ensure reliable inter-service communication.`,
+        rationale: `Evidences structured API design and backend architecture to directly bridge service integration gaps.`,
+      };
+    }
+    // 3. Target Cloud / Infrastructure / Pipeline / Deployment gaps
+    if (
+      targetGap.includes('cloud') ||
+      targetGap.includes('deploy') ||
+      targetGap.includes('pipeline') ||
+      targetGap.includes('infrastructure') ||
+      targetGap.includes('geospatial')
+    ) {
+      return {
+        rewrite: `${trimmed}, establishing automated cloud deployment pipelines and reliable multi-environment data workflows.`,
+        rationale: `Demonstrates cloud deployment and data pipeline engineering to satisfy target infrastructure criteria.`,
+      };
+    }
+    // 4. Target UI / Visualization / Frontend / Dashboard gaps
+    if (
+      targetGap.includes('ui') ||
+      targetGap.includes('visual') ||
+      targetGap.includes('dashboard') ||
+      targetGap.includes('component')
+    ) {
+      return {
+        rewrite: `${trimmed}, engineering responsive UI components and data visualization interfaces for intuitive real-time monitoring.`,
+        rationale: `Evidences frontend UI and data visualization capabilities to meet user interface engineering requirements.`,
+      };
+    }
+    // 5. Target Collaboration / Teamwork / Cross-functional gaps
+    if (
+      targetGap.includes('collaborat') ||
+      targetGap.includes('senior') ||
+      targetGap.includes('ramp') ||
+      targetGap.includes('team')
+    ) {
+      return {
+        rewrite: `${trimmed}, collaborating closely with cross-functional engineers to accelerate release cycles and technical alignment.`,
+        rationale: `Demonstrates close engineering collaboration and rapid codebase onboarding to fulfill team delivery expectations.`,
+      };
+    }
+
+    return null;
+  };
+
+  const gaps = (job.unmatchedResponsibilities && job.unmatchedResponsibilities.length > 0)
+    ? job.unmatchedResponsibilities
+    : (job.responsibilities || []);
+
+  // Inspect experience bullets — Gap bridging FIRST
   const expEntries = candidate.profile.experience || [];
   for (let itemIdx = 0; itemIdx < expEntries.length; itemIdx++) {
     const exp = expEntries[itemIdx];
@@ -147,91 +224,37 @@ export function generateDeterministicSuggestions(
       let rewrite: string | null = null;
       let rationale: string = '';
 
-      // Check for weak phrases
-      for (const weak of WEAK_PHRASES) {
-        const regex = new RegExp(`\\b${weak}\\b`, 'i');
-        if (regex.test(bullet)) {
-          const sug = WEAK_PHRASE_SUGGESTIONS[weak];
-          const repl = sug ? sug.alternatives[0] : 'Engineered';
-          rewrite = bullet.replace(regex, repl);
-          rationale = `Replaced passive phrase "${weak}" with strong action verb "${repl}" to increase ATS impact.`;
-          break;
+      // 1. Substantive gap enhancement (PRIMARY)
+      if (gaps.length > 0) {
+        const gapIdx = (suggestions.length) % gaps.length;
+        const gapResult = buildGapRewrite(bullet, gaps[gapIdx]);
+        if (gapResult) {
+          rewrite = gapResult.rewrite;
+          rationale = gapResult.rationale;
         }
       }
 
-      // Check for repeated / generic built / worked verbs
+      // 2. Check for weak phrases if no gap rewrite
+      if (!rewrite) {
+        for (const weak of WEAK_PHRASES) {
+          const regex = new RegExp(`\\b${weak}\\b`, 'i');
+          if (regex.test(bullet)) {
+            const sug = WEAK_PHRASE_SUGGESTIONS[weak];
+            const repl = sug ? sug.alternatives[0] : 'Engineered';
+            rewrite = bullet.replace(regex, repl);
+            rationale = `Replaced passive phrase "${weak}" with strong action verb "${repl}" to increase ATS impact.`;
+            break;
+          }
+        }
+      }
+
+      // 3. Check for repeated / generic built / worked verbs
       if (!rewrite) {
         const firstWord = bullet.trim().split(/\s+/)[0]?.toLowerCase();
         if (firstWord && VERB_ALTERNATIVES[firstWord]) {
           const repl = VERB_ALTERNATIVES[firstWord][0];
           rewrite = bullet.replace(new RegExp(`^${firstWord}\\b`, 'i'), repl);
           rationale = `Replaced generic verb "${firstWord}" with higher-impact leadership verb "${repl}".`;
-        }
-      }
-
-      // Substantive domain enhancement: weave in target-aligned verified skills and gap coverage
-      if (!rewrite || rewrite === bullet) {
-        const gaps = (job.unmatchedResponsibilities && job.unmatchedResponsibilities.length > 0)
-          ? job.unmatchedResponsibilities
-          : (job.responsibilities || []);
-        const gapIdx = (suggestions.length) % Math.max(1, gaps.length);
-        const targetGap = (gaps[gapIdx] || '').toLowerCase();
-        const missingSkillList = (job.missingSkills || []).map((s) => s.toLowerCase());
-        const hasSkill = (s: string) => whitelist.has(s.toLowerCase());
-        const trimmed = bullet.replace(/[.;\s]+$/, '');
-
-        // 1. Debugging, code reviews, testing, quality assurance, documentation gaps
-        if (
-          targetGap.includes('debug') ||
-          targetGap.includes('review') ||
-          targetGap.includes('test') ||
-          targetGap.includes('quality') ||
-          targetGap.includes('document')
-        ) {
-          rewrite = `${trimmed}, conducting rigorous debugging and peer code reviews while maintaining comprehensive technical documentation for release stability.`;
-          rationale = `Directly evidences debugging, code review practices, and documentation standards to satisfy target quality responsibilities.`;
-        }
-        // 2. Target API / Backend / Microservices / REST gaps
-        else if (
-          targetGap.includes('api') ||
-          targetGap.includes('backend') ||
-          targetGap.includes('service') ||
-          missingSkillList.some((s) => s.includes('rest') || s.includes('api'))
-        ) {
-          const apiSkill = hasSkill('rest') ? 'REST API design' : hasSkill('fastapi') ? 'FastAPI service' : 'modular API';
-          rewrite = `${trimmed}, incorporating structured ${apiSkill} and modular backend architecture to ensure reliable inter-service communication.`;
-          rationale = `Evidences structured API design and backend architecture to directly bridge service integration gaps.`;
-        }
-        // 3. Target Cloud / Infrastructure / Pipeline / Deployment gaps
-        else if (
-          targetGap.includes('cloud') ||
-          targetGap.includes('deploy') ||
-          targetGap.includes('pipeline') ||
-          targetGap.includes('infrastructure') ||
-          targetGap.includes('geospatial')
-        ) {
-          rewrite = `${trimmed}, establishing automated cloud deployment pipelines and reliable multi-environment data workflows.`;
-          rationale = `Demonstrates cloud deployment and data pipeline engineering to satisfy target infrastructure criteria.`;
-        }
-        // 4. Target UI / Visualization / Frontend / Dashboard gaps
-        else if (
-          targetGap.includes('ui') ||
-          targetGap.includes('visual') ||
-          targetGap.includes('dashboard') ||
-          targetGap.includes('component')
-        ) {
-          rewrite = `${trimmed}, engineering responsive UI components and data visualization interfaces for intuitive real-time monitoring.`;
-          rationale = `Evidences frontend UI and data visualization capabilities to meet user interface engineering requirements.`;
-        }
-        // 5. Target Collaboration / Teamwork / Cross-functional gaps
-        else if (
-          targetGap.includes('collaborat') ||
-          targetGap.includes('senior') ||
-          targetGap.includes('ramp') ||
-          targetGap.includes('team')
-        ) {
-          rewrite = `${trimmed}, collaborating closely with cross-functional engineers to accelerate release cycles and technical alignment.`;
-          rationale = `Demonstrates close engineering collaboration and rapid codebase onboarding to fulfill team delivery expectations.`;
         }
       }
 
@@ -259,7 +282,7 @@ export function generateDeterministicSuggestions(
   }
 
   // Inspect project bullets if more suggestions needed
-  if (suggestions.length < 3 && candidate.profile.projects) {
+  if (suggestions.length < 5 && candidate.profile.projects) {
     for (let pIdx = 0; pIdx < candidate.profile.projects.length; pIdx++) {
       const proj = candidate.profile.projects[pIdx];
       const bullets = proj.bullets?.map((b) => (typeof b === 'string' ? b : b.text)) || [];
@@ -269,13 +292,29 @@ export function generateDeterministicSuggestions(
         if (!bullet || bullet.length < 15) continue;
 
         let rewrite: string | null = null;
-        for (const weak of WEAK_PHRASES) {
-          const regex = new RegExp(`\\b${weak}\\b`, 'i');
-          if (regex.test(bullet)) {
-            const sug = WEAK_PHRASE_SUGGESTIONS[weak];
-            const repl = sug ? sug.alternatives[0] : 'Engineered';
-            rewrite = bullet.replace(regex, repl);
-            break;
+        let rationale: string = '';
+
+        // 1. Substantive gap enhancement for projects (PRIMARY)
+        if (gaps.length > 0) {
+          const gapIdx = (suggestions.length) % gaps.length;
+          const gapResult = buildGapRewrite(bullet, gaps[gapIdx]);
+          if (gapResult) {
+            rewrite = gapResult.rewrite;
+            rationale = gapResult.rationale;
+          }
+        }
+
+        // 2. Weak phrase check for projects
+        if (!rewrite) {
+          for (const weak of WEAK_PHRASES) {
+            const regex = new RegExp(`\\b${weak}\\b`, 'i');
+            if (regex.test(bullet)) {
+              const sug = WEAK_PHRASE_SUGGESTIONS[weak];
+              const repl = sug ? sug.alternatives[0] : 'Engineered';
+              rewrite = bullet.replace(regex, repl);
+              rationale = `Replaced "${weak}" with strong active verb "${repl}".`;
+              break;
+            }
           }
         }
 
@@ -289,7 +328,7 @@ export function generateDeterministicSuggestions(
               bulletIndex: bIdx,
               originalText: bullet,
               suggestedText: rewrite,
-              rationale: `Upgraded project achievement statement with active outcome verb.`,
+              rationale: rationale || `Upgraded project achievement statement with active outcome verb.`,
               verifiedSkillsUsed: guard.verifiedSkillsUsed,
               status: 'pending',
             });
