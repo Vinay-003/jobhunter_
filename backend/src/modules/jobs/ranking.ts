@@ -470,11 +470,21 @@ export async function rankJobsBatch(
         evidence.push(vec.size ? `Responsibility coverage ${supported}/${responsibilityMatches.length} via ${modelId}` : 'Keyword-only fallback; semantic responsibility evidence unavailable');
       } else if (vec.size && resumeChunks.length) {
         // Unstructured JD or snippet: compute semantic similarity directly between resume chunks and jobDesc
-        const scores = resumeChunks.map(rc => pairScore(rc, jobDesc)).sort((a, b) => b - a);
-        const top = scores.slice(0, 3);
-        const avg = top.length ? top.reduce((a, b) => a + b, 0) / top.length : 0;
+        const scoredChunks = resumeChunks.map(rc => ({ rc, score: pairScore(rc, jobDesc) })).sort((a, b) => b.score - a.score);
+        const top = scoredChunks.slice(0, 3);
+        const avg = top.length ? top.reduce((sum, item) => sum + item.score, 0) / top.length : 0;
         const effectiveAvg = Math.min(1, Math.max(0, avg / 0.55));
         responsibilitySemantic = Math.round(effectiveAvg * 25);
+        const topChunk = scoredChunks[0];
+        const rawCosine = topChunk ? Math.max(-1, Math.min(1, topChunk.score * .6 + .35)) : 0;
+        const supported = Boolean(topChunk && (topChunk.score >= 0.30 || rawCosine >= 0.40));
+        responsibilityMatches.push({
+          responsibility: `Job description scope & responsibilities (${job.title || 'Role'})`,
+          evidence: supported && topChunk ? topChunk.rc.slice(0, 140) : null,
+          similarity: topChunk ? topChunk.score : 0,
+          rawCosine,
+          supported,
+        });
         evidence.push(`Job description semantic alignment: ${Math.round(avg * 100)}% via ${modelId}`);
       } else {
         evidence.push('Semantic responsibility evidence unavailable');

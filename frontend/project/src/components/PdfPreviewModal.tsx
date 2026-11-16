@@ -89,7 +89,7 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
         </div>
 
         {/* PDF Frame */}
-        <div className="relative flex-1 w-full bg-stone-900/50">
+        <div className="relative flex-1 w-full bg-stone-100">
           <iframe
             src={pdfUrl}
             title={title}
@@ -98,12 +98,12 @@ export const PdfPreviewModal: React.FC<PdfPreviewModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-3 border-t border-stone-800 bg-stone-950 text-xs text-stone-500">
+        <div className="flex items-center justify-between px-6 py-3 border-t border-stone-200 bg-stone-50 text-xs text-stone-600">
           <span>Single-column, text-extractable ATS standard formatting</span>
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1 rounded bg-stone-800 hover:bg-stone-700 text-stone-300 transition-colors"
+            className="px-3 py-1 rounded bg-stone-200 hover:bg-stone-300 text-stone-700 font-medium transition-colors"
           >
             Close
           </button>

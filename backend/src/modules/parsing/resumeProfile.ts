@@ -197,7 +197,7 @@ export function buildParsedResumeSections(doc: ParsedDocument, prof: ResumeProfi
 } {
   const lines = doc.normalizedText.split('\n').map(l => l.trim()).filter(Boolean);
   const email = doc.normalizedText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)?.[0] ?? null;
-  const phone = doc.normalizedText.match(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)?.[0] ?? null;
+  const phone = doc.normalizedText.match(/(?:\+91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}|(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)?.[0] ?? null;
   const headerLines: string[] = [];
   for (const line of lines) {
     if (/^(?:professional summary|summary|technical skills|skills|professional experience|experience)/i.test(line)) break;
@@ -211,7 +211,7 @@ export function buildParsedResumeSections(doc: ParsedDocument, prof: ResumeProfi
   const parts = contactLine.split('|').map(s => s.trim());
   const location = parts.find(p => !p.includes('@') && !p.includes('+') && !p.includes('.com') && !p.includes('http')
     && !/^(?:linkedin|github|gitlab|portfolio|twitter|medium|behance|leetcode|hackerrank|website|email|phone)$/i.test(p)) || null;
-  const links = parts.filter(p => !p.includes('@') && (p.includes('.com') || p.includes('http') || p.includes('github') || p.includes('linkedin')));
+  const links = parts.filter(p => !p.includes('@') && (p.toLowerCase().includes('.com') || p.toLowerCase().includes('http') || p.toLowerCase().includes('github') || p.toLowerCase().includes('linkedin') || p.toLowerCase().includes('portfolio')));
 
   const contactInfo: ContactInfo = { name, title: targetRole, email, phone, location, links };
 

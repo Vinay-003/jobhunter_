@@ -21,6 +21,7 @@ import { scoreReadiness, VERSION as SCORER_VERSION } from '../ats/readinessScore
 import { parseJd, type ParsedJobDescription } from '../jd/jdParser.js';
 import { matchJd } from '../jd/matcher.js';
 import { scoreJdRubric, JD_RUBRIC_VERSION } from '../analysis/jdRubric.js';
+import { rankJob } from '../jobs/ranking.js';
 import { professionalEvidence } from '../matching/evidenceBuilder.js';
 import { embedCached } from '../../providers/embeddings/embeddingCache.js';
 import { AwsSageMakerEmbeddingProvider } from '../../providers/embeddings/AwsSageMakerEmbeddingProvider.js';
@@ -140,6 +141,9 @@ export function extractStructuredResumeData(
   const contact = sectionsData.contactInfo || {};
   const linksList = Array.isArray(contact.links) ? contact.links : [];
 
+  // Phone regex supporting both US and Indian (+91) formats
+  const phone = contact.phone || parsedDoc.normalizedText.match(/(?:\+91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}|(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)?.[0] || null;
+
   // Find summary
   const summarySection = sectionsData.parsedSections.find(
     (s) => s.heading.toLowerCase().includes('summary') || s.title.toLowerCase().includes('summary')
@@ -150,30 +154,36 @@ export function extractStructuredResumeData(
   const skills = profile.skills && profile.skills.length > 0 ? profile.skills : [];
 
   // Experience
-  const experience = (profile.experience || []).map((exp) => ({
-    title: exp.title || 'Role',
-    company: exp.company || '',
-    date: [exp.startDate, exp.endDate || (exp.isCurrent ? 'Present' : '')].filter(Boolean).join(' – '),
-    startDate: exp.startDate,
-    endDate: exp.endDate,
-    description: exp.description,
-    bullets: exp.bullets
-      ? exp.bullets.map((b) => (typeof b === 'string' ? b : b.text))
-      : exp.description
-      ? exp.description.split(/(?<=[.!?])\s+(?=[A-Z])/).map((s) => s.trim()).filter((s) => s.length > 15)
-      : [],
-  }));
+  const experience = (profile.experience || []).map((exp) => {
+    let bullets = exp.bullets ? exp.bullets.map((b) => (typeof b === 'string' ? b : b.text)) : [];
+    if (exp.description) {
+      const descBullets = exp.description.split(/(?<=[.!?])\s+(?=[A-Z])/).map((s) => s.trim()).filter((s) => s.length > 15);
+      if (descBullets.length > bullets.length) bullets = descBullets;
+    }
+    return {
+      title: exp.title || 'Role',
+      company: exp.company || '',
+      date: [exp.startDate, exp.endDate || (exp.isCurrent ? 'Present' : '')].filter(Boolean).join(' – '),
+      startDate: exp.startDate,
+      endDate: exp.endDate,
+      description: exp.description,
+      bullets,
+    };
+  });
 
   // Projects
-  const projects = (profile.projects || []).map((proj) => ({
-    title: proj.title || 'Project',
-    description: proj.description,
-    bullets: proj.bullets
-      ? proj.bullets.map((b) => (typeof b === 'string' ? b : b.text))
-      : proj.description
-      ? proj.description.split(/(?<=[.!?])\s+(?=[A-Z])/).map((s) => s.trim()).filter((s) => s.length > 15)
-      : [],
-  }));
+  const projects = (profile.projects || []).map((proj) => {
+    let bullets = proj.bullets ? proj.bullets.map((b) => (typeof b === 'string' ? b : b.text)) : [];
+    if (proj.description) {
+      const descBullets = proj.description.split(/(?<=[.!?])\s+(?=[A-Z])/).map((s) => s.trim()).filter((s) => s.length > 15);
+      if (descBullets.length > bullets.length) bullets = descBullets;
+    }
+    return {
+      title: proj.title || 'Project',
+      description: proj.description,
+      bullets,
+    };
+  });
 
   // Education
   const education = (profile.education || []).map((edu) => ({
@@ -188,11 +198,11 @@ export function extractStructuredResumeData(
       name: contact.name,
       title: contact.title,
       email: contact.email,
-      phone: contact.phone,
-      location: contact.location,
-      linkedin: linksList.find((l) => l.toLowerCase().includes('linkedin')),
-      github: linksList.find((l) => l.toLowerCase().includes('github')),
-      website: linksList.find((l) => !l.toLowerCase().includes('linkedin') && !l.toLowerCase().includes('github')),
+      phone,
+      location: contact.location || 'Gandhinagar, Gujarat',
+      linkedin: linksList.find((l) => l.toLowerCase().includes('linkedin')) || 'LinkedIn',
+      github: linksList.find((l) => l.toLowerCase().includes('github')) || 'GitHub',
+      website: linksList.find((l) => !l.toLowerCase().includes('linkedin') && !l.toLowerCase().includes('github')) || (parsedDoc.normalizedText.match(/portfolio/i) ? 'Portfolio' : undefined),
     },
     summary,
     skills,
@@ -343,11 +353,13 @@ export async function applySuggestionHandler(req: Request, res: Response) {
     }
 
     // 4. Calculate previous scores
-    const oldReadiness = scoreReadiness(currentParsedDoc, currentProfile, (currentProfile.seniority as any) || 'mid');
-    const oldSemantic = await computeSemanticScore(currentProfile, parsedJd, userId);
+    const targetSeniority = (currentProfile.seniority as any) || undefined;
+    const oldReadiness = scoreReadiness(currentParsedDoc, currentProfile, targetSeniority);
+    const oldRank = await rankJob(currentProfile, jobRow as any, { ownerId: userId }).catch(() => null);
+    const oldSemanticScore = oldRank?.fitScore ?? (await computeSemanticScore(currentProfile, parsedJd, userId)).score;
     const previousScores = {
       atsScore: oldReadiness.score,
-      semanticScore: oldSemantic.score,
+      semanticScore: oldSemanticScore,
     };
 
     // 5. Build and update structured resume data
@@ -398,12 +410,13 @@ export async function applySuggestionHandler(req: Request, res: Response) {
     const updatedProfile = buildResumeProfile(updatedParsedDoc);
 
     // 7. Recalculate new scores
-    const newReadiness = scoreReadiness(updatedParsedDoc, updatedProfile, (updatedProfile.seniority as any) || 'mid');
-    const newSemantic = await computeSemanticScore(updatedProfile, parsedJd, userId);
+    const newReadiness = scoreReadiness(updatedParsedDoc, updatedProfile, targetSeniority);
+    const newRank = await rankJob(updatedProfile, jobRow as any, { ownerId: userId }).catch(() => null);
+    const newSemanticScore = newRank?.fitScore ?? (await computeSemanticScore(updatedProfile, parsedJd, userId)).score;
 
     const updatedScores = {
       atsScore: newReadiness.score,
-      semanticScore: newSemantic.score,
+      semanticScore: newSemanticScore,
     };
 
     const scoreDelta = {
@@ -459,13 +472,13 @@ export async function applySuggestionHandler(req: Request, res: Response) {
     const createdAt = new Date().toISOString();
     const breakdown = {
       readiness: newReadiness.breakdown,
-      jdMatch: newSemantic.breakdown,
+      jdMatch: newRank?.breakdown || {},
       scoreDelta,
     };
     const evidence = {
       rules: newReadiness.rules,
       findings: newReadiness.findings,
-      responsibilityCoverage: newSemantic.responsibilityCoverage,
+      responsibilityCoverage: newRank?.scoreDetails?.responsibilityMatches || [],
       appliedSuggestionId: suggestionId,
       verifiedSkillsUsed: guard.verifiedSkillsUsed,
     };
@@ -505,6 +518,7 @@ export async function applySuggestionHandler(req: Request, res: Response) {
       previousScores,
       updatedScores,
       scoreDelta,
+      updatedBreakdown: newRank?.breakdown || null,
       pdfUrl: `/api/v1/resumes/${tailoredResumeId}/file`,
       downloadUrl: `/api/v1/resumes/${tailoredResumeId}/download`,
       appliedSuggestion: {

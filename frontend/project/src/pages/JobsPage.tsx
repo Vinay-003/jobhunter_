@@ -578,6 +578,7 @@ export default function JobsPage() {
     return r?.fileName || r?.file_name || '';
   }, [resumes, selectedResume]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -833,7 +834,13 @@ export default function JobsPage() {
       return (scoreOf(b) - scoreOf(a)) || ((a.eligibility?.status === 'eligible' ? 0 : 1) - (b.eligibility?.status === 'eligible' ? 0 : 1));
     });
   }, [jobs, prefs.minScore, searchText, listLocation, sortBy]);
-  const selected = visibleJobs[Math.min(selectedIndex, Math.max(0, visibleJobs.length - 1))];
+  const selected = useMemo(() => {
+    if (selectedJobId) {
+      const found = visibleJobs.find((j) => String(j.id ?? j.jobId) === selectedJobId);
+      if (found) return found;
+    }
+    return visibleJobs[Math.min(selectedIndex, Math.max(0, visibleJobs.length - 1))];
+  }, [visibleJobs, selectedJobId, selectedIndex]);
   const topMatches = visibleJobs.filter((job) => scoreOf(job) >= 75).length;
   const [reportCopied, setReportCopied] = useState(false);
   const copyMatches = async () => {
@@ -1114,7 +1121,22 @@ export default function JobsPage() {
                   )}
                 </button>
               </div>
-             <div>{visibleJobs.map((job, index) => <JobCard key={String(job.id ?? job.jobId ?? `${job.title}-${job.company}-${index}`)} job={job} active={index === selectedIndex} onSelect={() => {setSelectedIndex(index);setMobileDetail(true);}} />)}</div>
+             <div>{visibleJobs.map((job, index) => {
+               const jId = String(job.id ?? job.jobId);
+               const isActive = selected ? String(selected.id ?? selected.jobId) === jId : index === selectedIndex;
+               return (
+                 <JobCard
+                   key={jId || `${job.title}-${job.company}-${index}`}
+                   job={job}
+                   active={isActive}
+                   onSelect={() => {
+                     setSelectedJobId(jId);
+                     setSelectedIndex(index);
+                     setMobileDetail(true);
+                   }}
+                 />
+               );
+             })}</div>
              {nextOffset !== null && <button className="jh-button-ghost mt-4 w-full" disabled={loadingMore} onClick={loadMore}>{loadingMore ? 'Loading…' : `Load more (${jobs.length} of ${total})`}</button>}
            </div>
 

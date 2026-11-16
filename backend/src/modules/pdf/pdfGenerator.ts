@@ -206,9 +206,9 @@ export function isWinAnsiEncodable(charCode: number): boolean {
 export function sanitizePdfText(text: string | null | undefined): string {
   if (!text) return '';
 
-  // 1. Strip emojis and extended pictographics
+  // 1. Strip emojis and extended pictographics (exclude Emoji_Component which incorrectly matches ASCII digits 0-9)
   let sanitized = text.replace(
-    /[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier_Base}\p{Emoji_Modifier}\p{Emoji_Component}]/gu,
+    /[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier_Base}\p{Emoji_Modifier}]/gu,
     ''
   );
 
