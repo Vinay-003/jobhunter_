@@ -303,18 +303,29 @@ Return a valid JSON object with a single key "suggestions" containing an array o
 
   const userPrompt = `Target Job Title: ${job.title}
 Target Company: ${job.company || 'Not specified'}
-Job Required Skills: ${job.requiredSkills.join(', ')}
-Job Preferred Skills: ${job.preferredSkills.join(', ')}
+Job Required Skills: ${job.requiredSkills.length ? job.requiredSkills.join(', ') : 'Not explicitly listed'}
+Job Preferred Skills: ${job.preferredSkills.length ? job.preferredSkills.join(', ') : 'None'}
 Key Job Responsibilities:
-${job.responsibilities.slice(0, 6).map((r) => `- ${r}`).join('\n')}
+${job.responsibilities.length ? job.responsibilities.slice(0, 8).map((r) => `- ${r}`).join('\n') : 'See Job Description below.'}
+
+Target Role Description & Context:
+"""
+${(job.description || '').slice(0, 2000)}
+"""
 
 Candidate Experience Bullets available to improve:
 ${JSON.stringify(experienceBullets.slice(0, 10), null, 2)}
 
 Candidate Project Bullets available to improve:
-${JSON.stringify(projectBullets.slice(0, 6), null, 2)}
+${JSON.stringify(projectBullets.slice(0, 8), null, 2)}
 
-Provide up to 5 highest-impact bullet rewrite suggestions that improve ATS friendliness and semantic similarity for this role, while strictly adhering to the candidate verified skills whitelist.`;
+TASK:
+Provide up to 5 customized bullet rewrite suggestions specifically tailored to ${job.company || 'this role'} and its technical requirements.
+- Target specific bullets from Candidate Experience or Project lists.
+- Set "section" to "experience" when rewriting an experience bullet, or "projects" when rewriting a project bullet.
+- Highlight candidate skills from the whitelist that are most relevant to ${job.title} at ${job.company || 'the target company'}.
+- Replace generic phrasing with high-impact engineering action verbs and clear achievements.
+- Strictly adhere to the candidate verified skills whitelist.`;
 
   try {
     const response = await axios.post(
@@ -363,10 +374,51 @@ Provide up to 5 highest-impact bullet rewrite suggestions that improve ATS frien
     let sugCounter = 1;
 
     for (const raw of rawSuggestions) {
-      if (!raw.originalText || !raw.suggestedText) continue;
+      let original = '';
+      let suggested = '';
+      let rationale = 'Tailored to improve ATS friendliness and role alignment.';
+      let rawSection = '';
 
-      const original = String(raw.originalText).trim();
-      const suggested = String(raw.suggestedText).trim();
+      if (typeof raw === 'string') {
+        suggested = raw.trim();
+        const allCandidates = [...experienceBullets, ...projectBullets];
+        let bestScore = 0;
+        let bestBullet: typeof allCandidates[0] | null = null;
+        for (const cb of allCandidates) {
+          const words = cb.text.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+          const matches = words.filter((w) => suggested.toLowerCase().includes(w)).length;
+          if (matches > bestScore) {
+            bestScore = matches;
+            bestBullet = cb;
+          }
+        }
+        if (bestBullet) {
+          original = bestBullet.text;
+        } else {
+          continue;
+        }
+      } else if (typeof raw === 'object' && raw !== null) {
+        suggested = String(raw.suggestedText || raw.text || raw.rewritten || raw.suggestion || '').trim();
+        original = String(raw.originalText || raw.original || '').trim();
+        rationale = String(raw.rationale || raw.why || 'Tailored to improve ATS friendliness and role alignment.').trim();
+        rawSection = String(raw.section || '');
+        if (!original && suggested) {
+          const allCandidates = [...experienceBullets, ...projectBullets];
+          let bestScore = 0;
+          let bestBullet: typeof allCandidates[0] | null = null;
+          for (const cb of allCandidates) {
+            const words = cb.text.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+            const matches = words.filter((w) => suggested.toLowerCase().includes(w)).length;
+            if (matches > bestScore) {
+              bestScore = matches;
+              bestBullet = cb;
+            }
+          }
+          if (bestBullet) original = bestBullet.text;
+        }
+      }
+
+      if (!original || !suggested) continue;
 
       // Programmatic Whitelist Guardrail Check
       const guard = validateSuggestionGuardrail(original, suggested, whitelist);
@@ -378,14 +430,36 @@ Provide up to 5 highest-impact bullet rewrite suggestions that improve ATS frien
         continue; // Discard invalid suggestion!
       }
 
+      // Deterministically resolve section & indices from candidate context
+      const expMatch = experienceBullets.find((b) => b.text === original || original.includes(b.text) || b.text.includes(original));
+      const projMatch = projectBullets.find((b) => b.text === original || original.includes(b.text) || b.text.includes(original));
+
+      let section: 'experience' | 'projects' = 'experience';
+      let itemIndex = 0;
+      let bulletIndex = 0;
+
+      if (projMatch && (!expMatch || rawSection === 'projects')) {
+        section = 'projects';
+        itemIndex = projMatch.itemIndex;
+        bulletIndex = projMatch.bulletIndex;
+      } else if (expMatch) {
+        section = 'experience';
+        itemIndex = expMatch.itemIndex;
+        bulletIndex = expMatch.bulletIndex;
+      } else {
+        section = (rawSection === 'projects' ? 'projects' : 'experience');
+        itemIndex = typeof (raw as any)?.itemIndex === 'number' ? (raw as any).itemIndex : 0;
+        bulletIndex = typeof (raw as any)?.bulletIndex === 'number' ? (raw as any).bulletIndex : 0;
+      }
+
       validatedSuggestions.push({
         id: `sug-${sugCounter++}`,
-        section: (raw.section === 'projects' ? 'projects' : 'experience') as 'experience' | 'projects',
-        itemIndex: typeof raw.itemIndex === 'number' ? raw.itemIndex : 0,
-        bulletIndex: typeof raw.bulletIndex === 'number' ? raw.bulletIndex : 0,
+        section,
+        itemIndex,
+        bulletIndex,
         originalText: original,
         suggestedText: suggested,
-        rationale: String(raw.rationale || 'Tailored to improve ATS friendliness and role alignment.').trim(),
+        rationale,
         verifiedSkillsUsed: guard.verifiedSkillsUsed,
         status: 'pending',
       });

@@ -133,10 +133,10 @@ router.get('/', requireSession, async (req:any,res)=>{
   try {
     let rows;
     try {
-      const r = await pool.query('SELECT id, original_filename as file_name, storage_object_path, sha256, file_size_bytes, page_count, processing_status as status, created_at as upload_date, is_latest FROM resumes WHERE user_id=$1 ORDER BY created_at DESC', [userId]);
+      const r = await pool.query('SELECT id, original_filename as file_name, storage_object_path, sha256, file_size_bytes, page_count, processing_status as status, created_at as upload_date, is_latest FROM resumes WHERE user_id=$1 AND parent_resume_id IS NULL AND job_id IS NULL ORDER BY created_at DESC', [userId]);
       rows = r.rows;
     } catch {
-      const r = await pool.query('SELECT * FROM resumes WHERE user_id=$1 ORDER BY created_at DESC', [userId]);
+      const r = await pool.query('SELECT * FROM resumes WHERE user_id=$1 AND parent_resume_id IS NULL AND job_id IS NULL ORDER BY created_at DESC', [userId]);
       rows = r.rows;
     }
     res.json({ success:true, resumes: rows.map((r:any)=>({ id:r.id, fileName:r.file_name || r.original_filename, uploadDate:r.upload_date || r.created_at, status:r.status, pageCount:r.page_count, sha256:r.sha256, isLatest:r.is_latest, storageBucket:r.storage_bucket }))});
