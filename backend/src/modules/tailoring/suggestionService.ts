@@ -40,6 +40,9 @@ export interface JobContext {
   preferredSkills: string[];
   responsibilities: string[];
   description?: string;
+  unmatchedResponsibilities?: string[];
+  missingSkills?: string[];
+  scoreBreakdownSummary?: string;
 }
 
 /**
@@ -273,18 +276,19 @@ export async function generateTailorSuggestions(
     return generateDeterministicSuggestions(candidate, job, whitelist);
   }
 
-  const systemPrompt = `You are an expert resume tailoring and ATS optimization engine. Your goal is to improve the candidate's resume for a specific target job without ANY user input.
+  const systemPrompt = `You are an expert resume tailoring and ATS/Semantic matching optimization engine. Your goal is to maximize the candidate's Job Similarity Score (Semantic Match) and ATS readiness for a specific target job.
 
-CRITICAL INTEGRITY CONSTRAINTS:
-1. You must NEVER invent, infer, or recommend adding any skill, technology, tool, credential, framework, or experience that the candidate does not already possess in their original resume or demonstrated in their projects.
-2. The candidate's verified skills whitelist is:
+CRITICAL OBJECTIVES & INTEGRITY CONSTRAINTS:
+1. TARGET SPECIFIC SCORING GAPS: Look closely at the "PRIMARY SCORING GAPS TO IMPROVE" section in the user prompt (unmatched responsibilities and missing criteria where candidate fit score is currently low). Your primary mission is to reframe and enhance the candidate's existing achievements so they directly evidence and semantically mirror those unmatched responsibilities.
+2. NO TRIVIAL / COSMETIC EDITS:
+   - Do NOT just substitute a single verb (e.g. NEVER change "Maintained" to "Sustained" or "Built" to "Developed" without adding substantive technical depth).
+   - Do NOT just insert a single buzzword like "production".
+   - Rewrites MUST substantive: clearly explain the architecture, engineering outcome, scale, or workflow (e.g., cloud data pipelines, visualization systems, API design, testing) using the candidate's actual projects and technologies.
+3. NEVER INVENT UNVERIFIED SKILLS OR FALSE CLAIMS:
+   - You must NEVER invent, infer, or recommend adding any skill, technology, tool, credential, framework, or experience that the candidate does not already possess.
+   - The candidate's verified skills whitelist is:
 ${candidateSkillsList.slice(0, 80).join(', ')}
-3. You may ONLY:
-   - Rephrase existing bullets to emphasize verified candidate skills that match target job requirements;
-   - Align bullet phrasing and vocabulary to directly reflect the target job responsibilities using candidate's actual accomplishments;
-   - Replace weak or passive phrasing (e.g. "worked on", "helped with", "responsible for") with strong, quantified action verbs (e.g. "Architected", "Engineered", "Optimized", "Scaled");
-   - Clarify metrics and outcomes without inventing false numbers.
-4. Any suggestion that introduces a skill absent from the candidate's verified skills whitelist will be automatically discarded by programmatic guardrails.
+   - Any suggestion introducing a skill absent from this whitelist will be programmatically rejected by guardrails.
 
 OUTPUT FORMAT:
 Return a valid JSON object with a single key "suggestions" containing an array of suggestion objects:
@@ -295,18 +299,28 @@ Return a valid JSON object with a single key "suggestions" containing an array o
       "itemIndex": 0,
       "bulletIndex": 1,
       "originalText": "exact original bullet text",
-      "suggestedText": "tailored high-impact bullet text",
-      "rationale": "Clear 1-sentence rationale explaining the ATS and semantic improvement"
+      "suggestedText": "tailored high-impact bullet text directly aligning with target gaps",
+      "rationale": "Clear 1-sentence rationale explaining which target responsibility/gap this solves and how it lifts job similarity"
     }
   ]
 }`;
+
+  const gapsSection = (job.unmatchedResponsibilities && job.unmatchedResponsibilities.length > 0)
+    ? `Target Responsibilities Currently UNMATCHED (Scoring Gaps):\n${job.unmatchedResponsibilities.map((r) => `  - [GAP] ${r}`).join('\n')}`
+    : `Key Job Responsibilities:\n${job.responsibilities.length ? job.responsibilities.slice(0, 8).map((r) => `  - ${r}`).join('\n') : 'See Job Description below.'}`;
+
+  const missingSkillsSection = (job.missingSkills && job.missingSkills.length > 0)
+    ? `Missing / Desired Skills: ${job.missingSkills.join(', ')}`
+    : '';
 
   const userPrompt = `Target Job Title: ${job.title}
 Target Company: ${job.company || 'Not specified'}
 Job Required Skills: ${job.requiredSkills.length ? job.requiredSkills.join(', ') : 'Not explicitly listed'}
 Job Preferred Skills: ${job.preferredSkills.length ? job.preferredSkills.join(', ') : 'None'}
-Key Job Responsibilities:
-${job.responsibilities.length ? job.responsibilities.slice(0, 8).map((r) => `- ${r}`).join('\n') : 'See Job Description below.'}
+
+PRIMARY SCORING GAPS TO IMPROVE:
+${gapsSection}
+${missingSkillsSection}
 
 Target Role Description & Context:
 """
@@ -320,11 +334,11 @@ Candidate Project Bullets available to improve:
 ${JSON.stringify(projectBullets.slice(0, 8), null, 2)}
 
 TASK:
-Provide up to 5 customized bullet rewrite suggestions specifically tailored to ${job.company || 'this role'} and its technical requirements.
+Provide up to 5 customized bullet rewrite suggestions specifically tailored to bridge the PRIMARY SCORING GAPS above for ${job.title} at ${job.company || 'the target company'}.
 - Target specific bullets from Candidate Experience or Project lists.
 - Set "section" to "experience" when rewriting an experience bullet, or "projects" when rewriting a project bullet.
-- Highlight candidate skills from the whitelist that are most relevant to ${job.title} at ${job.company || 'the target company'}.
-- Replace generic phrasing with high-impact engineering action verbs and clear achievements.
+- Reframe candidate's existing work to semantically cover the unmatched responsibilities (e.g. data pipelines, UI visualization, testing, cloud infrastructure) using ONLY verified candidate skills from the whitelist.
+- Reject superficial 1-word changes; make meaningful improvements that directly increase semantic job match.
 - Strictly adhere to the candidate verified skills whitelist.`;
 
   try {

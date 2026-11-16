@@ -114,7 +114,12 @@ async function executeRecommendationRun(ctx: RunContext): Promise<void> {
   const { runId, userId, resumeId, preferences, forceRefresh, startedAt } = ctx;
   const timings: Record<string, number> = {};
   try {
-    const resume = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
+    const resume = await pool.query(
+      `SELECT * FROM resumes 
+       WHERE (id=$1 OR (user_id=$2 AND parent_resume_id IS NULL AND job_id IS NULL)) AND user_id=$2 
+       ORDER BY (parent_resume_id IS NULL AND job_id IS NULL) DESC, created_at DESC LIMIT 1`,
+      [resumeId, userId]
+    );
     if (!resume.rows[0]) throw new Error('RESUME_NOT_FOUND');
     const profile = await ownedProfile(resume.rows[0]);
     if (!profile || !Array.isArray(profile.skills) || !Array.isArray(profile.experience)) throw new Error('PROFILE_UNAVAILABLE');
@@ -301,7 +306,12 @@ router.post('/', authenticate, workLimiter, validate({ body: createRunSchema }),
   const userId = String(req.user.id);
   const { resumeId, idempotencyKey, forceRefresh = false } = req.body;
   try {
-    const resume = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
+    const resume = await pool.query(
+      `SELECT * FROM resumes 
+       WHERE (id=$1 OR (user_id=$2 AND parent_resume_id IS NULL AND job_id IS NULL)) AND user_id=$2 
+       ORDER BY (parent_resume_id IS NULL AND job_id IS NULL) DESC, created_at DESC LIMIT 1`,
+      [resumeId, userId]
+    );
     if (!resume.rows[0]) return res.status(404).json({ success: false, message: 'Resume not found' });
     const saved = await pool.query('SELECT * FROM user_job_preferences WHERE user_id=$1', [userId]);
     const preferences = effectivePreferences(saved.rows[0], req.body);

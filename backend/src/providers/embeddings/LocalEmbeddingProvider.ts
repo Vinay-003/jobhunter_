@@ -50,8 +50,36 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       const current = new Map(this.cache);
       for (let start = 0; start < missing.length; start += MAX_BATCH) {
         const texts = missing.slice(start, start + MAX_BATCH);
-        const result = await this.request(texts);
-        if (result.error) throw new Error(`Local embedding worker: ${result.error}`);
+        let result: WorkerResponse;
+        try {
+          result = await this.request(texts);
+        } catch (reqErr: any) {
+          result = { id: -1, error: reqErr.message || 'Worker request failed' };
+        }
+        if (result.error || !result.vectors || result.vectors.length !== texts.length) {
+          console.warn(`[LocalEmbeddingProvider] batch slice failed: ${result.error} — attempting item-by-item recovery for ${texts.length} texts`);
+          const recoveredVectors: number[][] = [];
+          for (const singleText of texts) {
+            try {
+              const singleRes = await this.request([singleText]);
+              if (singleRes.vectors && singleRes.vectors.length === 1 && singleRes.vectors[0].length === this.dimension) {
+                recoveredVectors.push(singleRes.vectors[0]);
+                this.revision = singleRes.modelRevision ?? this.revision;
+              } else {
+                recoveredVectors.push(new Array(this.dimension).fill(0));
+              }
+            } catch {
+              recoveredVectors.push(new Array(this.dimension).fill(0));
+            }
+          }
+          result = {
+            id: 0,
+            vectors: recoveredVectors,
+            modelId: this.modelId,
+            modelRevision: this.revision,
+            dimension: this.dimension,
+          };
+        }
         if (result.modelId !== this.modelId || result.dimension !== this.dimension) throw new Error('Local embedding model identity mismatch');
         validateVectors(result.vectors, texts.length, this.dimension);
         this.revision = result.modelRevision ?? null;
@@ -76,7 +104,15 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       path.resolve(process.cwd(), 'python/venv/Scripts/python.exe'),
     ].filter(Boolean) as string[];
     const python = candidates.find(candidate => fs.existsSync(candidate)) ?? 'python3';
-    const worker = spawn(python, ['-u', SCRIPT, this.modelId], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1' } });
+    const worker = spawn(python, ['-u', SCRIPT, this.modelId], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        PYTHONIOENCODING: 'utf-8',
+        KMP_DUPLICATE_LIB_OK: 'TRUE',
+      },
+    });
     this.worker = worker;
     this.lines = readline.createInterface({ input: worker.stdout });
     this.lines.on('line', line => {
@@ -88,7 +124,12 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       this.pending.delete(reply.id);
       pending.resolve(reply);
     });
-    worker.stderr.on('data', () => { /* never log user text or worker tracebacks */ });
+    worker.stderr.on('data', d => {
+      const msg = d.toString();
+      if (!msg.includes('Loading weights') && !msg.includes('Warning: You are sending unauthenticated requests')) {
+        console.warn(`[LocalEmbeddingWorker] ${msg.trim()}`);
+      }
+    });
     worker.on('error', () => { if (this.worker === worker) this.stop(new Error('Local embedding worker unavailable')); });
     worker.on('exit', () => { if (this.worker === worker) this.stop(new Error('Local embedding worker exited')); });
   }

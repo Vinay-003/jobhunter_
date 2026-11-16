@@ -230,8 +230,14 @@ export async function getTailorSuggestionsHandler(req: Request, res: Response) {
   }
 
   try {
-    // 1. Fetch resume
-    const rRes = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
+    // 1. Fetch base master resume to guarantee a clean starting point
+    const rRes = await pool.query(
+      `SELECT * FROM resumes 
+       WHERE user_id=$2 AND (id=$1 OR (parent_resume_id IS NULL AND job_id IS NULL))
+       ORDER BY (parent_resume_id IS NULL AND job_id IS NULL) DESC, created_at DESC 
+       LIMIT 1`,
+      [resumeId, userId]
+    );
     let resumeRow = rRes.rows[0];
     if (!resumeRow) {
       const fallback = await pool.query('SELECT * FROM resumes WHERE id=$1', [resumeId]);
@@ -254,11 +260,21 @@ export async function getTailorSuggestionsHandler(req: Request, res: Response) {
     const jobDescription = jobRow.description || jobRow.job_description || jobRow.snippet || '';
     const parsedJd = parseJd(jobDescription);
 
-    // 3. Load & parse resume
+    // 3. Load & parse base resume
     const resumeBuf = await loadResumeBuffer(resumeRow);
     const parsedDoc = await parsePdfBuffer(resumeBuf);
     const profile = buildResumeProfile(parsedDoc);
     const sectionsData = buildParsedResumeSections(parsedDoc, profile);
+
+    // 4. Compute current rank & identify specific gaps
+    const rank = await rankJob(profile, jobRow as any, { ownerId: userId }).catch(() => null);
+    const responsibilityMatches = rank?.scoreDetails?.responsibilityMatches || [];
+    const unmatchedResponsibilities = responsibilityMatches
+      .filter((r: any) => !r.supported || (typeof r.similarity === 'number' && r.similarity < 0.40))
+      .map((r: any) => r.responsibility);
+    const missingSkills = (rank?.missingSkills && rank.missingSkills.length > 0)
+      ? rank.missingSkills
+      : parsedJd.requiredSkills || [];
 
     const candidateContext: CandidateContext = {
       resumeText: parsedDoc.normalizedText,
@@ -274,9 +290,11 @@ export async function getTailorSuggestionsHandler(req: Request, res: Response) {
       preferredSkills: parsedJd.preferredSkills,
       responsibilities: parsedJd.responsibilities,
       description: jobDescription,
+      unmatchedResponsibilities: unmatchedResponsibilities.length ? unmatchedResponsibilities : parsedJd.responsibilities.slice(0, 7),
+      missingSkills,
     };
 
-    // 4. Generate suggestions (zero prompt needed from user)
+    // 5. Generate suggestions (zero prompt needed from user, targeted at gaps)
     const suggestions = await generateTailorSuggestions(candidateContext, jobContext);
 
     return res.json({
@@ -311,8 +329,14 @@ export async function applySuggestionHandler(req: Request, res: Response) {
   }
 
   try {
-    // 1. Fetch resume & job
-    const rRes = await pool.query('SELECT * FROM resumes WHERE id=$1 AND user_id=$2', [resumeId, userId]);
+    // 1. Fetch base master resume & job
+    const rRes = await pool.query(
+      `SELECT * FROM resumes 
+       WHERE user_id=$2 AND (id=$1 OR (parent_resume_id IS NULL AND job_id IS NULL))
+       ORDER BY (parent_resume_id IS NULL AND job_id IS NULL) DESC, created_at DESC 
+       LIMIT 1`,
+      [resumeId, userId]
+    );
     let resumeRow = rRes.rows[0];
     if (!resumeRow) {
       const fallback = await pool.query('SELECT * FROM resumes WHERE id=$1', [resumeId]);
@@ -362,9 +386,15 @@ export async function applySuggestionHandler(req: Request, res: Response) {
       semanticScore: oldSemanticScore,
     };
 
-    // 5. Build and update structured resume data
+    // 5. Build and update structured resume data (incrementally build on this job's existing tailored version if present)
+    const existingTailored = await pool.query(
+      `SELECT * FROM resumes WHERE user_id=$1 AND job_id=$2 ORDER BY created_at DESC LIMIT 1`,
+      [userId, jobId]
+    );
     let structured: StructuredResumeData;
-    if (resumeRow.tailored_content_json && typeof resumeRow.tailored_content_json === 'object') {
+    if (existingTailored.rows[0]?.tailored_content_json && typeof existingTailored.rows[0].tailored_content_json === 'object') {
+      structured = existingTailored.rows[0].tailored_content_json as StructuredResumeData;
+    } else if (resumeRow.tailored_content_json && typeof resumeRow.tailored_content_json === 'object') {
       structured = resumeRow.tailored_content_json as StructuredResumeData;
     } else {
       structured = extractStructuredResumeData(currentParsedDoc, currentProfile);
@@ -454,7 +484,7 @@ export async function applySuggestionHandler(req: Request, res: Response) {
         updatedParsedDoc.layoutSignals.pageCount || 1,
         parserVersion,
         jobId,
-        resumeId,
+        resumeRow.parent_resume_id || resumeRow.id,
         JSON.stringify(structured),
       ]
     );
